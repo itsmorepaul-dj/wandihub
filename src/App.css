@@ -5088,21 +5088,11 @@ a.report-view-btn {
 .weekly-tab-fyi:hover       { color: #2563eb; }
 .weekly-tab-people:hover    { color: #9333ea; }
 .weekly-tab-icon { display: flex; align-items: center; }
-.weekly-tab-dot {
-  width: 5px; height: 5px; border-radius: 50%;
-  background: currentColor; opacity: 0.6;
-}
-
 /* Tab active + color states */
 .weekly-tab-highlight.active { color: #16a34a; border-bottom-color: #22c55e; font-weight: 600; }
 .weekly-tab-lowlight.active  { color: #dc2626; border-bottom-color: #ef4444; font-weight: 600; }
 .weekly-tab-fyi.active       { color: #2563eb; border-bottom-color: #3b82f6; font-weight: 600; }
 .weekly-tab-people.active    { color: #9333ea; border-bottom-color: #a855f7; font-weight: 600; }
-
-.weekly-tab-highlight.filled .weekly-tab-dot { background: #22c55e; }
-.weekly-tab-lowlight.filled .weekly-tab-dot  { background: #ef4444; }
-.weekly-tab-fyi.filled .weekly-tab-dot       { background: #3b82f6; }
-.weekly-tab-people.filled .weekly-tab-dot    { background: #a855f7; }
 
 /* --- Tab body --- */
 .weekly-tab-body {

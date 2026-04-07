@@ -70,6 +70,8 @@ export default function WeeklyUpdateForm({
   const [linkDraft, setLinkDraft] = useState({ name: '', url: '' })
   const linkAnchorRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
 
   // Load draft from existing data when expanding
   useEffect(() => {
@@ -86,6 +88,14 @@ export default function WeeklyUpdateForm({
       })
       setActiveTab('highlight')
       setEditing(false)
+    }
+  }, [isExpanded])
+
+  // Save on unmount (page navigation, expanding different project, etc.)
+  useEffect(() => {
+    if (!isExpanded) return
+    return () => {
+      onSave({ ...draftRef.current, existingHighlight, existingLowlight })
     }
   }, [isExpanded])
 
@@ -160,12 +170,11 @@ export default function WeeklyUpdateForm({
             {tabs.map(tab => (
               <button
                 key={tab.key}
-                className={`weekly-tab weekly-tab-${tab.key}${activeTab === tab.key ? ' active' : ''}${draft[tab.key].trim() ? ' filled' : ''}`}
+                className={`weekly-tab weekly-tab-${tab.key}${activeTab === tab.key ? ' active' : ''}`}
                 onClick={() => { setActiveTab(tab.key); setEditing(false) }}
               >
                 <span className="weekly-tab-icon">{tab.icon}</span>
                 <span className="weekly-tab-label">{tab.label}</span>
-                {draft[tab.key].trim() && <span className="weekly-tab-dot" />}
               </button>
             ))}
           </div>

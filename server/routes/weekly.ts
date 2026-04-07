@@ -4,6 +4,21 @@ import { getUserEmail } from '../auth.js';
 
 const router = express.Router();
 
+// Weekly deadline config (single source of truth)
+const WEEKLY_DEADLINE = { day: 5, hour: 17, minute: 0 } // Friday 5pm ET
+
+const isPastDeadline = () => {
+  const now = new Date()
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+  const day = et.getDay()
+  const hour = et.getHours()
+  const minute = et.getMinutes()
+  const dl = WEEKLY_DEADLINE
+  if (day > dl.day || day === 0) return true // Saturday or Sunday
+  if (day === dl.day && (hour > dl.hour || (hour === dl.hour && minute >= dl.minute))) return true
+  return false
+}
+
 // ISO week string for a given date, e.g. "2026-W15"
 const getISOWeek = (d: Date = new Date()) => {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
@@ -234,13 +249,15 @@ router.post('/weekly-snapshots/generate', async (req, res) => {
 router.get('/weekly-updates/missing', async (req, res) => {
   try {
     const week = (req.query.week as string) || getISOWeek()
+    const pastDeadline = isPastDeadline()
+    if (!pastDeadline) return res.json({ pastDeadline: false, projects: [] })
     const activeProjects = await all(`SELECT id, name, designers FROM projects WHERE status IN ('active', 'review', 'blocked')`)
     const updatedProjectIds = await all(
       `SELECT DISTINCT project_id FROM weekly_updates WHERE week = ?`, [week]
     )
     const updatedSet = new Set(updatedProjectIds.map((r: any) => r.project_id))
     const missing = activeProjects.filter((p: any) => !updatedSet.has(p.id))
-    res.json(missing)
+    res.json({ pastDeadline: true, projects: missing })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -258,7 +275,7 @@ export const startWeeklyCron = () => {
     const minute = et.getMinutes()
     const checkKey = `${et.getFullYear()}-${et.getMonth()}-${et.getDate()}-${hour}-${minute}`
 
-    if (day === 5 && hour === 17 && minute === 0 && checkKey !== lastSnapshotCheck) {
+    if (day === WEEKLY_DEADLINE.day && hour === WEEKLY_DEADLINE.hour && minute === WEEKLY_DEADLINE.minute && checkKey !== lastSnapshotCheck) {
       lastSnapshotCheck = checkKey
       const week = getISOWeek(now)
       generateSnapshot(week).catch(e => console.error('Auto-snapshot failed:', e))

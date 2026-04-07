@@ -798,7 +798,8 @@ const [showFilters, setShowFilters] = useState(false)
         setWeeklyUpdates(await updatesRes.json())
         setWeeklyGeneral(await generalRes.json())
         setWeeklySnapshots(await snapshotsRes.json())
-        setMissingUpdates(await missingRes.json())
+        const missingData = await missingRes.json()
+        setMissingUpdates(missingData.projects || [])
       } catch (err) { console.error('Error loading weekly data:', err) }
     }
     loadWeekly()
