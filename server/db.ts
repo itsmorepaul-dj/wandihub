@@ -282,6 +282,13 @@ export const initSchema = async () => {
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
   )`).catch(e => console.error('weekly_general init error:', e.message))
 
+  await run(`CREATE TABLE IF NOT EXISTS weekly_snapshots (
+    id TEXT PRIMARY KEY, week TEXT NOT NULL UNIQUE,
+    generated_at TEXT DEFAULT (datetime('now')),
+    plain_text TEXT DEFAULT '',
+    data_json TEXT DEFAULT '{}'
+  )`).catch(e => console.error('weekly_snapshots init error:', e.message))
+
   // Seed default business lines if empty
   const existing = await get('SELECT COUNT(*) as count FROM business_lines')
   if (existing?.count === 0) {

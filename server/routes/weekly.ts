@@ -140,4 +140,131 @@ router.get('/current-week', (_req, res) => {
   res.json({ week: getISOWeek() })
 })
 
+// ============ SNAPSHOT GENERATION ============
+
+const generateSnapshot = async (week: string) => {
+  const updates = await all(
+    `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
+     FROM weekly_updates wu
+     LEFT JOIN team t ON wu.designer_id = t.id
+     LEFT JOIN projects p ON wu.project_id = p.id
+     WHERE wu.week = ? ORDER BY wu.created_at DESC`, [week]
+  )
+  const general = await all(
+    `SELECT wg.*, t.name as designer_name
+     FROM weekly_general wg
+     LEFT JOIN team t ON wg.designer_id = t.id
+     WHERE wg.week = ? ORDER BY wg.category, wg.created_at DESC`, [week]
+  )
+  const projects = await all(`SELECT id, name, status, businessLine, startDate, endDate, estimatedHours, designers, deckLink, prdLink, briefLink, figmaLink, customLinks FROM projects WHERE status != 'done' OR archivedQuarter IS NULL`)
+
+  const highlights = updates.filter((u: any) => u.type === 'highlight')
+  const lowlights = updates.filter((u: any) => u.type === 'lowlight')
+  const fyis = general.filter((e: any) => e.category === 'fyi')
+  const peopleUpdates = general.filter((e: any) => e.category === 'people')
+
+  const getBrand = (u: any) => {
+    if (u.business_lines) {
+      try { const p = JSON.parse(u.business_lines); return Array.isArray(p) ? p[0] : u.business_lines } catch { return u.business_lines }
+    }
+    return 'General'
+  }
+
+  const highlightsText = highlights.length > 0 ? highlights.map((u: any) => {
+    return `    \u2022    ${getBrand(u)}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}`
+  }).join('\n') : '    \u2022    TK'
+
+  const lowlightsText = lowlights.length > 0 ? lowlights.map((u: any) => {
+    const lines = [`    \u2022    ${getBrand(u)}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
+    if (u.risk_reason) lines.push(`    \u25E6    At risk: ${u.risk_reason}`)
+    if (u.resolution) lines.push(`    \u25E6    Path to resolution: ${u.resolution}`)
+    return lines.join('\n')
+  }).join('\n') : '    \u2022    TK'
+
+  const fyisText = fyis.length > 0 ? fyis.map((e: any) => `    \u2022    ${e.content}`).join('\n') : '    \u2022    TK'
+  const peopleText = peopleUpdates.length > 0 ? peopleUpdates.map((e: any) => `    \u2022    ${e.content}`).join('\n') : '    \u2022    TK'
+
+  const plainText = `Design\nHighlights\n${highlightsText}\n\nLowlights\n${lowlightsText}\n\nUpcoming FYIs\n${fyisText}\n\nPeople Updates\n${peopleText}`
+
+  const dataJson = JSON.stringify({
+    week,
+    highlights: highlights.map((u: any) => ({ ...u })),
+    lowlights: lowlights.map((u: any) => ({ ...u })),
+    fyis: fyis.map((e: any) => ({ ...e })),
+    peopleUpdates: peopleUpdates.map((e: any) => ({ ...e })),
+    projectCount: projects.length,
+  })
+
+  await run(
+    `INSERT OR REPLACE INTO weekly_snapshots (id, week, generated_at, plain_text, data_json) VALUES (?, ?, datetime('now'), ?, ?)`,
+    [week, week, plainText, dataJson]
+  )
+
+  console.log(`Weekly snapshot generated for ${week}`)
+  return { week, plainText, dataJson }
+}
+
+// ============ SNAPSHOT API ============
+
+router.get('/weekly-snapshots', async (_req, res) => {
+  try {
+    const snapshots = await all('SELECT id, week, generated_at FROM weekly_snapshots ORDER BY week DESC')
+    res.json(snapshots)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.get('/weekly-snapshots/:week', async (req, res) => {
+  try {
+    const snapshot = await get('SELECT * FROM weekly_snapshots WHERE week = ?', [req.params.week])
+    if (!snapshot) return res.status(404).json({ error: 'Snapshot not found' })
+    res.json(snapshot)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.post('/weekly-snapshots/generate', async (req, res) => {
+  try {
+    const week = (req.body.week as string) || getISOWeek()
+    const result = await generateSnapshot(week)
+    res.json(result)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// ============ MISSING UPDATES CHECK ============
+
+router.get('/weekly-updates/missing', async (req, res) => {
+  try {
+    const week = (req.query.week as string) || getISOWeek()
+    const activeProjects = await all(`SELECT id, name, designers FROM projects WHERE status IN ('active', 'review', 'blocked')`)
+    const updatedProjectIds = await all(
+      `SELECT DISTINCT project_id FROM weekly_updates WHERE week = ?`, [week]
+    )
+    const updatedSet = new Set(updatedProjectIds.map((r: any) => r.project_id))
+    const missing = activeProjects.filter((p: any) => !updatedSet.has(p.id))
+    res.json(missing)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// ============ FRIDAY 5PM ET CRON ============
+
+let lastSnapshotCheck = ''
+
+export const startWeeklyCron = () => {
+  setInterval(() => {
+    const now = new Date()
+    // Convert to ET (America/New_York)
+    const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    const day = et.getDay() // 5 = Friday
+    const hour = et.getHours()
+    const minute = et.getMinutes()
+    const checkKey = `${et.getFullYear()}-${et.getMonth()}-${et.getDate()}-${hour}-${minute}`
+
+    if (day === 5 && hour === 17 && minute === 0 && checkKey !== lastSnapshotCheck) {
+      lastSnapshotCheck = checkKey
+      const week = getISOWeek(now)
+      generateSnapshot(week).catch(e => console.error('Auto-snapshot failed:', e))
+    }
+  }, 30_000) // check every 30 seconds
+  console.log('Weekly snapshot cron started (Friday 5pm ET)')
+}
+
 export default router;

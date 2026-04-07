@@ -14,7 +14,7 @@ import capacityRouter from './server/routes/capacity.js';
 import notesRouter from './server/routes/notes.js';
 import dataRouter from './server/routes/data.js';
 import adminRouter from './server/routes/admin.js';
-import weeklyRouter from './server/routes/weekly.js';
+import weeklyRouter, { startWeeklyCron } from './server/routes/weekly.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -102,5 +102,6 @@ startup().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`API server running on http://localhost:${PORT}`);
     console.log(`Production mode: ${isProduction}`);
+    startWeeklyCron();
   });
 });

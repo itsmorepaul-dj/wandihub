@@ -24,10 +24,12 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Weekly updates — add highlights, lowlights, FYIs, and people updates per project with inline links and bullet formatting',
+  'Weekly snapshots — auto-generated Friday 5pm ET reports with full history on the Reports page',
+  'Missing update warnings — projects page alerts for active projects without weekly updates',
+  'Archive by business line — archived projects now grouped by business line within each quarter',
+  'Improved warning badges — pill-style with tinted backgrounds for better readability in light and dark modes',
   'Quarterly archive — archive done projects at quarter boundaries, browse and restore from archive',
-  'Migrated GitHub to internal Dow Jones repo',
-  'Migrated to new home — wandihub.up.railway.app',
-  'Click any calendar date to quickly add your time off — no need to open the full team modal',
 ]
 
 
@@ -602,6 +604,8 @@ const [showFilters, setShowFilters] = useState(false)
   const [weeklyGeneral, setWeeklyGeneral] = useState<WeeklyGeneral[]>([])
   const [currentWeek, setCurrentWeek] = useState('')
   const [weeklyExpandedProject, setWeeklyExpandedProject] = useState<string | null>(null)
+  const [weeklySnapshots, setWeeklySnapshots] = useState<{ id: string; week: string; generated_at: string }[]>([])
+  const [missingUpdates, setMissingUpdates] = useState<{ id: string; name: string }[]>([])
   
   // Server-Sent Events — live updates from server
   useEffect(() => {
@@ -766,12 +770,16 @@ const [showFilters, setShowFilters] = useState(false)
         const weekRes = await authFetch('/api/current-week')
         const { week } = await weekRes.json()
         setCurrentWeek(week)
-        const [updatesRes, generalRes] = await Promise.all([
+        const [updatesRes, generalRes, snapshotsRes, missingRes] = await Promise.all([
           authFetch(`/api/weekly-updates?week=${week}`),
-          authFetch(`/api/weekly-general?week=${week}`)
+          authFetch(`/api/weekly-general?week=${week}`),
+          authFetch('/api/weekly-snapshots'),
+          authFetch(`/api/weekly-updates/missing?week=${week}`)
         ])
         setWeeklyUpdates(await updatesRes.json())
         setWeeklyGeneral(await generalRes.json())
+        setWeeklySnapshots(await snapshotsRes.json())
+        setMissingUpdates(await missingRes.json())
       } catch (err) { console.error('Error loading weekly data:', err) }
     }
     loadWeekly()
@@ -2286,6 +2294,13 @@ const [showFilters, setShowFilters] = useState(false)
                   detail: { title: 'Overlapping PTO on Projects', items: ptoConflictDetails }
                 })
 
+                if (missingUpdates.length > 0) warnings.push({
+                  icon: <ClipboardCopy size={12} />, text: `${missingUpdates.length} missing weekly updates`, severity: 'warn',
+                  detail: { title: 'Projects Missing Weekly Updates', items: missingUpdates.map(p => {
+                    return { name: p.name, detail: `No update for ${currentWeek}`, projectName: p.name }
+                  })}
+                })
+
                 return (
                   <div className="projects-summary">
                     <div className="summary-stats">
@@ -2374,54 +2389,67 @@ const [showFilters, setShowFilters] = useState(false)
                   ) : (
                     Object.entries(archivedByQuarter)
                       .sort(([a], [b]) => b.localeCompare(a))
-                      .map(([quarter, qProjects]) => (
+                      .map(([quarter, qProjects]) => {
+                        const byBL: Record<string, Project[]> = {}
+                        qProjects.forEach(p => {
+                          const bl = (p.businessLines && p.businessLines.length > 0) ? p.businessLines[0] : 'Unassigned'
+                          ;(byBL[bl] ||= []).push(p)
+                        })
+                        return (
                         <div key={quarter} className="archive-quarter-group">
                           <div className="archive-quarter-header">
                             <span className="archive-quarter-label">{quarter}</span>
                             <span className="archive-quarter-count">{qProjects.length} project{qProjects.length !== 1 ? 's' : ''}</span>
                           </div>
-                          <div className="archive-cards">
-                            {qProjects.sort((a, b) => a.name.localeCompare(b.name)).map(p => (
-                              <div key={p.id} className="archive-card">
-                                <div className="archive-card-header">
-                                  <span className="archive-card-name">{p.name}</span>
-                                  {isAdmin && (
-                                    <button className="archive-restore-btn" title="Restore to active projects" onClick={() => unarchiveProject(p.id)}>
-                                      <RotateCcw size={13} />
-                                      Restore
-                                    </button>
-                                  )}
-                                </div>
-                                <div className="archive-card-meta">
-                                  {p.businessLines && p.businessLines.length > 0 && (
-                                    <span className="archive-card-tag"><Folder size={12} />{p.businessLines.join(', ')}</span>
-                                  )}
-                                  {p.designers && p.designers.length > 0 && (
-                                    <span className="archive-card-tag"><User size={12} />{p.designers.map(d => d.split(' ')[0]).join(', ')}</span>
-                                  )}
-                                  {p.startDate && p.endDate && (
-                                    <span className="archive-card-tag"><Calendar size={12} />{formatShortDate(p.startDate)} – {formatShortDate(p.endDate)}</span>
-                                  )}
-                                  {(p.estimatedHours || 0) > 0 && (
-                                    <span className="archive-card-tag"><Clock size={12} />{p.estimatedHours}h</span>
-                                  )}
-                                </div>
-                                {(p.deckLink || p.prdLink || p.briefLink || p.figmaLink || (p.customLinks && p.customLinks.length > 0)) && (
-                                  <div className="archive-card-links">
-                                    {p.deckLink && <a href={p.deckLink} target="_blank" rel="noopener noreferrer"><Presentation size={12} />{p.deckName || 'Deck'}</a>}
-                                    {p.prdLink && <a href={p.prdLink} target="_blank" rel="noopener noreferrer"><FileText size={12} />{p.prdName || 'PRD'}</a>}
-                                    {p.briefLink && <a href={p.briefLink} target="_blank" rel="noopener noreferrer"><FileEdit size={12} />{p.briefName || 'Brief'}</a>}
-                                    {p.figmaLink && <a href={p.figmaLink} target="_blank" rel="noopener noreferrer"><Figma size={12} />Figma</a>}
-                                    {p.customLinks?.map((link: any, idx: number) => (
-                                      <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer"><LinkIcon size={12} />{link.name}</a>
-                                    ))}
-                                  </div>
-                                )}
+                          {Object.entries(byBL).sort(([a], [b]) => a.localeCompare(b)).map(([bl, blProjects]) => (
+                            <div key={bl} className="archive-bl-group">
+                              <div className="archive-bl-header">
+                                <Folder size={12} />
+                                <span>{bl}</span>
+                                <span className="archive-bl-count">{blProjects.length}</span>
                               </div>
-                            ))}
-                          </div>
+                              <div className="archive-cards">
+                                {blProjects.sort((a, b) => a.name.localeCompare(b.name)).map(p => (
+                                  <div key={p.id} className="archive-card">
+                                    <div className="archive-card-header">
+                                      <span className="archive-card-name">{p.name}</span>
+                                      {isAdmin && (
+                                        <button className="archive-restore-btn" title="Restore to active projects" onClick={() => unarchiveProject(p.id)}>
+                                          <RotateCcw size={13} />
+                                          Restore
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="archive-card-meta">
+                                      {p.designers && p.designers.length > 0 && (
+                                        <span className="archive-card-tag"><User size={12} />{p.designers.map(d => d.split(' ')[0]).join(', ')}</span>
+                                      )}
+                                      {p.startDate && p.endDate && (
+                                        <span className="archive-card-tag"><Calendar size={12} />{formatShortDate(p.startDate)} – {formatShortDate(p.endDate)}</span>
+                                      )}
+                                      {(p.estimatedHours || 0) > 0 && (
+                                        <span className="archive-card-tag"><Clock size={12} />{p.estimatedHours}h</span>
+                                      )}
+                                    </div>
+                                    {(p.deckLink || p.prdLink || p.briefLink || p.figmaLink || (p.customLinks && p.customLinks.length > 0)) && (
+                                      <div className="archive-card-links">
+                                        {p.deckLink && <a href={p.deckLink} target="_blank" rel="noopener noreferrer"><Presentation size={12} />{p.deckName || 'Deck'}</a>}
+                                        {p.prdLink && <a href={p.prdLink} target="_blank" rel="noopener noreferrer"><FileText size={12} />{p.prdName || 'PRD'}</a>}
+                                        {p.briefLink && <a href={p.briefLink} target="_blank" rel="noopener noreferrer"><FileEdit size={12} />{p.briefName || 'Brief'}</a>}
+                                        {p.figmaLink && <a href={p.figmaLink} target="_blank" rel="noopener noreferrer"><Figma size={12} />Figma</a>}
+                                        {p.customLinks?.map((link: any, idx: number) => (
+                                          <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer"><LinkIcon size={12} />{link.name}</a>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))
+                        )
+                      })
                   )}
                 </div>
               )}
@@ -4454,6 +4482,25 @@ const [showFilters, setShowFilters] = useState(false)
               </div>
             ))}
           </div>
+          {weeklySnapshots.length > 0 && (
+            <div className="snapshot-history">
+              <h3 className="snapshot-history-title"><Clock size={14} /> Weekly Snapshot History</h3>
+              <div className="snapshot-list">
+                {weeklySnapshots.map(snap => (
+                  <button key={snap.id} className="snapshot-item" onClick={async () => {
+                    try {
+                      const res = await authFetch(`/api/weekly-snapshots/${snap.week}`)
+                      const data = await res.json()
+                      openReport(`Weekly Snapshot — ${snap.week}`, data.plain_text || '')
+                    } catch (err) { console.error('Error loading snapshot:', err) }
+                  }}>
+                    <span className="snapshot-week">{snap.week}</span>
+                    <span className="snapshot-date">{new Date(snap.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {copiedReport && (
             <div className="report-copied-toast">Report copied to clipboard — paste into Google Docs</div>
           )}
