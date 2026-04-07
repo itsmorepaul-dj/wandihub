@@ -28,10 +28,6 @@ const CHANGELOG = [
   'Improved link flow — select text, click link button, name pre-fills from selection, explicit Add Link button in popover',
   'Weekly updates — add highlights, lowlights, FYIs, and people updates per project with inline links and bullet formatting',
   'Weekly snapshots — auto-generated Friday 5pm ET reports with full history on the Reports page',
-  'Missing update warnings — projects page alerts for active projects without weekly updates',
-  'Archive by business line — archived projects now grouped by business line within each quarter',
-  'Improved warning badges — pill-style with tinted backgrounds for better readability in light and dark modes',
-  'Quarterly archive — archive done projects at quarter boundaries, browse and restore from archive',
 ]
 
 
