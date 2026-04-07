@@ -131,7 +131,8 @@ export function maintenanceMiddleware(req: express.Request, res: express.Respons
   const isAdminUser = session?.role === 'admin'
   const isAdminLogin = req.query.admin === '1'
   const isStaticAsset = /\.(js|css|ico|svg|png|jpg|woff2?)$/i.test(req.path)
-  if (isMaintenanceEndpoint || isHealthEndpoint || isAuthEndpoint || isActivityEndpoint || isDbEndpoint || isLocalhost || isAdminUser || isAdminLogin || isStaticAsset) return next()
+  const isImageServe = req.method === 'GET' && req.path.startsWith('/api/images/')
+  if (isMaintenanceEndpoint || isHealthEndpoint || isAuthEndpoint || isActivityEndpoint || isDbEndpoint || isLocalhost || isAdminUser || isAdminLogin || isStaticAsset || isImageServe) return next()
   if (req.path.startsWith('/api/')) {
     return res.status(503).json({ error: 'maintenance', message: maintenanceState.lockoutMessage })
   }
