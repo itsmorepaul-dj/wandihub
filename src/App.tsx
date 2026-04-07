@@ -24,6 +24,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Rich text editor — weekly update form now uses contentEditable with inline rendered links, no more edit/preview toggle',
+  'Improved link flow — select text, click link button, name pre-fills from selection, explicit Add Link button in popover',
   'Weekly updates — add highlights, lowlights, FYIs, and people updates per project with inline links and bullet formatting',
   'Weekly snapshots — auto-generated Friday 5pm ET reports with full history on the Reports page',
   'Missing update warnings — projects page alerts for active projects without weekly updates',
