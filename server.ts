@@ -21,10 +21,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb', type: (req) => {
-  const ct = req.headers['content-type'] || ''
-  return !ct.startsWith('image/')
-} }));
+app.use(express.raw({ type: 'image/*', limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 // ============ VERSION GUARD ============
 // Reject writes from stale client bundles

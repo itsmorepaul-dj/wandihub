@@ -49,11 +49,7 @@ router.post('/images', async (req, res) => {
       return res.status(400).json({ error: 'Only image uploads allowed' });
     }
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Buffer);
-    }
-    const buffer = Buffer.concat(chunks);
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
 
     if (buffer.length === 0) return res.status(400).json({ error: 'Empty file' });
     if (buffer.length > MAX_SIZE) return res.status(400).json({ error: 'File too large (max 10MB)' });
