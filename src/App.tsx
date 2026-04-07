@@ -1467,15 +1467,6 @@ const [showFilters, setShowFilters] = useState(false)
     return getDjFiscalLabel(prev.getMonth() + 1, prev.getFullYear())
   }
 
-  const archiveProject = async (projectId: string, quarter: string) => {
-    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: quarter } : p))
-    await authFetch(`/api/projects/${projectId}/archive`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quarter })
-    })
-  }
-
   const unarchiveProject = async (projectId: string) => {
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: null } : p))
     await authFetch(`/api/projects/${projectId}/unarchive`, { method: 'PUT' })
@@ -2631,7 +2622,6 @@ const [showFilters, setShowFilters] = useState(false)
                               projectUpdates={projectUpdates}
                               weeklyGeneral={weeklyGeneral}
                               designerId={designerId}
-                              currentWeek={currentWeek}
                               isExpanded={weeklyExpandedProject === project.id}
                               onToggle={() => setWeeklyExpandedProject(project.id)}
                               onSave={async (data) => {
@@ -2651,7 +2641,7 @@ const [showFilters, setShowFilters] = useState(false)
                               }}
                               onAddProjectLink={async (name, url) => {
                                 const existing = project.customLinks || []
-                                const alreadyExists = existing.some(l => l.url === url) || [project.deckLink, project.prdLink, project.briefLink, project.figmaLink].includes(url)
+                                const alreadyExists = existing.some((l: { url: string }) => l.url === url) || [project.deckLink, project.prdLink, project.briefLink, project.figmaLink].includes(url)
                                 if (!alreadyExists) {
                                   const updated = { ...project, customLinks: [...existing, { name, url }] }
                                   await saveProject(updated)
@@ -3981,49 +3971,12 @@ const [showFilters, setShowFilters] = useState(false)
         const noEstimate = currentProjects.filter(p => p.status !== 'done' && (!p.estimatedHours || p.estimatedHours <= 0))
         const noDesigner = currentProjects.filter(p => p.status !== 'done' && (!p.designers || p.designers.length === 0))
 
-        const copyToClipboard = (text: string) => {
-          navigator.clipboard.writeText(text).then(() => {
-            setCopiedReport(Date.now())
-            setTimeout(() => setCopiedReport(null), 2000)
-          })
-        }
-
         const openReport = (title: string, content: string, richContent?: React.ReactNode) => {
           setReportModal({ open: true, title, content, richContent })
         }
 
         const generateWeeklyStatus = () => {
           // Plain text for clipboard
-          const lines = [
-            `DESIGN WEEKLY STATUS — ${todayStr}`,
-            '',
-            `ACTIVE (${activeProjects.length})`,
-            ...activeProjects.map(p => {
-              const designers = (p.designers || []).map(d => d.split(' ')[0]).join(', ')
-              const hours = p.estimatedHours ? `${p.estimatedHours} hrs` : 'no estimate'
-              const due = p.endDate ? formatShortDate(p.endDate) : 'no due date'
-              return `  • ${p.name} — ${designers || 'unassigned'} — ${hours} — due ${due}`
-            }),
-            '',
-            `IN REVIEW (${reviewProjects.length})`,
-            ...reviewProjects.map(p => `  • ${p.name} — ${(p.designers || []).map(d => d.split(' ')[0]).join(', ') || 'unassigned'}`),
-            '',
-            ...(blockedProjects.length > 0 ? [
-              `BLOCKED (${blockedProjects.length})`,
-              ...blockedProjects.map(p => `  • ${p.name} — ${(p.designers || []).map(d => d.split(' ')[0]).join(', ') || 'unassigned'}`),
-              '',
-            ] : []),
-            ...(overdueProjects.length > 0 ? [
-              `OVERDUE (${overdueProjects.length})`,
-              ...overdueProjects.map(p => `  • ${p.name} — due ${p.endDate ? formatShortDate(p.endDate) : '?'}`),
-              '',
-            ] : []),
-            `COMPLETED THIS PERIOD (${doneProjects.length})`,
-            ...doneProjects.map(p => `  • ${p.name}`),
-            '',
-            `Total: ${currentProjects.length} projects (${activeProjects.length} active, ${reviewProjects.length} review, ${blockedProjects.length} blocked, ${doneProjects.length} done)`,
-          ]
-
           // Build sections from weekly update data
           const highlights = weeklyUpdates.filter(u => u.type === 'highlight')
           const lowlights = weeklyUpdates.filter(u => u.type === 'lowlight')

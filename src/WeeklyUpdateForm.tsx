@@ -7,7 +7,6 @@ interface WeeklyUpdateFormProps {
   projectUpdates: WeeklyUpdate[]
   weeklyGeneral: WeeklyGeneral[]
   designerId: string
-  currentWeek: string
   isExpanded: boolean
   onToggle: () => void
   onSave: (data: {
@@ -57,7 +56,7 @@ function renderPreview(text: string, placeholder: string, onClickEdit: () => voi
 }
 
 export default function WeeklyUpdateForm({
-  project, projectUpdates, weeklyGeneral, designerId, currentWeek,
+  project, projectUpdates, weeklyGeneral, designerId,
   isExpanded, onToggle, onSave, onAddProjectLink,
 }: WeeklyUpdateFormProps) {
   const existingHighlight = projectUpdates.find(u => u.type === 'highlight') || null
