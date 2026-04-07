@@ -16,7 +16,8 @@ import {
 import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
-import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId } from './types'
+import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral } from './types'
+import WeeklyUpdateForm from './WeeklyUpdateForm'
 import { defaultHolidays, getTodayStr, getDjFiscalLabel, DAY_MS, parseLocalDate, formatShortDate, formatFullDate, calcRangeHours, getClosestTimeOff, formatDateRange, formatMonthDay, formatMonthDayFromDate, getTodayFormatted, formatVersionDisplay } from './utils'
 import { authFetch, setClientVersion, getClientVersion, defaultBrandOptions, loadDataFromAPI } from './api'
 import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgressDropZone, DoneDropZone } from './components/Sortable'
@@ -594,10 +595,14 @@ const [showFilters, setShowFilters] = useState(false)
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
-  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string }>({ open: false, title: '', content: '' })
+  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode }>({ open: false, title: '', content: '' })
   const [showArchive, setShowArchive] = useState(false)
   const [openCritsSyncing, setOpenCritsSyncing] = useState(false)
-
+  const [weeklyUpdates, setWeeklyUpdates] = useState<WeeklyUpdate[]>([])
+  const [weeklyGeneral, setWeeklyGeneral] = useState<WeeklyGeneral[]>([])
+  const [currentWeek, setCurrentWeek] = useState('')
+  const [weeklyExpandedProject, setWeeklyExpandedProject] = useState<string | null>(null)
+  
   // Server-Sent Events — live updates from server
   useEffect(() => {
     const baseUrl = import.meta.env.DEV ? 'http://localhost:3001' : ''
@@ -752,6 +757,67 @@ const [showFilters, setShowFilters] = useState(false)
     }
     if (currentUser) loadHolidays()
   }, [currentUser])
+
+  // Load weekly updates for current week
+  useEffect(() => {
+    if (!currentUser) return
+    const loadWeekly = async () => {
+      try {
+        const weekRes = await authFetch('/api/current-week')
+        const { week } = await weekRes.json()
+        setCurrentWeek(week)
+        const [updatesRes, generalRes] = await Promise.all([
+          authFetch(`/api/weekly-updates?week=${week}`),
+          authFetch(`/api/weekly-general?week=${week}`)
+        ])
+        setWeeklyUpdates(await updatesRes.json())
+        setWeeklyGeneral(await generalRes.json())
+      } catch (err) { console.error('Error loading weekly data:', err) }
+    }
+    loadWeekly()
+  }, [currentUser])
+
+  const saveWeeklyUpdate = async (update: Partial<WeeklyUpdate>) => {
+    try {
+      const res = await authFetch('/api/weekly-updates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(update)
+      })
+      const saved = await res.json() as WeeklyUpdate
+      setWeeklyUpdates(prev => {
+        const idx = prev.findIndex(u => u.id === saved.id)
+        return idx >= 0 ? prev.map(u => u.id === saved.id ? saved : u) : [...prev, saved]
+      })
+      return saved
+    } catch (err) { console.error('Error saving weekly update:', err); return null }
+  }
+
+  const deleteWeeklyUpdate = async (id: string) => {
+    await authFetch(`/api/weekly-updates/${id}`, { method: 'DELETE' })
+    setWeeklyUpdates(prev => prev.filter(u => u.id !== id))
+  }
+
+  const saveWeeklyGeneral = async (entry: Partial<WeeklyGeneral>) => {
+    try {
+      const res = await authFetch('/api/weekly-general', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry)
+      })
+      const saved = await res.json() as WeeklyGeneral
+      setWeeklyGeneral(prev => {
+        const idx = prev.findIndex(e => e.id === saved.id)
+        return idx >= 0 ? prev.map(e => e.id === saved.id ? saved : e) : [...prev, saved]
+      })
+      return saved
+    } catch (err) { console.error('Error saving weekly general:', err); return null }
+  }
+
+  const deleteWeeklyGeneral = async (id: string) => {
+    await authFetch(`/api/weekly-general/${id}`, { method: 'DELETE' })
+    setWeeklyGeneral(prev => prev.filter(e => e.id !== id))
+  }
 
   // Reset scroll position when switching tabs (non-calendar tabs should start at top)
   useEffect(() => {
@@ -2525,6 +2591,49 @@ const [showFilters, setShowFilters] = useState(false)
                               </div>
                             )
                           })()}
+                        {/* Weekly Update Inline */}
+                        {project.status !== 'done' && currentWeek && (() => {
+                          const projectUpdates = weeklyUpdates.filter(u => u.project_id === project.id)
+                          const assignedDesignerNames = project.designers || []
+                          const primaryDesigner = team.find(t => assignedDesignerNames.includes(t.name))
+                          const designerId = primaryDesigner?.id || project.id
+                          return (
+                            <WeeklyUpdateForm
+                              project={project}
+                              projectUpdates={projectUpdates}
+                              weeklyGeneral={weeklyGeneral}
+                              designerId={designerId}
+                              currentWeek={currentWeek}
+                              isExpanded={weeklyExpandedProject === project.id}
+                              onToggle={() => setWeeklyExpandedProject(project.id)}
+                              onSave={async (data) => {
+                                if (data.highlight.trim()) {
+                                  await saveWeeklyUpdate({ ...(data.existingHighlight ? { id: data.existingHighlight.id } : {}), project_id: project.id, designer_id: designerId, week: currentWeek, type: 'highlight' as const, description: data.highlight.trim() })
+                                } else if (data.existingHighlight) { await deleteWeeklyUpdate(data.existingHighlight.id) }
+                                if (data.lowlight.trim()) {
+                                  await saveWeeklyUpdate({ ...(data.existingLowlight ? { id: data.existingLowlight.id } : {}), project_id: project.id, designer_id: designerId, week: currentWeek, type: 'lowlight' as const, description: data.lowlight.trim(), risk_reason: data.risk_reason.trim(), resolution: data.resolution.trim() })
+                                } else if (data.existingLowlight) { await deleteWeeklyUpdate(data.existingLowlight.id) }
+                                const eFYIs = weeklyGeneral.filter(e => e.category === 'fyi' && e.designer_id === designerId)
+                                for (const old of eFYIs) await deleteWeeklyGeneral(old.id)
+                                for (const line of data.fyi.split('\n').map(l => l.trim()).filter(Boolean)) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'fyi', content: line }) }
+                                const ePeople = weeklyGeneral.filter(e => e.category === 'people' && e.designer_id === designerId)
+                                for (const old of ePeople) await deleteWeeklyGeneral(old.id)
+                                for (const line of data.people.split('\n').map(l => l.trim()).filter(Boolean)) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'people', content: line }) }
+                                setWeeklyExpandedProject(null)
+                              }}
+                              onAddProjectLink={async (name, url) => {
+                                const existing = project.customLinks || []
+                                const alreadyExists = existing.some(l => l.url === url) || [project.deckLink, project.prdLink, project.briefLink, project.figmaLink].includes(url)
+                                if (!alreadyExists) {
+                                  const updated = { ...project, customLinks: [...existing, { name, url }] }
+                                  await saveProject(updated)
+                                  setProjects(projects.map(p => p.id === project.id ? updated : p))
+                                }
+                              }}
+                            />
+                          )
+                        })()}
+
                         <div className="project-card-footer">
                           <div className="project-links-footer">
                             {(project.designers || []).length > 0 && (
@@ -3851,11 +3960,12 @@ const [showFilters, setShowFilters] = useState(false)
           })
         }
 
-        const openReport = (title: string, content: string) => {
-          setReportModal({ open: true, title, content })
+        const openReport = (title: string, content: string, richContent?: React.ReactNode) => {
+          setReportModal({ open: true, title, content, richContent })
         }
 
         const generateWeeklyStatus = () => {
+          // Plain text for clipboard
           const lines = [
             `DESIGN WEEKLY STATUS — ${todayStr}`,
             '',
@@ -3885,7 +3995,177 @@ const [showFilters, setShowFilters] = useState(false)
             '',
             `Total: ${currentProjects.length} projects (${activeProjects.length} active, ${reviewProjects.length} review, ${blockedProjects.length} blocked, ${doneProjects.length} done)`,
           ]
-          openReport('Weekly Status Update', lines.join('\n'))
+
+          // Build sections from weekly update data
+          const highlights = weeklyUpdates.filter(u => u.type === 'highlight')
+          const lowlights = weeklyUpdates.filter(u => u.type === 'lowlight')
+          const fyis = weeklyGeneral.filter(e => e.category === 'fyi')
+          const peopleUpdates = weeklyGeneral.filter(e => e.category === 'people')
+
+          const getBrand = (u: WeeklyUpdate) => {
+            if (u.business_lines) {
+              try { const parsed = JSON.parse(u.business_lines); return Array.isArray(parsed) ? parsed[0] : u.business_lines } catch { return u.business_lines }
+            }
+            const proj = currentProjects.find(p => p.id === u.project_id)
+            return proj?.businessLines?.[0] || 'General'
+          }
+
+          // Google Doc format text generators per section
+          const highlightsText = highlights.length > 0 ? highlights.map(u => {
+            const brand = getBrand(u)
+            const proj = currentProjects.find(p => p.id === u.project_id)
+            const links = [proj?.deckLink, proj?.prdLink, proj?.briefLink, proj?.figmaLink].filter(Boolean)
+            return `    \u2022    ${brand}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}${links.length > 0 ? `\n    \u25E6    Related files/screenshots\n    \u25AA    ${links.join('\n    \u25AA    ')}` : ''}`
+          }).join('\n') : '    \u2022    TK'
+
+          const lowlightsText = lowlights.length > 0 ? lowlights.map(u => {
+            const brand = getBrand(u)
+            const lines = [`    \u2022    ${brand}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
+            if (u.risk_reason) lines.push(`    \u25E6    At risk: ${u.risk_reason}`)
+            if (u.resolution) lines.push(`    \u25E6    Path to resolution: ${u.resolution}`)
+            return lines.join('\n')
+          }).join('\n') : '    \u2022    TK'
+
+          const fyisText = fyis.length > 0 ? fyis.map(e => `    \u2022    ${e.content}`).join('\n') : '    \u2022    TK'
+          const peopleText = peopleUpdates.length > 0 ? peopleUpdates.map(e => `    \u2022    ${e.content}`).join('\n') : '    \u2022    TK'
+
+          const fullText = `Design\nHighlights\n${highlightsText}\n\nLowlights\n${lowlightsText}\n\nUpcoming FYIs\n${fyisText}\n\nPeople Updates\n${peopleText}`
+
+          const sectionCopy = (text: string) => {
+            navigator.clipboard.writeText(text).then(() => {
+              setCopiedReport(Date.now())
+              setTimeout(() => setCopiedReport(null), 2000)
+            })
+          }
+
+          const renderUpdateEntry = (u: WeeklyUpdate, type: 'highlight' | 'lowlight') => {
+            const brand = getBrand(u)
+            const proj = currentProjects.find(p => p.id === u.project_id)
+            const links = [
+              proj?.deckLink && { name: proj.deckName || 'Deck', url: proj.deckLink },
+              proj?.prdLink && { name: proj.prdName || 'PRD', url: proj.prdLink },
+              proj?.briefLink && { name: proj.briefName || 'Brief', url: proj.briefLink },
+              proj?.figmaLink && { name: 'Figma', url: proj.figmaLink },
+              ...(proj?.customLinks || []),
+            ].filter(Boolean) as { name: string; url: string }[]
+            return (
+              <div key={u.id} className={`rr-update-card rr-update-${type}`}>
+                <div className="rr-update-brand">{brand}</div>
+                <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
+                <div className="rr-update-desc">{u.description}</div>
+                {type === 'lowlight' && u.risk_reason && (
+                  <div className="rr-update-risk"><strong>Risk:</strong> {u.risk_reason}</div>
+                )}
+                {type === 'lowlight' && u.resolution && (
+                  <div className="rr-update-resolution"><strong>Resolution:</strong> {u.resolution}</div>
+                )}
+                {links.length > 0 && (
+                  <div className="rr-update-links">
+                    {links.map((l, i) => <a key={i} href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a>)}
+                  </div>
+                )}
+                <div className="rr-update-author">{(u.designer_name || '').split(' ')[0]}</div>
+              </div>
+            )
+          }
+
+          const rich = (
+            <div className="rr">
+              <div className="rr-date">{todayStr} · {currentWeek}</div>
+
+              {/* Highlights */}
+              <div className="rr-section">
+                <div className="rr-section-header-row">
+                  <div className="rr-section-header" style={{ color: '#22c55e' }}>
+                    <span className="rr-section-dot" style={{ background: '#22c55e' }} />
+                    <span>Highlights</span>
+                    <span className="rr-section-count">{highlights.length}</span>
+                  </div>
+                  <button className="rr-copy-section" onClick={() => sectionCopy(`Highlights\n${highlightsText}`)}>
+                    <ClipboardCopy size={12} /> Copy
+                  </button>
+                </div>
+                {highlights.length > 0 ? (
+                  <div className="rr-update-list">{highlights.map(u => renderUpdateEntry(u, 'highlight'))}</div>
+                ) : (
+                  <div className="rr-empty">No highlights this week. Add updates on project cards.</div>
+                )}
+              </div>
+
+              {/* Lowlights */}
+              <div className="rr-section">
+                <div className="rr-section-header-row">
+                  <div className="rr-section-header" style={{ color: '#ef4444' }}>
+                    <span className="rr-section-dot" style={{ background: '#ef4444' }} />
+                    <span>Lowlights</span>
+                    <span className="rr-section-count">{lowlights.length}</span>
+                  </div>
+                  <button className="rr-copy-section" onClick={() => sectionCopy(`Lowlights\n${lowlightsText}`)}>
+                    <ClipboardCopy size={12} /> Copy
+                  </button>
+                </div>
+                {lowlights.length > 0 ? (
+                  <div className="rr-update-list">{lowlights.map(u => renderUpdateEntry(u, 'lowlight'))}</div>
+                ) : (
+                  <div className="rr-empty">No lowlights this week.</div>
+                )}
+              </div>
+
+              {/* Upcoming FYIs */}
+              <div className="rr-section">
+                <div className="rr-section-header-row">
+                  <div className="rr-section-header" style={{ color: '#f59e0b' }}>
+                    <span className="rr-section-dot" style={{ background: '#f59e0b' }} />
+                    <span>Upcoming FYIs</span>
+                    <span className="rr-section-count">{fyis.length}</span>
+                  </div>
+                  <button className="rr-copy-section" onClick={() => sectionCopy(`Upcoming FYIs\n${fyisText}`)}>
+                    <ClipboardCopy size={12} /> Copy
+                  </button>
+                </div>
+                {fyis.length > 0 ? (
+                  <div className="rr-general-list">
+                    {fyis.map(e => (
+                      <div key={e.id} className="rr-general-item">
+                        <span>{e.content}</span>
+                        <span className="rr-general-author">{(e.designer_name || '').split(' ')[0]}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rr-empty">No FYIs. Add them on the Reports page.</div>
+                )}
+              </div>
+
+              {/* People Updates */}
+              <div className="rr-section">
+                <div className="rr-section-header-row">
+                  <div className="rr-section-header" style={{ color: '#8b5cf6' }}>
+                    <span className="rr-section-dot" style={{ background: '#8b5cf6' }} />
+                    <span>People Updates</span>
+                    <span className="rr-section-count">{peopleUpdates.length}</span>
+                  </div>
+                  <button className="rr-copy-section" onClick={() => sectionCopy(`People Updates\n${peopleText}`)}>
+                    <ClipboardCopy size={12} /> Copy
+                  </button>
+                </div>
+                {peopleUpdates.length > 0 ? (
+                  <div className="rr-general-list">
+                    {peopleUpdates.map(e => (
+                      <div key={e.id} className="rr-general-item">
+                        <span>{e.content}</span>
+                        <span className="rr-general-author">{(e.designer_name || '').split(' ')[0]}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rr-empty">No people updates. Add them on the Reports page.</div>
+                )}
+              </div>
+            </div>
+          )
+
+          openReport('Weekly Status', fullText, rich)
         }
 
         const syncOpenCritsDoc = async () => {
@@ -5652,7 +5932,7 @@ const [showFilters, setShowFilters] = useState(false)
               </div>
             </div>
             <div className="modal-body">
-              <pre className="report-modal-content">{reportModal.content}</pre>
+              {reportModal.richContent || <pre className="report-modal-content">{reportModal.content}</pre>}
             </div>
           </div>
         </div>

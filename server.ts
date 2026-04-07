@@ -14,6 +14,7 @@ import capacityRouter from './server/routes/capacity.js';
 import notesRouter from './server/routes/notes.js';
 import dataRouter from './server/routes/data.js';
 import adminRouter from './server/routes/admin.js';
+import weeklyRouter from './server/routes/weekly.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -65,6 +66,7 @@ app.use('/api', capacityRouter);
 app.use('/api', notesRouter);
 app.use('/api', dataRouter);
 app.use('/api', adminRouter);
+app.use('/api', weeklyRouter);
 app.use('/api/versions', versionRouter);
 
 // ============ STATIC FILES (production) ============

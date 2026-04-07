@@ -129,7 +129,7 @@ export const upsertNote = async (n: any) => {
 const UPSERT_COLUMNS: Record<string, string[]> = {
   projects: ['id','name','status','dueDate','assignee','url','description','businessLine',
     'deckName','deckLink','prdName','prdLink','briefName','briefLink','figmaLink',
-    'customLinks','designers','startDate','endDate','timeline','estimatedHours','updatedAt'],
+    'customLinks','designers','startDate','endDate','timeline','estimatedHours','archivedQuarter','updatedAt'],
   team: ['id','name','role','brands','status','slack','email','avatar','timeOff','weekly_hours','excluded','updatedAt'],
   business_lines: ['id','name','deckName','deckLink','prdName','prdLink','briefName','briefLink','figmaLink','customLinks','updatedAt'],
   project_assignments: ['id','project_id','designer_id','allocation_percent','created_at'],
@@ -267,6 +267,20 @@ export const initSchema = async () => {
     note_id TEXT NOT NULL, team_id TEXT NOT NULL,
     PRIMARY KEY (note_id, team_id)
   )`).catch(e => console.error('note_people_links init error:', e.message))
+
+  await run(`CREATE TABLE IF NOT EXISTS weekly_updates (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, designer_id TEXT NOT NULL,
+    week TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'highlight',
+    description TEXT DEFAULT '', risk_reason TEXT DEFAULT '', resolution TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+  )`).catch(e => console.error('weekly_updates init error:', e.message))
+
+  await run(`CREATE TABLE IF NOT EXISTS weekly_general (
+    id TEXT PRIMARY KEY, designer_id TEXT NOT NULL,
+    week TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'fyi',
+    content TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+  )`).catch(e => console.error('weekly_general init error:', e.message))
 
   // Seed default business lines if empty
   const existing = await get('SELECT COUNT(*) as count FROM business_lines')

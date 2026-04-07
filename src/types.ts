@@ -136,4 +136,31 @@ export interface ActivityItem {
   created_at: string
 }
 
+export interface WeeklyUpdate {
+  id: string
+  project_id: string
+  designer_id: string
+  week: string
+  type: 'highlight' | 'lowlight'
+  description: string
+  risk_reason?: string
+  resolution?: string
+  created_at?: string
+  updated_at?: string
+  designer_name?: string
+  project_name?: string
+  business_lines?: string
+}
+
+export interface WeeklyGeneral {
+  id: string
+  designer_id: string
+  week: string
+  category: 'fyi' | 'people'
+  content: string
+  created_at?: string
+  updated_at?: string
+  designer_name?: string
+}
+
 export type TabId = 'projects' | 'team' | 'calendar' | 'capacity' | 'reports' | 'settings'
