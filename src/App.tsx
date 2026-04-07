@@ -1270,6 +1270,12 @@ const [showFilters, setShowFilters] = useState(false)
         headers: { 'Content-Type': file.type || 'image/png', 'X-Project-Id': projectId, 'X-Original-Name': originalName },
         body: file,
       })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        alert(`Image upload failed: ${err.error || res.statusText}`)
+        setUploadingImage(false)
+        return
+      }
       const saved = await res.json() as ProjectImage
       setProjectImages(prev => [saved, ...prev])
       setAllProjectImages(prev => [saved, ...prev])

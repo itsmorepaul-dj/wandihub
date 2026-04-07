@@ -50,8 +50,9 @@ router.post('/images', async (req, res) => {
     }
 
     const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    console.log(`[image-upload] content-type=${contentType} body-type=${typeof req.body} isBuffer=${Buffer.isBuffer(req.body)} size=${buffer.length}`);
 
-    if (buffer.length === 0) return res.status(400).json({ error: 'Empty file' });
+    if (buffer.length === 0) return res.status(400).json({ error: 'Empty file — body was not received as a buffer' });
     if (buffer.length > MAX_SIZE) return res.status(400).json({ error: 'File too large (max 10MB)' });
 
     const id = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
