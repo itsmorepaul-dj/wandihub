@@ -15,12 +15,16 @@ import notesRouter from './server/routes/notes.js';
 import dataRouter from './server/routes/data.js';
 import adminRouter from './server/routes/admin.js';
 import weeklyRouter, { startWeeklyCron } from './server/routes/weekly.js';
+import imagesRouter from './server/routes/images.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '10mb', type: (req) => {
+  const ct = req.headers['content-type'] || ''
+  return !ct.startsWith('image/')
+} }));
 
 // ============ VERSION GUARD ============
 // Reject writes from stale client bundles
@@ -67,6 +71,7 @@ app.use('/api', notesRouter);
 app.use('/api', dataRouter);
 app.use('/api', adminRouter);
 app.use('/api', weeklyRouter);
+app.use('/api', imagesRouter);
 app.use('/api/versions', versionRouter);
 
 // ============ STATIC FILES (production) ============

@@ -16,18 +16,21 @@ import {
 import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
-import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral } from './types'
+import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
 import WeeklyUpdateForm from './WeeklyUpdateForm'
+import ImageLightbox from './ImageLightbox'
 import { defaultHolidays, getTodayStr, getDjFiscalLabel, DAY_MS, parseLocalDate, formatShortDate, formatFullDate, calcRangeHours, getClosestTimeOff, formatDateRange, formatMonthDay, formatMonthDayFromDate, getTodayFormatted, formatVersionDisplay } from './utils'
 import { authFetch, setClientVersion, getClientVersion, defaultBrandOptions, loadDataFromAPI } from './api'
 import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgressDropZone, DoneDropZone } from './components/Sortable'
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Project images — paste or drag images into projects, view in lightbox with captions and keyboard navigation',
+  'Card redesign — designers, hours, edit & delete moved to compact meta chips in header; attached images below links',
+  'Missing weekly updates warning — now always visible until all projects have entries, resets after weekly report',
+  'Bug fixes — fixed stale vacation icons, "Unknown" project names in reports, duplicate button, accordion double-click',
   'Rich text editor — weekly update form now uses contentEditable with inline rendered links, no more edit/preview toggle',
   'Improved link flow — select text, click link button, name pre-fills from selection, explicit Add Link button in popover',
-  'Weekly updates — add highlights, lowlights, FYIs, and people updates per project with inline links and bullet formatting',
-  'Weekly snapshots — auto-generated Friday 5pm ET reports with full history on the Reports page',
 ]
 
 
@@ -161,6 +164,11 @@ function App() {
     estimatedHours: 0
   })
   
+  const [projectImages, setProjectImages] = useState<ProjectImage[]>([])
+  const [allProjectImages, setAllProjectImages] = useState<ProjectImage[]>([])
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [lightbox, setLightbox] = useState<{ images: ProjectImage[]; index: number } | null>(null)
+
   // Timeline editing state
   const [showTimelineModal, setShowTimelineModal] = useState(false)
   const [editingTimeline, setEditingTimeline] = useState<TimelineRange | null>(null)
@@ -715,6 +723,8 @@ const [showFilters, setShowFilters] = useState(false)
         const blRes = await authFetch('/api/business-lines')
         const blData = await blRes.json()
         setBusinessLines(blData)
+        // Load all project images
+        authFetch('/api/images').then(r => r.json()).then(setAllProjectImages).catch(() => {})
         // Load priorities
         const prRes = await authFetch('/api/priorities')
         const prData: { business_line_id: string; project_id: string; rank: number }[] = await prRes.json()
@@ -1223,6 +1233,7 @@ const [showFilters, setShowFilters] = useState(false)
       estimatedHours: 0
     })
     setShowProjectModal(true)
+    setProjectImages([])
   }
 
   const handleEditProject = (project: Project) => {
@@ -1247,6 +1258,44 @@ const [showFilters, setShowFilters] = useState(false)
       estimatedHours: project.estimatedHours || 0
     })
     setShowProjectModal(true)
+    // Load images for this project
+    authFetch(`/api/images?project_id=${project.id}`).then(r => r.json()).then(setProjectImages).catch(() => setProjectImages([]))
+  }
+
+  const uploadProjectImage = async (projectId: string, file: Blob, originalName: string) => {
+    setUploadingImage(true)
+    try {
+      const res = await authFetch('/api/images', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'image/png', 'X-Project-Id': projectId, 'X-Original-Name': originalName },
+        body: file,
+      })
+      const saved = await res.json() as ProjectImage
+      setProjectImages(prev => [saved, ...prev])
+      setAllProjectImages(prev => [saved, ...prev])
+    } catch (err) { console.error('Image upload error:', err) }
+    setUploadingImage(false)
+  }
+
+  const deleteProjectImage = async (imageId: string) => {
+    try {
+      await authFetch(`/api/images/${imageId}`, { method: 'DELETE' })
+      setProjectImages(prev => prev.filter(img => img.id !== imageId))
+      setAllProjectImages(prev => prev.filter(img => img.id !== imageId))
+    } catch (err) { console.error('Image delete error:', err) }
+  }
+
+  const updateImageCaption = async (imageId: string, caption: string) => {
+    try {
+      const res = await authFetch(`/api/images/${imageId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caption }),
+      })
+      const saved = await res.json() as ProjectImage
+      setProjectImages(prev => prev.map(img => img.id === imageId ? saved : img))
+      setAllProjectImages(prev => prev.map(img => img.id === imageId ? saved : img))
+    } catch (err) { console.error('Caption update error:', err) }
   }
 
   const handleDeleteProject = async (id: string) => {
@@ -1756,7 +1805,9 @@ const [showFilters, setShowFilters] = useState(false)
   const sortedTeam = [...team].map(m => {
     // Recompute status based on current time off dates
     const timeOffStatus = getStatusFromTimeOff(m.timeOff || [])
-    return { ...m, status: timeOffStatus || m.status }
+    // If no active time-off but status is stale 'away', reset to 'online'
+    const status = timeOffStatus || (m.status === 'away' ? 'online' : m.status)
+    return { ...m, status }
   }).sort((a, b) => {
     return a.name.localeCompare(b.name)
   })
@@ -2546,18 +2597,54 @@ const [showFilters, setShowFilters] = useState(false)
                     return (
                       <div key={project.id} className="project-row">
                         <div className="project-info">
-                          <span className="project-name-cell">
-                            {isOverdue && <span className="overdue-label">Overdue</span>}
-                            {project.url ? (
-                              <a href={project.url} target="_blank" rel="noopener noreferrer" className="project-name-link"><LinkIcon size={14} className="project-name-link-icon" />{project.name}</a>
-                            ) : (
-                              <span className="project-name">{project.name}</span>
-                            )}
-                          </span>
-                          <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444' }[project.status as string] }}>
-                            <span className={`status-badge-dot ${getStatusColor(project.status)}`}></span>
-                            {getStatusLabel(project.status)}
-                          </span>
+                          <div className="project-info-top">
+                            <span className="project-name-cell">
+                              {isOverdue && <span className="overdue-label">Overdue</span>}
+                              {project.url ? (
+                                <a href={project.url} target="_blank" rel="noopener noreferrer" className="project-name-link"><LinkIcon size={14} className="project-name-link-icon" />{project.name}</a>
+                              ) : (
+                                <span className="project-name">{project.name}</span>
+                              )}
+                            </span>
+                            <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444' }[project.status as string] }}>
+                              <span className={`status-badge-dot ${getStatusColor(project.status)}`}></span>
+                              {getStatusLabel(project.status)}
+                            </span>
+                          </div>
+                          <div className="project-meta">
+                            {(project.designers || []).length > 0 ? (
+                              <span className="project-meta-chip">
+                                <User size={11} />
+                                {(project.designers || []).map((d: string) => d.split(' ')[0]).join(', ')}
+                              </span>
+                            ) : project.status !== 'done' ? (
+                              <span className="project-meta-chip project-meta-warn">
+                                <User size={11} /> No designer
+                              </span>
+                            ) : null}
+                            {(project.estimatedHours || 0) > 0 ? (
+                              <span className="project-meta-chip">
+                                <Clock size={11} />
+                                {(() => {
+                                  const sizeMap: Record<number, string> = {35:'XXS',70:'XS',105:'S',175:'M',280:'L',455:'XL',910:'XXL'}
+                                  const size = sizeMap[project.estimatedHours || 0]
+                                  const weeks = Math.round((project.estimatedHours || 0) / 35 * 10) / 10
+                                  return <>{size ? `${size} · ` : ''}{project.estimatedHours}h ({weeks}w)</>
+                                })()}
+                              </span>
+                            ) : project.status !== 'done' ? (
+                              <span className="project-meta-chip project-meta-warn">
+                                <Clock size={11} /> No estimate
+                              </span>
+                            ) : null}
+                            <span className="project-meta-spacer" />
+                            <span className="project-meta-chip project-meta-action" onClick={() => handleEditProject(project)}>
+                              <Pencil size={11} /> Edit
+                            </span>
+                            <span className="project-meta-chip project-meta-action project-meta-action-delete" onClick={() => handleDeleteProject(project.id)}>
+                              <Trash2 size={11} /> Delete
+                            </span>
+                          </div>
                         </div>
                         {((project.timeline && project.timeline.length > 0) || (project.startDate && project.endDate)) && (() => {
                             const ganttRange = getGanttRange(project)
@@ -2641,7 +2728,7 @@ const [showFilters, setShowFilters] = useState(false)
                               weeklyGeneral={weeklyGeneral}
                               designerId={designerId}
                               isExpanded={weeklyExpandedProject === project.id}
-                              onToggle={() => setWeeklyExpandedProject(project.id)}
+                              onToggle={() => setWeeklyExpandedProject(prev => prev === project.id ? null : project.id)}
                               onSave={async (data) => {
                                 if (data.highlight.trim()) {
                                   await saveWeeklyUpdate({ ...(data.existingHighlight ? { id: data.existingHighlight.id } : {}), project_id: project.id, designer_id: designerId, week: currentWeek, type: 'highlight' as const, description: data.highlight.trim() })
@@ -2655,7 +2742,6 @@ const [showFilters, setShowFilters] = useState(false)
                                 const ePeople = weeklyGeneral.filter(e => e.category === 'people' && e.designer_id === designerId)
                                 for (const old of ePeople) await deleteWeeklyGeneral(old.id)
                                 for (const line of data.people.split('\n').map(l => l.trim()).filter(Boolean)) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'people', content: line }) }
-                                setWeeklyExpandedProject(null)
                               }}
                               onAddProjectLink={async (name, url) => {
                                 const existing = project.customLinks || []
@@ -2672,41 +2758,6 @@ const [showFilters, setShowFilters] = useState(false)
 
                         <div className="project-card-footer">
                           <div className="project-links-footer">
-                            {(project.designers || []).length > 0 && (
-                              <span className="project-footer-designer">
-                                <User size={12} />
-                                <span>{(project.designers || []).map((d: string) => d.split(' ')[0]).join(', ')}</span>
-                              </span>
-                            )}
-                            {(project.estimatedHours || 0) > 0 ? (
-                              <span className="project-footer-hours">
-                                <Clock size={12} />
-                                {(() => {
-                                  const sizeMap: Record<number, string> = {35:'XXS',70:'XS',105:'S',175:'M',280:'L',455:'XL',910:'XXL'}
-                                  const size = sizeMap[project.estimatedHours || 0]
-                                  const weeks = Math.round((project.estimatedHours || 0) / 35 * 10) / 10
-                                  return <span>{size ? `${size} · ` : ''}{project.estimatedHours} hrs ({weeks} weeks)</span>
-                                })()}
-                              </span>
-                            ) : project.status !== 'done' ? (
-                              <span className="project-footer-hours project-footer-warning">
-                                <Clock size={12} />
-                                <span>No estimate</span>
-                              </span>
-                            ) : null}
-                            {project.timeline && project.timeline.length > 0 && (
-                              <div className="project-footer-phases">
-                                {project.timeline.map((r: TimelineRange) => (
-                                  <span key={r.id} className="chip-phase">{r.name} <span className="chip-phase-hrs">{calcRangeHours(r.startDate, r.endDate)}h</span></span>
-                                ))}
-                              </div>
-                            )}
-                            {(project.designers || []).length === 0 && project.status !== 'done' && (
-                              <span className="project-footer-hours project-footer-warning">
-                                <User size={12} />
-                                <span>No designer</span>
-                              </span>
-                            )}
                             {project.deckLink && (
                               <a href={project.deckLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
                                 <Presentation size={12} />
@@ -2738,11 +2789,25 @@ const [showFilters, setShowFilters] = useState(false)
                               </a>
                             ))}
                           </div>
-                          <div className="project-actions">
-                            <button className="action-btn" onClick={() => handleEditProject(project)} aria-label="Edit"><Pencil size={14} /></button>
-                            <button className="action-btn delete" onClick={() => handleDeleteProject(project.id)} aria-label="Delete"><Trash2 size={14} /></button>
-                          </div>
                         </div>
+                        {(() => {
+                          const imgs = allProjectImages.filter(i => i.project_id === project.id)
+                          if (imgs.length === 0) return null
+                          return (
+                            <div className="project-attached-images">
+                              <span className="project-attached-label">Attached images</span>
+                              <div className="project-images-inline">
+                                {imgs.slice(0, 4).map((img, idx) => (
+                                  <div key={img.id} className="project-image-thumb">
+                                    <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
+                                      onClick={() => setLightbox({ images: imgs, index: idx })} />
+                                  </div>
+                                ))}
+                                {imgs.length > 4 && <span className="project-card-images">+{imgs.length - 4} more</span>}
+                              </div>
+                            </div>
+                          )
+                        })()}
                       </div>
                     )
                   }
@@ -5052,7 +5117,7 @@ const [showFilters, setShowFilters] = useState(false)
           <div className="settings-section">
             <div className="settings-header">
               <h2>Special Days</h2>
-              <button className="add-timeline-btn" onClick={() => { setHolidayForm({ name: '', date: '' }); setShowHolidayModal(true) }}>+ Add Special Day</button>
+              <button className="primary-btn" onClick={() => { setHolidayForm({ name: '', date: '' }); setShowHolidayModal(true) }}>+ Add Special Day</button>
             </div>
             <div className="timeline-list">
               {holidays.map(h => (
@@ -5392,6 +5457,7 @@ const [showFilters, setShowFilters] = useState(false)
                     estimatedHours: 0,
                   })
                   setEditingProject(null)
+                  setShowProjectModal(true)
                 }}>
                   <Copy size={13} />
                   Duplicate
@@ -5704,6 +5770,65 @@ const [showFilters, setShowFilters] = useState(false)
                   >+ Add Custom Link</button>
                 )}
               </div>
+
+              {/* Images */}
+              {editingProject && (
+                <div className="form-section">
+                  <div className="form-section-title">Images</div>
+                  <div
+                    className={`project-image-drop${uploadingImage ? ' uploading' : ''}`}
+                    onPaste={async (e) => {
+                      const items = e.clipboardData?.items
+                      if (!items) return
+                      for (const item of Array.from(items)) {
+                        if (item.type.startsWith('image/')) {
+                          e.preventDefault()
+                          const file = item.getAsFile()
+                          if (file) await uploadProjectImage(editingProject.id, file, file.name || 'pasted-image.png')
+                          return
+                        }
+                      }
+                    }}
+                    onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('dragover') }}
+                    onDragLeave={e => e.currentTarget.classList.remove('dragover')}
+                    onDrop={async (e) => {
+                      e.preventDefault()
+                      e.currentTarget.classList.remove('dragover')
+                      const files = e.dataTransfer?.files
+                      if (!files) return
+                      for (const file of Array.from(files)) {
+                        if (file.type.startsWith('image/')) {
+                          await uploadProjectImage(editingProject.id, file, file.name)
+                        }
+                      }
+                    }}
+                    tabIndex={0}
+                  >
+                    {uploadingImage && <div className="project-image-uploading"><Loader size={14} className="spin" /> Uploading...</div>}
+                    {!uploadingImage && projectImages.length === 0 && (
+                      <div className="project-image-placeholder">Paste or drag an image here</div>
+                    )}
+                    {projectImages.length > 0 && (
+                      <div className="project-image-grid">
+                        {projectImages.map((img, idx) => (
+                          <div key={img.id} className="project-image-item">
+                            <div className="project-image-thumb">
+                              <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
+                                onClick={() => setLightbox({ images: projectImages, index: idx })} />
+                              <button className="project-image-delete" onClick={() => deleteProjectImage(img.id)} title="Delete image">
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                            <input className="project-image-caption" placeholder="Add caption..."
+                              defaultValue={img.caption || ''}
+                              onBlur={e => { if (e.target.value !== (img.caption || '')) updateImageCaption(img.id, e.target.value) }} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
             </div>
 
@@ -6633,6 +6758,14 @@ const [showFilters, setShowFilters] = useState(false)
       )}
 
     </div>
+    {lightbox && (
+      <ImageLightbox
+        images={lightbox.images}
+        currentIndex={lightbox.index}
+        onClose={() => setLightbox(null)}
+        onNavigate={index => setLightbox(prev => prev ? { ...prev, index } : null)}
+      />
+    )}
     </>
   )
 }

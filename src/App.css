@@ -494,9 +494,55 @@
 
 .project-row .project-info {
   display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1rem 1.5rem 0.5rem;
+}
+.project-info-top {
+  display: flex;
   justify-content: space-between;
-  padding: 1rem 1.5rem;
   align-items: center;
+}
+.project-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+.project-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 99px;
+  padding: 0.15rem 0.55rem;
+  white-space: nowrap;
+}
+.project-meta-warn {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+  font-weight: 600;
+}
+.project-meta-spacer {
+  flex: 1;
+}
+.project-meta-action {
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.project-row:hover .project-meta-action {
+  opacity: 1;
+}
+.project-meta-action:hover {
+  background: var(--color-hover-subtle);
+}
+.project-meta-action-delete:hover {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
 }
 
 .project-row:last-child {
@@ -513,6 +559,7 @@
   opacity: 0;
   transition: opacity 0.15s ease;
 }
+
 
 .project-row:hover .project-actions {
   opacity: 1;
@@ -1945,8 +1992,9 @@
 
 .project-links-footer {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+  align-items: center;
 }
 .project-footer-phases {
   display: flex;
@@ -2299,6 +2347,229 @@
 .add-link-btn:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
+}
+
+/* Project Images */
+.project-image-drop {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  min-height: 80px;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: default;
+  outline: none;
+}
+.project-image-drop:focus,
+.project-image-drop.dragover {
+  border-color: var(--color-accent);
+  background: rgba(59, 130, 246, 0.04);
+}
+.project-image-drop.uploading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.project-image-placeholder {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 1rem 0;
+  opacity: 0.6;
+}
+.project-image-uploading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  padding: 0.5rem 0;
+}
+.project-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.5rem;
+}
+.project-image-thumb {
+  position: relative;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  aspect-ratio: 4/3;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+}
+.project-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+}
+.project-image-thumb img:hover {
+  opacity: 0.9;
+}
+.project-image-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.project-image-thumb:hover .project-image-delete {
+  opacity: 1;
+}
+.project-image-delete:hover {
+  background: #ef4444;
+}
+.project-image-item {
+  display: flex;
+  flex-direction: column;
+}
+.project-image-caption {
+  width: 100%;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  margin-top: 0.25rem;
+  font-family: inherit;
+}
+.project-image-caption::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+/* Lightbox */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(255,255,255,0.15);
+  border: none;
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  z-index: 10;
+}
+.lightbox-close:hover {
+  background: rgba(255,255,255,0.3);
+}
+.lightbox-content {
+  max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: default;
+}
+.lightbox-content img {
+  max-width: 90vw;
+  max-height: 78vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.lightbox-caption {
+  color: #fff;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+  text-align: center;
+  max-width: 600px;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+.lightbox-counter {
+  color: rgba(255,255,255,0.5);
+  font-size: 0.7rem;
+  margin-top: 0.35rem;
+}
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255,255,255,0.1);
+  border: none;
+  color: #fff;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  z-index: 10;
+}
+.lightbox-nav:hover {
+  background: rgba(255,255,255,0.25);
+}
+.lightbox-prev { left: 16px; }
+.lightbox-next { right: 16px; }
+
+/* Project card image badge */
+.project-card-images {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+/* Attached images section below footer */
+.project-attached-images {
+  padding: 0.5rem 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.project-attached-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: block;
+  margin-bottom: 0.3rem;
+}
+/* Inline project images (expanded view) */
+.project-images-inline {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.project-images-inline .project-image-thumb {
+  width: 80px;
+  height: 60px;
+  aspect-ratio: auto;
+}
+.project-images-inline .project-image-thumb img {
+  cursor: pointer;
 }
 
 /* Priority View */
@@ -7428,7 +7699,7 @@ select:focus-visible {
 
 .theme-switch-moon {
   right: 7px;
-  color: white;
+  color: #555;
 }
 
 .disabled-input {

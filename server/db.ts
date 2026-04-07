@@ -1,7 +1,12 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
+import fs from 'fs';
 
 export const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'data', 'shared.db');
+export const IMAGES_DIR = path.join(path.dirname(DB_PATH), 'images');
+
+// Ensure images directory exists
+try { fs.mkdirSync(IMAGES_DIR, { recursive: true }); } catch { /* ok */ }
 export const SEED_SECRET = process.env.DCC_SEED_SECRET || '';
 
 let db: sqlite3.Database;
@@ -288,6 +293,16 @@ export const initSchema = async () => {
     plain_text TEXT DEFAULT '',
     data_json TEXT DEFAULT '{}'
   )`).catch(e => console.error('weekly_snapshots init error:', e.message))
+
+  await run(`CREATE TABLE IF NOT EXISTS project_images (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+    filename TEXT NOT NULL, original_name TEXT DEFAULT '',
+    mime_type TEXT DEFAULT 'image/png', size_bytes INTEGER DEFAULT 0,
+    caption TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).catch(e => console.error('project_images init error:', e.message))
+  // Migration: add caption column if missing
+  await run(`ALTER TABLE project_images ADD COLUMN caption TEXT DEFAULT ''`).catch(() => {})
 
   // Seed default business lines if empty
   const existing = await get('SELECT COUNT(*) as count FROM business_lines')

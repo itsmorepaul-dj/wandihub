@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { TrendingUp, TrendingDown, Megaphone, UserCheck, List, Link as LinkIcon, ChevronDown, ChevronRight } from 'lucide-react'
 import type { Project, WeeklyUpdate, WeeklyGeneral } from './types'
 
@@ -128,16 +128,6 @@ export default function WeeklyUpdateForm({
     return () => document.removeEventListener('mousedown', handler)
   }, [linkPopover])
 
-  const handleCollapse = useCallback(async () => {
-    if (editorRef.current) {
-      const md = htmlToMarkdown(editorRef.current)
-      const updated = { ...draft, [activeTab]: md }
-      await onSave({ ...updated, existingHighlight, existingLowlight })
-    } else {
-      await onSave({ ...draft, existingHighlight, existingLowlight })
-    }
-  }, [draft, activeTab, existingHighlight, existingLowlight, onSave])
-
   const projectLinks = [
     project.deckLink && { name: project.deckName || 'Deck', url: project.deckLink },
     project.prdLink && { name: project.prdName || 'PRD', url: project.prdLink },
@@ -261,7 +251,7 @@ export default function WeeklyUpdateForm({
     <div className="weekly-inline">
       <button
         className={`weekly-inline-toggle${hasUpdate ? ' has-update' : ''}`}
-        onClick={isExpanded ? handleCollapse : onToggle}
+        onClick={onToggle}
       >
         {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         {hasUpdate ? 'Edit weekly update' : 'Weekly update'}

@@ -163,4 +163,15 @@ export interface WeeklyGeneral {
   designer_name?: string
 }
 
+export interface ProjectImage {
+  id: string
+  project_id: string
+  filename: string
+  original_name: string
+  mime_type: string
+  size_bytes: number
+  caption: string
+  created_at: string
+}
+
 export type TabId = 'projects' | 'team' | 'calendar' | 'capacity' | 'reports' | 'settings'
