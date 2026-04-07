@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
-import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft } from 'lucide-react'
+import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral } from './types'
@@ -32,6 +32,24 @@ const CHANGELOG = [
   'Quarterly archive — archive done projects at quarter boundaries, browse and restore from archive',
 ]
 
+
+// Render [name](url) markdown links as clickable <a> tags in text
+function renderMarkdownLinks(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  let last = 0
+  const linkRe = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g
+  let m: RegExpExecArray | null
+  while ((m = linkRe.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    parts.push(
+      <a key={m.index} href={m[2]} target="_blank" rel="noopener noreferrer" className="weekly-inline-link"
+        onClick={e => e.stopPropagation()}>{m[1]}</a>
+    )
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts.length > 0 ? <>{parts}</> : text
+}
 
 // Parse Gemini note content_preview to extract structured sections
 // Highlight projects and people in text with clickable + buttons to add links
@@ -599,6 +617,7 @@ const [showFilters, setShowFilters] = useState(false)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
   const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode }>({ open: false, title: '', content: '' })
   const [showArchive, setShowArchive] = useState(false)
+  const [showSnapshotHistory, setShowSnapshotHistory] = useState(false)
   const [openCritsSyncing, setOpenCritsSyncing] = useState(false)
   const [weeklyUpdates, setWeeklyUpdates] = useState<WeeklyUpdate[]>([])
   const [weeklyGeneral, setWeeklyGeneral] = useState<WeeklyGeneral[]>([])
@@ -4033,17 +4052,17 @@ const [showFilters, setShowFilters] = useState(false)
               <div key={u.id} className={`rr-update-card rr-update-${type}`}>
                 <div className="rr-update-brand">{brand}</div>
                 <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
-                <div className="rr-update-desc">{u.description}</div>
-                {type === 'lowlight' && u.risk_reason && (
-                  <div className="rr-update-risk"><strong>Risk:</strong> {u.risk_reason}</div>
-                )}
-                {type === 'lowlight' && u.resolution && (
-                  <div className="rr-update-resolution"><strong>Resolution:</strong> {u.resolution}</div>
-                )}
                 {links.length > 0 && (
                   <div className="rr-update-links">
-                    {links.map((l, i) => <a key={i} href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a>)}
+                    {links.map((l, i) => <span key={i}>{i > 0 && <span className="rr-link-sep">|</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
                   </div>
+                )}
+                <div className="rr-update-desc">{renderMarkdownLinks(u.description)}</div>
+                {type === 'lowlight' && u.risk_reason && (
+                  <div className="rr-update-risk"><strong>Risk:</strong> {renderMarkdownLinks(u.risk_reason)}</div>
+                )}
+                {type === 'lowlight' && u.resolution && (
+                  <div className="rr-update-resolution"><strong>Resolution:</strong> {renderMarkdownLinks(u.resolution)}</div>
                 )}
                 <div className="rr-update-author">{(u.designer_name || '').split(' ')[0]}</div>
               </div>
@@ -4114,7 +4133,7 @@ const [showFilters, setShowFilters] = useState(false)
                     ))}
                   </div>
                 ) : (
-                  <div className="rr-empty">No FYIs. Add them on the Reports page.</div>
+                  <div className="rr-empty">No FYIs this week.</div>
                 )}
               </div>
 
@@ -4140,13 +4159,111 @@ const [showFilters, setShowFilters] = useState(false)
                     ))}
                   </div>
                 ) : (
-                  <div className="rr-empty">No people updates. Add them on the Reports page.</div>
+                  <div className="rr-empty">No people updates this week.</div>
                 )}
               </div>
             </div>
           )
 
           openReport('Weekly Status', fullText, rich)
+        }
+
+        const viewSnapshot = async (snap: { id: string; week: string; generated_at: string }) => {
+          try {
+            const res = await authFetch(`/api/weekly-snapshots/${snap.week}`)
+            const snapData = await res.json()
+            const parsed = JSON.parse(snapData.data_json || '{}')
+            const hl = (parsed.highlights || []) as WeeklyUpdate[]
+            const ll = (parsed.lowlights || []) as WeeklyUpdate[]
+            const fi = (parsed.fyis || []) as WeeklyGeneral[]
+            const pu = (parsed.peopleUpdates || []) as WeeklyGeneral[]
+
+            const snapGetBrand = (u: WeeklyUpdate) => {
+              if (u.business_lines) {
+                try { const p = JSON.parse(u.business_lines); return Array.isArray(p) ? p[0] : u.business_lines } catch { return u.business_lines }
+              }
+              return 'General'
+            }
+
+            const snapRenderEntry = (u: WeeklyUpdate, type: 'highlight' | 'lowlight') => {
+              const proj = currentProjects.find(p => p.id === u.project_id)
+              const links = [
+                proj?.deckLink && { name: proj.deckName || 'Deck', url: proj.deckLink },
+                proj?.prdLink && { name: proj.prdName || 'PRD', url: proj.prdLink },
+                proj?.briefLink && { name: proj.briefName || 'Brief', url: proj.briefLink },
+                proj?.figmaLink && { name: 'Figma', url: proj.figmaLink },
+                ...(proj?.customLinks || []),
+              ].filter(Boolean) as { name: string; url: string }[]
+              return (
+                <div key={u.id} className={`rr-update-card rr-update-${type}`}>
+                  <div className="rr-update-brand">{snapGetBrand(u)}</div>
+                  <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
+                  {links.length > 0 && (
+                    <div className="rr-update-links">
+                      {links.map((l, i) => <span key={i}>{i > 0 && <span className="rr-link-sep">|</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                    </div>
+                  )}
+                  <div className="rr-update-desc">{renderMarkdownLinks(u.description)}</div>
+                  {type === 'lowlight' && u.risk_reason && (
+                    <div className="rr-update-risk"><strong>Risk:</strong> {renderMarkdownLinks(u.risk_reason)}</div>
+                  )}
+                  {type === 'lowlight' && u.resolution && (
+                    <div className="rr-update-resolution"><strong>Resolution:</strong> {renderMarkdownLinks(u.resolution)}</div>
+                  )}
+                  <div className="rr-update-author">{(u.designer_name || '').split(' ')[0]}</div>
+                </div>
+              )
+            }
+
+            const genDate = new Date(snapData.generated_at)
+            const dateStr = genDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+
+            const rich = (
+              <div className="rr">
+                <div className="rr-date">{dateStr} · {snap.week}</div>
+                {([
+                  { items: hl, label: 'Highlights', color: '#22c55e', type: 'highlight' as const },
+                  { items: ll, label: 'Lowlights', color: '#ef4444', type: 'lowlight' as const },
+                ] as const).map(section => (
+                  <div key={section.label} className="rr-section">
+                    <div className="rr-section-header-row">
+                      <div className="rr-section-header" style={{ color: section.color }}>
+                        <span className="rr-section-dot" style={{ background: section.color }} />
+                        <span>{section.label}</span>
+                        <span className="rr-section-count">{section.items.length}</span>
+                      </div>
+                    </div>
+                    {section.items.length > 0 ? (
+                      <div className="rr-update-list">{section.items.map(u => snapRenderEntry(u, section.type))}</div>
+                    ) : <div className="rr-empty">No {section.label.toLowerCase()} this week.</div>}
+                  </div>
+                ))}
+                {([
+                  { items: fi, label: 'Upcoming FYIs', color: '#f59e0b' },
+                  { items: pu, label: 'People Updates', color: '#8b5cf6' },
+                ] as const).map(section => (
+                  <div key={section.label} className="rr-section">
+                    <div className="rr-section-header-row">
+                      <div className="rr-section-header" style={{ color: section.color }}>
+                        <span className="rr-section-dot" style={{ background: section.color }} />
+                        <span>{section.label}</span>
+                        <span className="rr-section-count">{section.items.length}</span>
+                      </div>
+                    </div>
+                    {section.items.length > 0 ? (
+                      <div className="rr-general-list">{section.items.map((e: WeeklyGeneral) => (
+                        <div key={e.id} className="rr-general-item">
+                          <span>{renderMarkdownLinks(e.content)}</span>
+                          <span className="rr-general-author">{(e.designer_name || '').split(' ')[0]}</span>
+                        </div>
+                      ))}</div>
+                    ) : <div className="rr-empty">No {section.label.toLowerCase()} this week.</div>}
+                  </div>
+                ))}
+              </div>
+            )
+            openReport(`Weekly Snapshot — ${snap.week}`, snapData.plain_text || '', rich)
+          } catch (err) { console.error('Error loading snapshot:', err) }
         }
 
         const syncOpenCritsDoc = async () => {
@@ -4406,7 +4523,7 @@ const [showFilters, setShowFilters] = useState(false)
         <div className="reports-page">
           <div className="reports-grid">
             {reports.map(report => (
-              <div key={report.id} className="report-card">
+              <div key={report.id} className={`report-card${report.id === 'weekly-status' && weeklySnapshots.length > 0 ? ' report-card-has-history' : ''}`}>
                 <div className="report-card-icon" style={{ color: report.color }}>
                   {report.icon}
                 </div>
@@ -4432,28 +4549,28 @@ const [showFilters, setShowFilters] = useState(false)
                     View Report
                   </button>
                 ) : null}
+                {report.id === 'weekly-status' && weeklySnapshots.length > 0 && (
+                  <div className="snapshot-accordion">
+                    <button className="snapshot-accordion-toggle" onClick={() => setShowSnapshotHistory(v => !v)}>
+                      {showSnapshotHistory ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      <Clock size={12} />
+                      <span>Past Reports ({weeklySnapshots.length})</span>
+                    </button>
+                    {showSnapshotHistory && (
+                      <div className="snapshot-accordion-body">
+                        {weeklySnapshots.map(snap => (
+                          <button key={snap.id} className="snapshot-item" onClick={() => viewSnapshot(snap)}>
+                            <span className="snapshot-week">{snap.week}</span>
+                            <span className="snapshot-date">{new Date(snap.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
-          {weeklySnapshots.length > 0 && (
-            <div className="snapshot-history">
-              <h3 className="snapshot-history-title"><Clock size={14} /> Weekly Snapshot History</h3>
-              <div className="snapshot-list">
-                {weeklySnapshots.map(snap => (
-                  <button key={snap.id} className="snapshot-item" onClick={async () => {
-                    try {
-                      const res = await authFetch(`/api/weekly-snapshots/${snap.week}`)
-                      const data = await res.json()
-                      openReport(`Weekly Snapshot — ${snap.week}`, data.plain_text || '')
-                    } catch (err) { console.error('Error loading snapshot:', err) }
-                  }}>
-                    <span className="snapshot-week">{snap.week}</span>
-                    <span className="snapshot-date">{new Date(snap.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           {copiedReport && (
             <div className="report-copied-toast">Report copied to clipboard — paste into Google Docs</div>
           )}
@@ -5261,6 +5378,26 @@ const [showFilters, setShowFilters] = useState(false)
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{editingProject ? 'Edit Project' : 'New Project'}</h2>
+              {editingProject && (
+                <button className="modal-duplicate-btn" onClick={() => {
+                  const phase = editingProject.name.match(/Phase\s+(\d+)/i)
+                  const nextPhase = phase ? parseInt(phase[1]) + 1 : 2
+                  const newName = phase
+                    ? editingProject.name.replace(/Phase\s+\d+/i, `Phase ${nextPhase}`)
+                    : `${editingProject.name} (Phase ${nextPhase})`
+                  setProjectFormData({
+                    ...projectFormData,
+                    name: newName,
+                    startDate: '',
+                    endDate: '',
+                    estimatedHours: 0,
+                  })
+                  setEditingProject(null)
+                }}>
+                  <Copy size={13} />
+                  Duplicate
+                </button>
+              )}
             </div>
             
             <div className="modal-body">

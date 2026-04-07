@@ -4935,16 +4935,23 @@ a.report-view-btn {
 .rr-update-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
-  padding-top: 0.15rem;
+  align-items: center;
+  gap: 0.15rem;
+  margin-top: -0.1rem;
+  margin-bottom: 0.2rem;
 }
 .rr-update-links a {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--color-accent);
   text-decoration: none;
 }
 .rr-update-links a:hover {
   text-decoration: underline;
+}
+.rr-link-sep {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  margin: 0 0.15rem;
 }
 .rr-update-author {
   font-size: 0.7rem;
@@ -5107,7 +5114,7 @@ a.report-view-btn {
 /* --- Toolbar --- */
 .weekly-toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.25rem;
   padding: 0.15rem 0;
 }
@@ -5330,37 +5337,53 @@ a.report-view-btn {
   opacity: 0.8;
 }
 
-/* Snapshot History */
-.snapshot-history {
-  margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--color-border);
+/* Snapshot Accordion (inside weekly-status report card) */
+.report-card-has-history {
+  flex-wrap: wrap;
 }
-.snapshot-history-title {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-text-secondary);
+.snapshot-accordion {
+  width: 100%;
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+}
+.snapshot-accordion-toggle {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.75rem;
+  gap: 0.35rem;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0;
+  transition: color 0.15s;
 }
-.snapshot-list {
+.snapshot-accordion-toggle:hover {
+  color: var(--color-accent);
+}
+.snapshot-accordion-body {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.2rem;
+  margin-top: 0.4rem;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 .snapshot-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
+  padding: 0.35rem 0.6rem;
+  border-radius: 5px;
+  border: 1px solid var(--color-border-subtle);
   background: var(--color-bg-secondary);
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--color-text);
   transition: background 0.15s, border-color 0.15s;
 }
@@ -5373,7 +5396,7 @@ a.report-view-btn {
 }
 .snapshot-date {
   color: var(--color-text-secondary);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
 }
 
 .report-copied-toast {
@@ -5683,6 +5706,26 @@ select:focus-visible {
   margin: 0;
   font-size: 1.15rem;
   font-weight: 600;
+}
+
+.modal-duplicate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-family: inherit;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.modal-duplicate-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .modal-body {
