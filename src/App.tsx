@@ -594,6 +594,7 @@ const [showFilters, setShowFilters] = useState(false)
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
+  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string }>({ open: false, title: '', content: '' })
   const [showArchive, setShowArchive] = useState(false)
   const [openCritsSyncing, setOpenCritsSyncing] = useState(false)
 
@@ -1385,6 +1386,13 @@ const [showFilters, setShowFilters] = useState(false)
     return getDjFiscalLabel(now.getMonth() + 1, now.getFullYear())
   }
 
+  const getPreviousFiscalQuarter = () => {
+    const now = new Date()
+    // Go back ~45 days to land solidly in the previous quarter
+    const prev = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+    return getDjFiscalLabel(prev.getMonth() + 1, prev.getFullYear())
+  }
+
   const archiveProject = async (projectId: string, quarter: string) => {
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: quarter } : p))
     await authFetch(`/api/projects/${projectId}/archive`, {
@@ -1400,7 +1408,7 @@ const [showFilters, setShowFilters] = useState(false)
   }
 
   const handleQuarterRollover = async () => {
-    const quarter = getCurrentFiscalQuarter()
+    const quarter = getPreviousFiscalQuarter()
     const doneCount = currentProjects.filter(p => p.status === 'done').length
     if (doneCount === 0) {
       alert('No done projects to archive')
@@ -3843,6 +3851,10 @@ const [showFilters, setShowFilters] = useState(false)
           })
         }
 
+        const openReport = (title: string, content: string) => {
+          setReportModal({ open: true, title, content })
+        }
+
         const generateWeeklyStatus = () => {
           const lines = [
             `DESIGN WEEKLY STATUS — ${todayStr}`,
@@ -3873,7 +3885,7 @@ const [showFilters, setShowFilters] = useState(false)
             '',
             `Total: ${currentProjects.length} projects (${activeProjects.length} active, ${reviewProjects.length} review, ${blockedProjects.length} blocked, ${doneProjects.length} done)`,
           ]
-          copyToClipboard(lines.join('\n'))
+          openReport('Weekly Status Update', lines.join('\n'))
         }
 
         const syncOpenCritsDoc = async () => {
@@ -3929,7 +3941,7 @@ const [showFilters, setShowFilters] = useState(false)
               '',
             ] : []),
           ]
-          copyToClipboard(lines.join('\n'))
+          openReport('Project Review', lines.join('\n'))
         }
 
         const generateCapacityStats = () => {
@@ -3984,7 +3996,7 @@ const [showFilters, setShowFilters] = useState(false)
               '',
             ] : []),
           ]
-          copyToClipboard(lines.join('\n'))
+          openReport('Capacity Report', lines.join('\n'))
         }
 
         const generateProjectStats = () => {
@@ -4023,10 +4035,48 @@ const [showFilters, setShowFilters] = useState(false)
             'ACTIVE PROJECTS PER DESIGNER',
             ...Object.entries(designerCounts).sort((a, b) => b[1] - a[1]).map(([d, count]) => `  ${d}: ${count}`),
           ]
-          copyToClipboard(lines.join('\n'))
+          openReport('Project Statistics', lines.join('\n'))
+        }
+
+        const generateQuarterReview = () => {
+          const quarters = Object.keys(archivedByQuarter).sort((a, b) => b.localeCompare(a))
+          if (quarters.length === 0) {
+            openReport('Quarter Review', 'No archived quarters yet.')
+            return
+          }
+          const lines: string[] = [`QUARTERLY REVIEW — ${todayStr}`, '']
+          for (const q of quarters) {
+            const qProjects = archivedByQuarter[q]
+            const totalHours = qProjects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
+            const designerNames = [...new Set(qProjects.flatMap(p => p.designers || []))]
+            const blNames = [...new Set(qProjects.flatMap(p => p.businessLines || []))]
+            lines.push(
+              `${q} — ${qProjects.length} project${qProjects.length !== 1 ? 's' : ''} delivered`,
+              `  Hours: ${totalHours > 0 ? `${totalHours} hrs (${Math.round(totalHours / 35 * 10) / 10} weeks)` : 'no estimates'}`,
+              `  Designers: ${designerNames.length > 0 ? designerNames.join(', ') : 'none'}`,
+              `  Business Lines: ${blNames.length > 0 ? blNames.join(', ') : 'none'}`,
+              '',
+              ...qProjects.sort((a, b) => a.name.localeCompare(b.name)).map(p => {
+                const designers = (p.designers || []).map(d => d.split(' ')[0]).join(', ')
+                const hours = p.estimatedHours ? `${p.estimatedHours} hrs` : 'no estimate'
+                const bl = (p.businessLines || []).join(', ') || 'unassigned'
+                return `  • ${p.name} — ${bl} — ${designers || 'unassigned'} — ${hours}`
+              }),
+              '',
+            )
+          }
+          openReport('Quarter Review', lines.join('\n'))
         }
 
         const totalEstimatedHours = projects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
+        const lastQuarter = (() => {
+          const currentQ = getCurrentFiscalQuarter()
+          const quarters = Object.keys(archivedByQuarter).filter(q => q !== currentQ).sort((a, b) => b.localeCompare(a))
+          return quarters.length > 0 ? quarters[0] : null
+        })()
+        const lastQProjects = lastQuarter ? archivedByQuarter[lastQuarter] : []
+        const lastQHours = lastQProjects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
+        const lastQDesigners = [...new Set(lastQProjects.flatMap(p => p.designers || []))]
 
         const reports = [
           {
@@ -4076,17 +4126,24 @@ const [showFilters, setShowFilters] = useState(false)
             stats: `${projects.length} total, ${totalEstimatedHours} hrs estimated`,
             generate: generateProjectStats,
           },
+          {
+            id: 'quarter-review',
+            title: 'Quarter Review',
+            description: lastQuarter
+              ? `Summary of delivered work by quarter. Includes projects, hours, designers, and business lines.`
+              : 'No completed quarters yet. Archive done projects at the end of a quarter to build history.',
+            icon: <Archive size={24} />,
+            color: '#6366f1',
+            stats: lastQuarter
+              ? `${lastQuarter}: ${lastQProjects.length} project${lastQProjects.length !== 1 ? 's' : ''} · ${lastQHours > 0 ? `${lastQHours}h` : 'no estimates'} · ${lastQDesigners.length} designer${lastQDesigners.length !== 1 ? 's' : ''}`
+              : `${archivedProjects.length} archived across ${Object.keys(archivedByQuarter).length} quarter${Object.keys(archivedByQuarter).length !== 1 ? 's' : ''}`,
+            generate: archivedProjects.length > 0 ? generateQuarterReview : undefined,
+          },
         ]
 
         return (
         <div className="reports-page">
-          {!isAdmin && (
-            <div className="reports-locked-banner">
-              <span className="reports-locked-icon">🔒</span>
-              <p>Reports are in beta and currently available to admins only.</p>
-            </div>
-          )}
-          <div className={`reports-grid${!isAdmin ? ' reports-disabled' : ''}`}>
+          <div className="reports-grid">
             {reports.map(report => (
               <div key={report.id} className="report-card">
                 <div className="report-card-icon" style={{ color: report.color }}>
@@ -4097,7 +4154,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <p className="report-card-desc">{report.description}</p>
                   <span className="report-card-stats">{report.stats}</span>
                 </div>
-                {isAdmin && report.docUrl ? (
+                {report.docUrl ? (
                   <div className="report-doc-actions">
                     <button className="report-generate-btn" onClick={report.syncDoc} disabled={report.syncing} style={{ borderColor: report.color, color: report.color }}>
                       {report.syncing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />}
@@ -4108,10 +4165,10 @@ const [showFilters, setShowFilters] = useState(false)
                       View Doc
                     </a>
                   </div>
-                ) : isAdmin && report.generate ? (
+                ) : report.generate ? (
                   <button className="report-generate-btn" onClick={report.generate} style={{ borderColor: report.color, color: report.color }}>
-                    <ClipboardCopy size={14} />
-                    {copiedReport ? 'Copied!' : 'Copy Report'}
+                    <FileBarChart size={14} />
+                    View Report
                   </button>
                 ) : null}
               </div>
@@ -4574,6 +4631,10 @@ const [showFilters, setShowFilters] = useState(false)
                   <span style={{ fontWeight: 600 }}>{getCurrentFiscalQuarter()}</span>
                 </div>
                 <div className="settings-row">
+                  <span>Previous Quarter</span>
+                  <span style={{ fontWeight: 600 }}>{getPreviousFiscalQuarter()}</span>
+                </div>
+                <div className="settings-row">
                   <span>Done (unarchived)</span>
                   <span>{currentProjects.filter(p => p.status === 'done').length} projects</span>
                 </div>
@@ -4584,7 +4645,7 @@ const [showFilters, setShowFilters] = useState(false)
                 <div className="settings-row">
                   <span />
                   <button className="primary-btn" onClick={handleQuarterRollover}>
-                    Archive Done Projects
+                    Archive to {getPreviousFiscalQuarter()}
                   </button>
                 </div>
               </div>
@@ -5563,6 +5624,35 @@ const [showFilters, setShowFilters] = useState(false)
               >
                 {confirmModal.confirmLabel || 'Delete'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report Modal */}
+      {reportModal.open && (
+        <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setReportModal({ open: false, title: '', content: '' }) }}>
+          <div className="modal report-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{reportModal.title}</h2>
+              <div className="report-modal-actions">
+                <button
+                  className="report-modal-copy-btn"
+                  onClick={() => {
+                    navigator.clipboard.writeText(reportModal.content).then(() => {
+                      setCopiedReport(Date.now())
+                      setTimeout(() => setCopiedReport(null), 2000)
+                    })
+                  }}
+                >
+                  <ClipboardCopy size={14} />
+                  {copiedReport ? 'Copied!' : 'Copy'}
+                </button>
+                <button className="modal-close-btn" onClick={() => setReportModal({ open: false, title: '', content: '' })}>×</button>
+              </div>
+            </div>
+            <div className="modal-body">
+              <pre className="report-modal-content">{reportModal.content}</pre>
             </div>
           </div>
         </div>

@@ -4618,6 +4618,64 @@ a.report-view-btn {
   justify-content: center;
 }
 
+.report-modal {
+  max-width: 640px;
+  width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-modal .modal-header {
+  padding: 1rem 1.25rem;
+}
+
+.report-modal .modal-header h2 {
+  font-size: 1rem;
+}
+
+.report-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-shrink: 0;
+}
+
+.report-modal-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.3rem 0.65rem;
+  transition: all 0.15s;
+}
+
+.report-modal-copy-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.report-modal .modal-body {
+  padding: 0;
+}
+
+.report-modal-content {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .report-copied-toast {
   position: fixed;
   bottom: 2rem;

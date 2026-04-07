@@ -110,6 +110,7 @@ router.post('/quarter-rollover', async (req, res) => {
     const doneProjects = await all("SELECT id, name FROM projects WHERE status = 'done' AND archivedQuarter IS NULL") as any[]
     for (const p of doneProjects) {
       await run("UPDATE projects SET archivedQuarter = ?, updatedAt = datetime('now') WHERE id = ?", [quarter, p.id])
+      await run('UPDATE project_assignments SET allocation_percent = 0 WHERE project_id = ?', [p.id])
     }
     await updateDbVersion()
     await logActivity('project', 'update', `Quarter rollover: ${quarter}`, getUserEmail(req), `Archived ${doneProjects.length} done projects`)
