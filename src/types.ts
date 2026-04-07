@@ -25,6 +25,7 @@ export interface Project {
   matchedLinks?: { name: string; url: string; type?: string }[]
   timeline: TimelineRange[]
   estimatedHours?: number
+  archivedQuarter?: string | null
 }
 
 export interface BusinessLine {

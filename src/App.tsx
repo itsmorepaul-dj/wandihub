@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
-import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info } from 'lucide-react'
+import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId } from './types'
@@ -23,10 +23,10 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Quarterly archive — archive done projects at quarter boundaries, browse and restore from archive',
   'Migrated GitHub to internal Dow Jones repo',
   'Migrated to new home — wandihub.up.railway.app',
   'Click any calendar date to quickly add your time off — no need to open the full team modal',
-  'Fiscal year chart now shows month labels below each quarter bar',
 ]
 
 
@@ -269,7 +269,7 @@ const [showFilters, setShowFilters] = useState(false)
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
-  const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: (() => Promise<void> | void) | null }>({
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; title: string; message: string; onConfirm: (() => Promise<void> | void) | null; confirmLabel?: string; danger?: boolean }>({
     open: false,
     title: '',
     message: '',
@@ -594,6 +594,7 @@ const [showFilters, setShowFilters] = useState(false)
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
+  const [showArchive, setShowArchive] = useState(false)
   const [openCritsSyncing, setOpenCritsSyncing] = useState(false)
 
   // Server-Sent Events — live updates from server
@@ -871,8 +872,8 @@ const [showFilters, setShowFilters] = useState(false)
     await refreshCapacity()
   }
 
-  const openConfirmModal = (title: string, message: string, onConfirm: () => Promise<void> | void) => {
-    setConfirmModal({ open: true, title, message, onConfirm })
+  const openConfirmModal = (title: string, message: string, onConfirm: () => Promise<void> | void, opts?: { confirmLabel?: string; danger?: boolean }) => {
+    setConfirmModal({ open: true, title, message, onConfirm, confirmLabel: opts?.confirmLabel, danger: opts?.danger ?? true })
   }
 
   const closeConfirmModal = () => {
@@ -1379,6 +1380,48 @@ const [showFilters, setShowFilters] = useState(false)
     await authFetch(`/api/projects/${projectId}/undone`, { method: 'PUT' })
   }
 
+  const getCurrentFiscalQuarter = () => {
+    const now = new Date()
+    return getDjFiscalLabel(now.getMonth() + 1, now.getFullYear())
+  }
+
+  const archiveProject = async (projectId: string, quarter: string) => {
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: quarter } : p))
+    await authFetch(`/api/projects/${projectId}/archive`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quarter })
+    })
+  }
+
+  const unarchiveProject = async (projectId: string) => {
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: null } : p))
+    await authFetch(`/api/projects/${projectId}/unarchive`, { method: 'PUT' })
+  }
+
+  const handleQuarterRollover = async () => {
+    const quarter = getCurrentFiscalQuarter()
+    const doneCount = currentProjects.filter(p => p.status === 'done').length
+    if (doneCount === 0) {
+      alert('No done projects to archive')
+      return
+    }
+    openConfirmModal(
+      `Archive done projects to ${quarter}?`,
+      `This will archive ${doneCount} done project${doneCount !== 1 ? 's' : ''} into ${quarter}. They'll move to the archive section and can be restored anytime.`,
+      async () => {
+        setProjects(prev => prev.map(p => p.status === 'done' && !p.archivedQuarter ? { ...p, archivedQuarter: quarter } : p))
+        await authFetch('/api/quarter-rollover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quarter })
+        })
+        closeConfirmModal()
+      },
+      { confirmLabel: 'Archive', danger: false }
+    )
+  }
+
   const handleSaveProject = async () => {
     if (!projectFormData.name.trim()) {
       alert('Please enter a project name')
@@ -1627,12 +1670,21 @@ const [showFilters, setShowFilters] = useState(false)
     return a.name.localeCompare(b.name)
   })
 
+  // Separate archived from current projects
+  const currentProjects = projects.filter(p => !p.archivedQuarter)
+  const archivedProjects = projects.filter(p => !!p.archivedQuarter)
+  const archivedByQuarter = archivedProjects.reduce<Record<string, Project[]>>((acc, p) => {
+    const q = p.archivedQuarter!
+    ;(acc[q] ||= []).push(p)
+    return acc
+  }, {})
+
   // Status priority: blocked first, then review, active, done last
   const statusOrder: Record<string, number> = { blocked: 0, review: 1, active: 2, done: 3 }
   const getStatusOrder = (s: string) => statusOrder[s] ?? 2
 
-  // Sort projects by selected criteria
-  const sortedProjects = [...projects].sort((a, b) => {
+  // Sort projects by selected criteria (only current/non-archived)
+  const sortedProjects = [...currentProjects].sort((a, b) => {
     // Always push "done" to the end regardless of sort mode
     const statusDiff = getStatusOrder(a.status) - getStatusOrder(b.status)
     if (statusDiff !== 0) return statusDiff
@@ -2060,7 +2112,7 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
               )}
             </div>
-            {activeTab === 'projects' && (
+            {activeTab === 'projects' && !showArchive && (
               <button className="primary-btn" onClick={handleAddProject}>+ New Project</button>
             )}
             {activeTab === 'team' && (
@@ -2073,12 +2125,12 @@ const [showFilters, setShowFilters] = useState(false)
         <div ref={contentRef} className={`content ${activeTab === 'calendar' ? 'content-calendar' : ''}`}>
           {activeTab === 'projects' && (
             <div className="projects-grid">
-              {(() => {
+              {!showArchive && (() => {
                 const now = new Date()
                 const in4Weeks = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000)
-                const activeProjects = projects.filter(p => p.status === 'active' || p.status === 'review')
+                const activeProjects = currentProjects.filter(p => p.status === 'active' || p.status === 'review')
                 const activeAssignments = capacityData?.assignments.filter((a: CapacityAssignment) => {
-                  const proj = projects.find(p => p.name === a.project_name)
+                  const proj = currentProjects.find(p => p.name === a.project_name)
                   return proj && (proj.status === 'active' || proj.status === 'review')
                 }) || []
                 const warnings: { icon: React.ReactNode; text: string; severity: 'danger' | 'warn' | 'info'; detail?: { title: string; items: { name: string; detail: string; projectName?: string }[] } }[] = []
@@ -2164,7 +2216,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="projects-summary">
                     <div className="summary-stats">
                       {([['active', 'Active', '#3b82f6'], ['review', 'In Review', '#f59e0b'], ['done', 'Done', '#22c55e'], ['blocked', 'Blocked', '#ef4444']] as const).map(([status, label, color]) => {
-                        const count = projects.filter(p => p.status === status).length
+                        const count = currentProjects.filter(p => p.status === status).length
                         return (
                           <div key={status} className="summary-stat" style={count > 0 ? { color } : undefined}>
                             <span className="summary-stat-value">{count}</span>
@@ -2188,14 +2240,19 @@ const [showFilters, setShowFilters] = useState(false)
               })()}
 
               <div className="projects-sort-row">
-                <label className="arrange-priority-toggle">
+                {!showArchive && <label className="arrange-priority-toggle">
                   <div className={`toggle-switch ${projectViewMode === 'priority' ? 'active' : ''}`} onClick={() => setProjectViewMode(projectViewMode === 'priority' ? 'list' : 'priority')}>
                     <div className="toggle-knob" />
                   </div>
                   <span className="toggle-label" onClick={() => setProjectViewMode(projectViewMode === 'priority' ? 'list' : 'priority')}>Arrange priority</span>
-                </label>
-                <div className="sort-divider" />
-                {projectViewMode === 'list' ? (
+                </label>}
+                {!showArchive && <div className="sort-divider" />}
+                {showArchive ? (
+                  <button className="archive-back-btn" onClick={() => setShowArchive(false)}>
+                    <ChevronLeft size={14} />
+                    Back to active projects
+                  </button>
+                ) : projectViewMode === 'list' ? (
                   <>
                     <span className="sort-label">Sort by:</span>
                     <button className={`sort-btn ${projectSortBy === 'name' ? 'active' : ''}`} onClick={() => handleProjectSortChange('name')}>Name</button>
@@ -2220,15 +2277,88 @@ const [showFilters, setShowFilters] = useState(false)
                     </select>
                   </>
                 )}
+                {!showArchive && archivedProjects.length > 0 && (
+                  <>
+                    <div className="sort-divider" style={{ marginLeft: 'auto' }} />
+                    <button className="archive-view-btn" onClick={() => setShowArchive(true)}>
+                      <Archive size={13} />
+                      Archive ({archivedProjects.length})
+                    </button>
+                  </>
+                )}
               </div>
 
+              {/* Archive View */}
+              {showArchive && (
+                <div className="archive-view">
+                  {archivedProjects.length === 0 ? (
+                    <div className="archive-empty">
+                      <Archive size={32} />
+                      <p>No archived projects yet</p>
+                      <p className="archive-empty-hint">Done projects will appear here after a quarter rollover</p>
+                    </div>
+                  ) : (
+                    Object.entries(archivedByQuarter)
+                      .sort(([a], [b]) => b.localeCompare(a))
+                      .map(([quarter, qProjects]) => (
+                        <div key={quarter} className="archive-quarter-group">
+                          <div className="archive-quarter-header">
+                            <span className="archive-quarter-label">{quarter}</span>
+                            <span className="archive-quarter-count">{qProjects.length} project{qProjects.length !== 1 ? 's' : ''}</span>
+                          </div>
+                          <div className="archive-cards">
+                            {qProjects.sort((a, b) => a.name.localeCompare(b.name)).map(p => (
+                              <div key={p.id} className="archive-card">
+                                <div className="archive-card-header">
+                                  <span className="archive-card-name">{p.name}</span>
+                                  {isAdmin && (
+                                    <button className="archive-restore-btn" title="Restore to active projects" onClick={() => unarchiveProject(p.id)}>
+                                      <RotateCcw size={13} />
+                                      Restore
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="archive-card-meta">
+                                  {p.businessLines && p.businessLines.length > 0 && (
+                                    <span className="archive-card-tag"><Folder size={12} />{p.businessLines.join(', ')}</span>
+                                  )}
+                                  {p.designers && p.designers.length > 0 && (
+                                    <span className="archive-card-tag"><User size={12} />{p.designers.map(d => d.split(' ')[0]).join(', ')}</span>
+                                  )}
+                                  {p.startDate && p.endDate && (
+                                    <span className="archive-card-tag"><Calendar size={12} />{formatShortDate(p.startDate)} – {formatShortDate(p.endDate)}</span>
+                                  )}
+                                  {(p.estimatedHours || 0) > 0 && (
+                                    <span className="archive-card-tag"><Clock size={12} />{p.estimatedHours}h</span>
+                                  )}
+                                </div>
+                                {(p.deckLink || p.prdLink || p.briefLink || p.figmaLink || (p.customLinks && p.customLinks.length > 0)) && (
+                                  <div className="archive-card-links">
+                                    {p.deckLink && <a href={p.deckLink} target="_blank" rel="noopener noreferrer"><Presentation size={12} />{p.deckName || 'Deck'}</a>}
+                                    {p.prdLink && <a href={p.prdLink} target="_blank" rel="noopener noreferrer"><FileText size={12} />{p.prdName || 'PRD'}</a>}
+                                    {p.briefLink && <a href={p.briefLink} target="_blank" rel="noopener noreferrer"><FileEdit size={12} />{p.briefName || 'Brief'}</a>}
+                                    {p.figmaLink && <a href={p.figmaLink} target="_blank" rel="noopener noreferrer"><Figma size={12} />Figma</a>}
+                                    {p.customLinks?.map((link: any, idx: number) => (
+                                      <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer"><LinkIcon size={12} />{link.name}</a>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              )}
+
               {/* Divider line under business line picker in priority All view */}
-              {projectViewMode === 'priority' && priorityBusinessLine === 'all' && (
+              {!showArchive && projectViewMode === 'priority' && priorityBusinessLine === 'all' && (
                 <div className="priority-all-divider" />
               )}
 
-              {/* Project Filters - hidden in priority mode */}
-              {projectViewMode === 'list' && showProjectFilter() && (
+              {/* Project Filters - hidden in priority mode and archive mode */}
+              {!showArchive && projectViewMode === 'list' && showProjectFilter() && (
                 <div className="projects-filter-row">
                   {projectSortBy === 'businessLine' && (
                     <>
@@ -2276,7 +2406,7 @@ const [showFilters, setShowFilters] = useState(false)
               )}
 
               {/* Active Project Filter (from day modal) */}
-              {projectFilters.project && (
+              {!showArchive && projectFilters.project && (
                 <div className="projects-filter-row">
                   <span className="filter-label">Showing:</span>
                   <button
@@ -2288,7 +2418,7 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
               )}
 
-              {projectViewMode === 'list' && <div className="projects-list">
+              {!showArchive && projectViewMode === 'list' && <div className="projects-list">
                 {(() => {
                   if (filteredProjects.length === 0) return <div className="priority-empty">No projects found</div>
 
@@ -2502,7 +2632,7 @@ const [showFilters, setShowFilters] = useState(false)
               </div>}
 
               {/* Priority View */}
-              {projectViewMode === 'priority' && (() => {
+              {!showArchive && projectViewMode === 'priority' && (() => {
                 const selectedBlId = priorityBusinessLine || 'all'
                 const isAllView = selectedBlId === 'all'
                 const liveStatuses = ['active', 'blocked', 'review']
@@ -2510,7 +2640,7 @@ const [showFilters, setShowFilters] = useState(false)
                 // Helper: render a single business line's priority section
                 const renderBlSection = (blId: string, bl: BusinessLine, doneZoneId: string, inProgressZoneId?: string) => {
                   const ipZoneId = inProgressZoneId || `ip-zone-${blId}`
-                  const blProjects = projects.filter(p => {
+                  const blProjects = currentProjects.filter(p => {
                     const lines = Array.isArray(p.businessLines) ? p.businessLines : (p.businessLines ? [p.businessLines] : [])
                     return lines.some(l => l === bl.name)
                   })
@@ -2655,6 +2785,7 @@ const [showFilters, setShowFilters] = useState(false)
                   )
                 }
               })()}
+
 
             </div>
           )}
@@ -3693,17 +3824,17 @@ const [showFilters, setShowFilters] = useState(false)
       {activeTab === 'reports' && (() => {
         const today = new Date()
         const todayStr = today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-        const activeProjects = projects.filter(p => p.status === 'active')
-        const reviewProjects = projects.filter(p => p.status === 'review')
-        const blockedProjects = projects.filter(p => p.status === 'blocked')
-        const doneProjects = projects.filter(p => p.status === 'done')
-        const overdueProjects = projects.filter(p => {
+        const activeProjects = currentProjects.filter(p => p.status === 'active')
+        const reviewProjects = currentProjects.filter(p => p.status === 'review')
+        const blockedProjects = currentProjects.filter(p => p.status === 'blocked')
+        const doneProjects = currentProjects.filter(p => p.status === 'done')
+        const overdueProjects = currentProjects.filter(p => {
           if (!p.endDate || p.status === 'done') return false
           const end = parseLocalDate(p.endDate)
           return end ? end < today : false
         })
-        const noEstimate = projects.filter(p => p.status !== 'done' && (!p.estimatedHours || p.estimatedHours <= 0))
-        const noDesigner = projects.filter(p => p.status !== 'done' && (!p.designers || p.designers.length === 0))
+        const noEstimate = currentProjects.filter(p => p.status !== 'done' && (!p.estimatedHours || p.estimatedHours <= 0))
+        const noDesigner = currentProjects.filter(p => p.status !== 'done' && (!p.designers || p.designers.length === 0))
 
         const copyToClipboard = (text: string) => {
           navigator.clipboard.writeText(text).then(() => {
@@ -3740,7 +3871,7 @@ const [showFilters, setShowFilters] = useState(false)
             `COMPLETED THIS PERIOD (${doneProjects.length})`,
             ...doneProjects.map(p => `  • ${p.name}`),
             '',
-            `Total: ${projects.length} projects (${activeProjects.length} active, ${reviewProjects.length} review, ${blockedProjects.length} blocked, ${doneProjects.length} done)`,
+            `Total: ${currentProjects.length} projects (${activeProjects.length} active, ${reviewProjects.length} review, ${blockedProjects.length} blocked, ${doneProjects.length} done)`,
           ]
           copyToClipboard(lines.join('\n'))
         }
@@ -3868,7 +3999,7 @@ const [showFilters, setShowFilters] = useState(false)
             }
           }
           const designerCounts: Record<string, number> = {}
-          for (const p of projects.filter(pr => pr.status !== 'done')) {
+          for (const p of currentProjects.filter(pr => pr.status !== 'done')) {
             for (const d of (p.designers || [])) {
               designerCounts[d] = (designerCounts[d] || 0) + 1
             }
@@ -3877,7 +4008,7 @@ const [showFilters, setShowFilters] = useState(false)
             `PROJECT STATISTICS — ${todayStr}`,
             '',
             'OVERVIEW',
-            `  Total: ${projects.length}`,
+            `  Total: ${currentProjects.length}${archivedProjects.length > 0 ? ` (${archivedProjects.length} archived)` : ''}`,
             `  Active: ${activeProjects.length} | Review: ${reviewProjects.length} | Blocked: ${blockedProjects.length} | Done: ${doneProjects.length}`,
             `  Overdue: ${overdueProjects.length}`,
             `  Missing estimates: ${noEstimate.length} | Missing designers: ${noDesigner.length}`,
@@ -4430,6 +4561,35 @@ const [showFilters, setShowFilters] = useState(false)
               </div>
             </div>
           </div>
+
+          {/* Quarter Management */}
+          {isAdmin && (
+            <div className="settings-section settings-admin-only">
+              <div className="settings-header">
+                <h2>Quarter Management</h2>
+              </div>
+              <div className="settings-general-card">
+                <div className="settings-row">
+                  <span>Current Quarter</span>
+                  <span style={{ fontWeight: 600 }}>{getCurrentFiscalQuarter()}</span>
+                </div>
+                <div className="settings-row">
+                  <span>Done (unarchived)</span>
+                  <span>{currentProjects.filter(p => p.status === 'done').length} projects</span>
+                </div>
+                <div className="settings-row">
+                  <span>Archived</span>
+                  <span>{archivedProjects.length} projects across {Object.keys(archivedByQuarter).length} quarter{Object.keys(archivedByQuarter).length !== 1 ? 's' : ''}</span>
+                </div>
+                <div className="settings-row">
+                  <span />
+                  <button className="primary-btn" onClick={handleQuarterRollover}>
+                    Archive Done Projects
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Holidays Section (All Users) */}
           <div className="settings-section">
@@ -5394,14 +5554,14 @@ const [showFilters, setShowFilters] = useState(false)
             <div className="confirm-actions">
               <button className="secondary-btn" onClick={closeConfirmModal}>Cancel</button>
               <button
-                className="primary-btn danger-btn"
+                className={`primary-btn${confirmModal.danger !== false ? ' danger-btn' : ''}`}
                 onClick={async () => {
                   if (confirmModal.onConfirm) {
                     await confirmModal.onConfirm()
                   }
                 }}
               >
-                Delete
+                {confirmModal.confirmLabel || 'Delete'}
               </button>
             </div>
           </div>

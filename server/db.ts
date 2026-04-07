@@ -52,18 +52,24 @@ export const upsertProject = async (p: any) => {
     ? p.businessLine
     : typeof p.businessLines === 'string' ? p.businessLines
     : JSON.stringify(p.businessLines || (p.businessLine ? [p.businessLine] : []))
+  // Preserve archivedQuarter if not explicitly provided (INSERT OR REPLACE would null it)
+  let archivedQuarter = p.archivedQuarter !== undefined ? (p.archivedQuarter || null) : undefined
+  if (archivedQuarter === undefined) {
+    const existing = await get('SELECT archivedQuarter FROM projects WHERE id = ?', [p.id]) as any
+    archivedQuarter = existing?.archivedQuarter || null
+  }
   await run(
     `INSERT OR REPLACE INTO projects
      (id, name, status, dueDate, assignee, url, description, businessLine,
       deckName, deckLink, prdName, prdLink, briefName, briefLink, figmaLink,
-      customLinks, designers, startDate, endDate, timeline, estimatedHours, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      customLinks, designers, startDate, endDate, timeline, estimatedHours, archivedQuarter, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [p.id, p.name, p.status || 'active', p.dueDate || null, p.assignee || null,
      p.url || '', p.description || '', businessLineVal,
      p.deckName || '', p.deckLink || '', p.prdName || '', p.prdLink || '',
      p.briefName || '', p.briefLink || '', p.figmaLink || '',
      customLinksVal, designersVal, p.startDate || null, p.endDate || null,
-     timelineVal, p.estimatedHours || 0]
+     timelineVal, p.estimatedHours || 0, archivedQuarter]
   )
 }
 
@@ -185,6 +191,7 @@ export const initSchema = async () => {
   )`).catch(e => console.error('projects init error:', e.message))
 
   await run(`ALTER TABLE projects ADD COLUMN estimatedHours REAL DEFAULT 0`).catch(() => {})
+  await run(`ALTER TABLE projects ADD COLUMN archivedQuarter TEXT DEFAULT NULL`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS team (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT, brands TEXT,
