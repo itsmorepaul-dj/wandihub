@@ -2,7 +2,7 @@
 
 A capacity management and project tracking dashboard for Dow Jones design teams. Track projects, team workload, calendars, and weekly updates with real-time data sync.
 
-**Live URL:** https://design-command-center-production.up.railway.app
+**Live URL:** wandihub.up.railway.app/
 
 ## Features
 
