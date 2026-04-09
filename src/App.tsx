@@ -5078,8 +5078,16 @@ const [showFilters, setShowFilters] = useState(false)
               <h3>No reviews yet</h3>
               <p>Create a review to stage projects for your weekly design review.</p>
               <button className="primary-btn" style={{ marginTop: '1rem' }} onClick={() => {
-                setCreateReviewForm({ title: '', selectedProjectIds: [] })
-                setShowCreateReviewModal(true)
+                (() => {
+                  const now = new Date()
+                  const t = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+                  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7))
+                  const ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+                  const wk = Math.ceil(((t.getTime() - ys.getTime()) / 86400000 + 1) / 7)
+                  const reviewIds = currentProjects.filter(p => p.status === 'review').map(p => p.id)
+                  setCreateReviewForm({ title: `W&I Open Critique — Week ${wk}`, selectedProjectIds: reviewIds })
+                  setShowCreateReviewModal(true)
+                })()
               }}>+ New Review</button>
             </div>
           ) : editingReview ? (
@@ -5136,7 +5144,13 @@ const [showFilters, setShowFilters] = useState(false)
                       const sid = getSessionId(); window.open(`${window.location.origin}/review/${editingReview.id}${sid ? '?sid=' + sid : ''}`, '_blank')
                     }}><Globe size={13} /> Public Review Site</button>
                     <button className="primary-btn" style={{ whiteSpace: 'nowrap', flexShrink: 0 }} onClick={() => {
-                      setCreateReviewForm({ title: '', selectedProjectIds: [] })
+                      const now = new Date()
+                      const t = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+                      t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7))
+                      const ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+                      const wk = Math.ceil(((t.getTime() - ys.getTime()) / 86400000 + 1) / 7)
+                      const reviewIds = currentProjects.filter(p => p.status === 'review').map(p => p.id)
+                      setCreateReviewForm({ title: `W&I Open Critique — Week ${wk}`, selectedProjectIds: reviewIds })
                       setShowCreateReviewModal(true)
                     }}>+ New Review</button>
                   </div>
@@ -5253,17 +5267,39 @@ const [showFilters, setShowFilters] = useState(false)
       {/* Create Review Modal */}
       {showCreateReviewModal && (
         <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === overlayMouseDownTarget.current && (e.target as HTMLElement).classList.contains('modal-overlay')) setShowCreateReviewModal(false) }}>
-          <div className="modal" style={{ maxWidth: 400 }}>
+          <div className="modal" style={{ maxWidth: 520 }}>
             <div className="modal-header">
               <h2>New Review</h2>
               <button className="modal-close-btn" onClick={() => setShowCreateReviewModal(false)}>&times;</button>
             </div>
             <div className="modal-body">
-              <div className={`float-field${createReviewForm.title ? ' has-value' : ''}`}>
+              <div className={`float-field${createReviewForm.title ? ' has-value' : ''}`} style={{ marginBottom: '1rem' }}>
                 <input type="text" value={createReviewForm.title} onChange={e => setCreateReviewForm({ ...createReviewForm, title: e.target.value })}
-                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).closest('.modal')?.querySelector<HTMLButtonElement>('.primary-btn')?.click() }}
                   placeholder=" " autoFocus />
                 <label>Title</label>
+              </div>
+              <label className="review-picker-label">Projects</label>
+              <div className="review-project-picker">
+                {currentProjects
+                  .filter(p => p.status === 'active' || p.status === 'review')
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map(p => (
+                    <label key={p.id} className="review-project-option">
+                      <input type="checkbox" checked={createReviewForm.selectedProjectIds.includes(p.id)}
+                        onChange={e => {
+                          setCreateReviewForm(f => ({
+                            ...f,
+                            selectedProjectIds: e.target.checked
+                              ? [...f.selectedProjectIds, p.id]
+                              : f.selectedProjectIds.filter(id => id !== p.id)
+                          }))
+                        }} />
+                      {p.name}
+                      <span className="review-project-option-meta">
+                        {p.status === 'active' ? 'Active' : p.status === 'review' ? 'In Review' : p.status}
+                      </span>
+                    </label>
+                  ))}
               </div>
             </div>
             <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)' }}>
@@ -5273,13 +5309,25 @@ const [showFilters, setShowFilters] = useState(false)
                 disabled={!createReviewForm.title.trim()}
                 onClick={async () => {
                   try {
+                    // Set selected projects to 'review' status if not already
+                    for (const pid of createReviewForm.selectedProjectIds) {
+                      const proj = projects.find(p => p.id === pid)
+                      if (proj && proj.status !== 'review') {
+                        await saveProject({ ...proj, status: 'review' })
+                      }
+                    }
                     const res = await authFetch('/api/reviews', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ title: createReviewForm.title.trim() })
+                      body: JSON.stringify({
+                        title: createReviewForm.title.trim(),
+                        project_ids: createReviewForm.selectedProjectIds,
+                      })
                     })
                     const review = await res.json()
                     setShowCreateReviewModal(false)
+                    const data = await loadDataFromAPI()
+                    if (data) { setProjects(data.projects || []) }
                     loadReviews(review.id)
                   } catch (err) { console.error('Error creating review:', err) }
                 }}
