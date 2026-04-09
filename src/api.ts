@@ -18,6 +18,11 @@ export const authFetch = async (url: string, options: RequestInit = {}) => {
     headers['Content-Type'] = 'application/json'
   }
   const res = await fetch(url, { ...options, headers })
+  if (res.status === 401 && !url.includes('/api/auth/')) {
+    localStorage.removeItem('dcc-session-id')
+    window.location.reload()
+    throw new Error('Session expired — redirecting to login')
+  }
   if (res.status === 409) {
     const data = await res.json().catch(() => ({}))
     if (data.error === 'Version mismatch') {

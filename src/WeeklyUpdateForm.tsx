@@ -33,8 +33,8 @@ function markdownToHtml(text: string): string {
       /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
       '<a href="$2" target="_blank" rel="noopener noreferrer" class="weekly-inline-link">$1</a>'
     )
-    return html || '<br>'
-  }).join('<br>')
+    return `<div>${html || '<br>'}</div>`
+  }).join('')
 }
 
 function htmlToMarkdown(el: HTMLElement): string {

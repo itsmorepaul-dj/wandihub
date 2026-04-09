@@ -36,20 +36,24 @@ const CHANGELOG = [
 
 // Render [name](url) markdown links as clickable <a> tags in text
 function renderMarkdownLinks(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = []
-  let last = 0
-  const linkRe = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g
-  let m: RegExpExecArray | null
-  while ((m = linkRe.exec(text)) !== null) {
-    if (m.index > last) parts.push(text.slice(last, m.index))
-    parts.push(
-      <a key={m.index} href={m[2]} target="_blank" rel="noopener noreferrer" className="weekly-inline-link"
-        onClick={e => e.stopPropagation()}>{m[1]}</a>
-    )
-    last = m.index + m[0].length
+  const renderLine = (line: string, lineIdx: number) => {
+    const parts: React.ReactNode[] = []
+    let last = 0
+    const linkRe = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g
+    let m: RegExpExecArray | null
+    while ((m = linkRe.exec(line)) !== null) {
+      if (m.index > last) parts.push(line.slice(last, m.index))
+      parts.push(
+        <a key={`${lineIdx}-${m.index}`} href={m[2]} target="_blank" rel="noopener noreferrer" className="weekly-inline-link"
+          onClick={e => e.stopPropagation()}>{m[1]}</a>
+      )
+      last = m.index + m[0].length
+    }
+    if (last < line.length) parts.push(line.slice(last))
+    return parts.length > 0 ? parts : [line]
   }
-  if (last < text.length) parts.push(text.slice(last))
-  return parts.length > 0 ? <>{parts}</> : text
+  const lines = text.split('\n')
+  return <>{lines.map((line, i) => <div key={i}>{line ? renderLine(line, i) : <br />}</div>)}</>
 }
 
 // Parse Gemini note content_preview to extract structured sections
@@ -4134,7 +4138,7 @@ const [showFilters, setShowFilters] = useState(false)
                 {type === 'lowlight' && u.resolution && (
                   <div className="rr-update-resolution"><strong>Resolution:</strong> {renderMarkdownLinks(u.resolution)}</div>
                 )}
-                <div className="rr-update-author">{(u.designer_name || '').split(' ')[0]}</div>
+                <div className="rr-update-author">{proj?.designers && proj.designers.length > 0 ? proj.designers.map(d => d.split(' ')[0]).join(', ') : (u.designer_name || '').split(' ')[0]}</div>
               </div>
             )
           }
@@ -4280,7 +4284,7 @@ const [showFilters, setShowFilters] = useState(false)
                   {type === 'lowlight' && u.resolution && (
                     <div className="rr-update-resolution"><strong>Resolution:</strong> {renderMarkdownLinks(u.resolution)}</div>
                   )}
-                  <div className="rr-update-author">{(u.designer_name || '').split(' ')[0]}</div>
+                  <div className="rr-update-author">{proj?.designers && proj.designers.length > 0 ? proj.designers.map(d => d.split(' ')[0]).join(', ') : (u.designer_name || '').split(' ')[0]}</div>
                 </div>
               )
             }
