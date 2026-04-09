@@ -117,6 +117,35 @@ function parseHash(): { tab: TabId; params: URLSearchParams } {
   return { tab, params: new URLSearchParams(query || '') }
 }
 
+function CustomLinkRow({ link, onChange, onRemove }: {
+  link: { name: string; url: string }
+  onChange: (updated: { name: string; url: string }) => void
+  onRemove: () => void
+}) {
+  const [local, setLocal] = useState(link)
+  // Sync if parent changes (e.g. link added/removed shifting indices)
+  useEffect(() => { setLocal(link) }, [link.name, link.url])
+  return (
+    <div className="custom-link-row" style={{ marginBottom: '0.5rem' }}>
+      <div className={`float-field${local.name ? ' has-value' : ''}`}>
+        <input type="text" value={local.name}
+          onChange={e => setLocal(prev => ({ ...prev, name: e.target.value }))}
+          onBlur={() => onChange(local)} placeholder=" " />
+        <label>Link Name</label>
+      </div>
+      <div className={`float-field${local.url ? ' has-value' : ''}`}>
+        <input type="url" value={local.url}
+          onChange={e => setLocal(prev => ({ ...prev, url: e.target.value }))}
+          onBlur={() => onChange(local)} placeholder=" " />
+        <label>URL</label>
+      </div>
+      <button type="button" className="remove-link-btn" onClick={onRemove}>
+        <Trash2 size={14} />
+      </button>
+    </div>
+  )
+}
+
 function App() {
   // Strip unused query params from URL (everything before the hash)
   if (window.location.search) {
@@ -5731,43 +5760,20 @@ const [showFilters, setShowFilters] = useState(false)
               <div className="form-section">
                 <div className="form-section-title">Custom Links</div>
                 {projectFormData.customLinks?.map((link, idx) => (
-                  <div key={idx} className="custom-link-row" style={{ marginBottom: '0.5rem' }}>
-                    <div className={`float-field${link.name ? ' has-value' : ''}`}>
-                      <input
-                        type="text"
-                        value={link.name}
-                        onChange={e => {
-                          const newLinks = [...projectFormData.customLinks];
-                          newLinks[idx].name = e.target.value;
-                          setProjectFormData({ ...projectFormData, customLinks: newLinks });
-                        }}
-                        placeholder=" "
-                      />
-                      <label>Link Name</label>
-                    </div>
-                    <div className={`float-field${link.url ? ' has-value' : ''}`}>
-                      <input
-                        type="url"
-                        value={link.url}
-                        onChange={e => {
-                          const newLinks = [...projectFormData.customLinks];
-                          newLinks[idx].url = e.target.value;
-                          setProjectFormData({ ...projectFormData, customLinks: newLinks });
-                        }}
-                        placeholder=" "
-                      />
-                      <label>URL</label>
-                    </div>
-                    <button
-                      type="button"
-                      className="remove-link-btn"
-                      onClick={() => openConfirmModal('Remove custom link?', 'This link will be removed from the project.', () => {
-                        const newLinks = projectFormData.customLinks.filter((_, i) => i !== idx)
-                        setProjectFormData({ ...projectFormData, customLinks: newLinks })
-                        closeConfirmModal()
-                      })}
-                    ><Trash2 size={14} /></button>
-                  </div>
+                  <CustomLinkRow
+                    key={idx}
+                    link={link}
+                    onChange={updated => {
+                      const newLinks = [...projectFormData.customLinks]
+                      newLinks[idx] = updated
+                      setProjectFormData({ ...projectFormData, customLinks: newLinks })
+                    }}
+                    onRemove={() => openConfirmModal('Remove custom link?', 'This link will be removed from the project.', () => {
+                      const newLinks = projectFormData.customLinks.filter((_, i) => i !== idx)
+                      setProjectFormData({ ...projectFormData, customLinks: newLinks })
+                      closeConfirmModal()
+                    })}
+                  />
                 ))}
                 {(
                   <button

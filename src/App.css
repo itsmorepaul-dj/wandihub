@@ -5259,9 +5259,10 @@ a.report-view-btn {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.15rem;
+  gap: 0.1rem 0.15rem;
+  line-height: 1.1;
   margin-top: -0.1rem;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.8rem;
 }
 .rr-update-links a {
   font-size: 0.7rem;
