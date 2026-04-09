@@ -141,6 +141,14 @@ export default function WeeklyUpdateForm({
       if (editorRef.current.innerHTML === '<br>') {
         editorRef.current.innerHTML = ''
       }
+      // Wrap bare top-level text nodes in <div> so paragraph spacing applies consistently
+      for (const node of Array.from(editorRef.current.childNodes)) {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent) {
+          const div = document.createElement('div')
+          editorRef.current.insertBefore(div, node)
+          div.appendChild(node)
+        }
+      }
       const md = htmlToMarkdown(editorRef.current)
       setDraft(d => ({ ...d, [activeTab]: md }))
     }
