@@ -25,12 +25,12 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Visual refresh — refined color palette, layered shadows, tighter typography, smoother animations across the entire UI',
   'Project images — paste or drag images into projects, view in lightbox with captions and keyboard navigation',
   'Card redesign — designers, hours, edit & delete moved to compact meta chips in header; attached images below links',
   'Missing weekly updates warning — now always visible until all projects have entries, resets after weekly report',
   'Bug fixes — fixed stale vacation icons, "Unknown" project names in reports, duplicate button, accordion double-click',
   'Rich text editor — weekly update form now uses contentEditable with inline rendered links, no more edit/preview toggle',
-  'Improved link flow — select text, click link button, name pre-fills from selection, explicit Add Link button in popover',
 ]
 
 

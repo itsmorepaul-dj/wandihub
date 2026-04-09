@@ -1,22 +1,54 @@
-# Design Command Center
+# WandiHub (Design Command Center)
 
-A capacity management dashboard for Dow Jones design teams. Track projects, team members, and calendars with sorting, filtering, and real-time data.
+A capacity management and project tracking dashboard for Dow Jones design teams. Track projects, team workload, calendars, and weekly updates with real-time data sync.
 
 **Live URL:** https://design-command-center-production.up.railway.app
 
 ## Features
 
-- **Projects** — Track design projects with status, due dates, business lines, designers, estimated hours, and timeline
-- **Capacity Planning** — Per-designer utilization gauges, slider-based allocation, blocked project pausing, and project funding stats (projected vs estimated hours)
-- **Team** — Manage team members with roles, brands, Slack/email links, and time-off
-- **Calendar** — Visual calendar with project timelines, time off, and holidays
-- **Sorting & Filtering** — Sort projects by name, business line, designer, due date, or status with filter pills
+### Projects
+- CRUD with status (active, in review, blocked, done), due dates, business lines, designers, estimated hours, and timeline
+- Project images (upload, drag/paste, lightbox with captions)
+- Custom links (Deck, PRD, Brief, Figma)
+- Designer assignments with allocation percentages
+- Priority reordering per business line (drag-and-drop)
+- Archive/restore by quarter
+- Filter by business line, designer, or status; sort by name, business line, due date, or status
+
+### Capacity
+- Per-designer workload dashboard with utilization stats
+- Weekly hours configuration and available hours calculation (accounts for time-off)
+- Project-to-designer allocation with percentage sliders
+
+### Calendar
+- Year-long month view with project timelines, team time-off, and holidays
+- Auto-scroll to current month
+
+### Team
+- Manage members with roles, brands, Slack/email links, avatar, and time-off periods
+- Weekly hours and availability tracking
+
+### Reports
+- Weekly update form with rich text editor
+- Missing updates warnings (deadline-gated, Friday 5pm ET)
+- Project status summaries
+
+### Settings (admin)
+- Maintenance mode with lockout countdown and banner
+- User management (create, delete, role assignment)
+- Password management
+
+### Cross-cutting
+- **Authentication** — Session-based login, role-based access (admin/user)
+- **Search** — Cmd+K global search across projects, team, and business lines
+- **Real-time sync** — Server-Sent Events for maintenance and version broadcasts
+- **Activity logging** — All CRUD actions timestamped with user
 
 ## Tech Stack
 
-- **Frontend:** React 19, TypeScript, Tailwind CSS, Vite
-- **Backend:** Express, SQLite
-- **Deployment:** Railway
+- **Frontend:** React 19, TypeScript, Tailwind CSS 4, Vite 7
+- **Backend:** Express 5, SQLite
+- **Deployment:** Railway (auto-deploy on push)
 
 ## Local Development
 
@@ -73,7 +105,7 @@ Connected to GitHub → Railway auto-deploys on push. **Railway uses an ephemera
 ./scripts/maintenance.sh on            # Block designers from editing
 ./scripts/merge-railway.sh             # Merge Railway data into local (Railway wins)
 # Make local changes, test on localhost:5173
-# Bump SITE_VERSION + SITE_TIME in server.ts
+# Bump SITE_VERSION in server/version.ts
 git add . && git commit -m "..."
 DCC_DEPLOY_OK=1 ./scripts/deploy.sh    # Backup, containment check, push, upload
 ./scripts/maintenance.sh off            # Unblock designers
@@ -98,11 +130,13 @@ Railway uses ephemeral filesystem — every code push destroys the DB. These saf
 | `scripts/deploy.sh` | Push code + DB to Railway (with containment check) |
 | `scripts/deploy.sh --data` | Upload DB only (no code push) |
 | `scripts/pull-from-railway.sh` | Full replace local DB with Railway (not merge) |
+| `scripts/backup-railway.sh` | Download Railway DB backup |
 | `scripts/maintenance.sh` | Toggle maintenance mode (`on`/`off`/`status`) |
+| `scripts/rebuild-note-links.sh` | Rebuild note link associations in DB |
 
 ### Git hook enforcement
 
-Pre-push hook blocks pushes if `SITE_VERSION`/`SITE_TIME` in `server.ts` are unchanged vs `origin/main`.
+Pre-push hook blocks pushes if `SITE_VERSION` in `server/version.ts` is unchanged vs `origin/main`.
 
 - Hook path: `.githooks/pre-push`
 - Enabled via: `git config core.hooksPath .githooks`
