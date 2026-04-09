@@ -325,6 +325,17 @@ export default function WeeklyUpdateForm({
               onKeyUp={saveSelection}
               data-placeholder={PLACEHOLDERS[activeTab]}
             />
+            <div className="weekly-resize-handle" onMouseDown={(e) => {
+              e.preventDefault()
+              const editor = editorRef.current
+              if (!editor) return
+              const startY = e.clientY
+              const startH = editor.offsetHeight
+              const onMove = (ev: MouseEvent) => { editor.style.height = Math.max(80, startH + ev.clientY - startY) + 'px' }
+              const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+              document.addEventListener('mousemove', onMove)
+              document.addEventListener('mouseup', onUp)
+            }} />
             {activeTab === 'lowlight' && draft.lowlight.trim() && (
               <div className="weekly-lowlight-extras">
                 <div className="weekly-field">

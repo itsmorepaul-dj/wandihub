@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
-import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy } from 'lucide-react'
+import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, ExternalLink, Plus, X, Globe } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
@@ -21,6 +21,8 @@ import WeeklyUpdateForm from './WeeklyUpdateForm'
 import ImageLightbox from './ImageLightbox'
 import { defaultHolidays, getTodayStr, getDjFiscalLabel, DAY_MS, parseLocalDate, formatShortDate, formatFullDate, calcRangeHours, getClosestTimeOff, formatDateRange, formatMonthDay, formatMonthDayFromDate, getTodayFormatted, formatVersionDisplay } from './utils'
 import { authFetch, setClientVersion, getClientVersion, defaultBrandOptions, loadDataFromAPI } from './api'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgressDropZone, DoneDropZone } from './components/Sortable'
 
 // Recent updates shown on login screen
@@ -108,7 +110,7 @@ function highlightTextWithLinks(
   })
 }
 
-const VALID_TABS = ['projects', 'team', 'calendar', 'capacity', 'reports', 'settings'] as const
+const VALID_TABS = ['projects', 'team', 'calendar', 'capacity', 'reports', 'reviews', 'settings'] as const
 
 function parseHash(): { tab: TabId; params: URLSearchParams } {
   const hash = window.location.hash.replace(/^#\/?/, '')
@@ -143,6 +145,73 @@ function CustomLinkRow({ link, onChange, onRemove }: {
         <Trash2 size={14} />
       </button>
     </div>
+  )
+}
+
+const REVIEW_STATUS_MAP: Record<string, { label: string; color: string }> = {
+  active: { label: 'Active', color: '#3b82f6' },
+  review: { label: 'In Review', color: '#f59e0b' },
+  done: { label: 'Done', color: '#22c55e' },
+  blocked: { label: 'Blocked', color: '#ef4444' },
+}
+
+function ReviewItemRow({ item, index, project, onRemove }: {
+  item: any
+  index: number
+  project: any
+  onRemove: () => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
+
+  const designers = project?.designers?.map((d: string) => d.split(' ')[0]).join(', ') || ''
+  const statusInfo = REVIEW_STATUS_MAP[project?.status] || { label: project?.status || '—', color: '#6b7280' }
+  const businessLines: string[] = project?.businessLines || (project?.businessLine ? (() => { try { return JSON.parse(project.businessLine) } catch { return [project.businessLine] } })() : [])
+
+  const links: { label: string; url: string }[] = []
+  if (project?.deckLink) links.push({ label: project.deckName || 'Deck', url: project.deckLink })
+  if (project?.prdLink) links.push({ label: project.prdName || 'PRD', url: project.prdLink })
+  if (project?.briefLink) links.push({ label: project.briefName || 'Brief', url: project.briefLink })
+  if (project?.figmaLink) links.push({ label: 'Figma', url: project.figmaLink })
+  if (project?.url) links.push({ label: 'JIRA', url: project.url })
+  if (project?.customLinks) {
+    for (const cl of project.customLinks) {
+      if (cl.url) links.push({ label: cl.name || 'Link', url: cl.url })
+    }
+  }
+
+  return (
+    <tr ref={setNodeRef} style={style}>
+      <td>
+        <button type="button" className="action-btn drag-handle" {...attributes} {...listeners} tabIndex={-1}>
+          <GripVertical size={14} />
+        </button>
+      </td>
+      <td className="review-rank">{index + 1}</td>
+      <td>
+        <div className="review-item-project">
+          <span className="review-item-name">{project?.name || 'Unknown'}</span>
+          <span className="review-item-meta">
+            <span className="review-status-pill" style={{ background: statusInfo.color }}>{statusInfo.label}</span>
+            {designers && <span className="review-item-designers">{designers}</span>}
+            {businessLines.length > 0 && <span className="review-item-bl">{businessLines.join(', ')}</span>}
+          </span>
+        </div>
+      </td>
+      <td className="review-item-links">
+        {links.length > 0 ? links.map((l, i) => (
+          <span key={i}>
+            <a href={l.url} target="_blank" rel="noopener noreferrer">{l.label}</a>
+            {i < links.length - 1 && <span className="review-link-sep">·</span>}
+          </span>
+        )) : <span style={{ color: 'var(--color-text-dim)' }}>—</span>}
+      </td>
+      <td>
+        <button className="action-btn delete" onClick={onRemove} title="Remove from review">
+          <Trash2 size={14} />
+        </button>
+      </td>
+    </tr>
   )
 }
 
@@ -201,6 +270,14 @@ function App() {
   const [allProjectImages, setAllProjectImages] = useState<ProjectImage[]>([])
   const [uploadingImage, setUploadingImage] = useState(false)
   const [lightbox, setLightbox] = useState<{ images: ProjectImage[]; index: number } | null>(null)
+
+  // Reviews state
+  const [reviews, setReviews] = useState<{ id: string; title: string; week: string | null; created_by: string | null; created_at: string; updated_at: string; itemCount: number }[]>([])
+  const [editingReview, setEditingReview] = useState<any>(null)
+  const [showCreateReviewModal, setShowCreateReviewModal] = useState(false)
+  const [createReviewForm, setCreateReviewForm] = useState({ title: '', selectedProjectIds: [] as string[] })
+  const [reviewCopied, setReviewCopied] = useState(false)
+  const [showDeleteReviewModal, setShowDeleteReviewModal] = useState(false)
 
   // Timeline editing state
   const [showTimelineModal, setShowTimelineModal] = useState(false)
@@ -937,6 +1014,35 @@ const [showFilters, setShowFilters] = useState(false)
       loadCapacity()
     }
   }, [activeTab])
+
+  // Load reviews when reviews tab is active
+  const loadReviews = async (selectId?: string) => {
+    try {
+      const res = await authFetch('/api/reviews')
+      const data = await res.json()
+      setReviews(data)
+      // Auto-select: specified id, or current, or most recent
+      const targetId = selectId || editingReview?.id || data[0]?.id
+      if (targetId && data.some((r: any) => r.id === targetId)) {
+        loadReviewDetail(targetId)
+      } else if (data.length > 0) {
+        loadReviewDetail(data[0].id)
+      } else {
+        setEditingReview(null)
+      }
+    } catch (err) { console.error('Error loading reviews:', err) }
+  }
+  useEffect(() => {
+    if (activeTab === 'reviews') loadReviews()
+  }, [activeTab])
+
+  const loadReviewDetail = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/reviews/${id}`)
+      const data = await res.json()
+      setEditingReview(data)
+    } catch (err) { console.error('Error loading review:', err) }
+  }
 
   // Notes are loaded on-demand by settings/hidden-notes, not on tab switch
 
@@ -2197,6 +2303,15 @@ const [showFilters, setShowFilters] = useState(false)
             <span className="nav-label">Reports</span>
             <span className="nav-badge-beta">beta</span>
           </button>
+          <button
+            className={`nav-item ${activeTab === 'reviews' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('reviews') }}
+            aria-label="Reviews"
+          >
+            <span className="nav-icon"><ListChecks size={18} /></span>
+            <span className="nav-label">Reviews</span>
+            <span className="nav-badge-beta">beta</span>
+          </button>
         </nav>
 
         <div className="sidebar-footer">
@@ -2225,6 +2340,7 @@ const [showFilters, setShowFilters] = useState(false)
               {activeTab === 'calendar' && 'Calendar'}
               {activeTab === 'capacity' && 'Capacity'}
               {activeTab === 'reports' && 'Reports'}
+              {activeTab === 'reviews' && 'Reviews'}
               {activeTab === 'settings' && 'Settings'}
             </h1>
             <p className="date">{getTodayFormatted()}</p>
@@ -2758,6 +2874,40 @@ const [showFilters, setShowFilters] = useState(false)
                               </div>
                             )
                           })()}
+                        <div className="project-card-footer">
+                          <div className="project-links-footer">
+                            {project.deckLink && (
+                              <a href={project.deckLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
+                                <Presentation size={12} />
+                                <span>{project.deckName || 'Design Deck'}</span>
+                              </a>
+                            )}
+                            {project.prdLink && (
+                              <a href={project.prdLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
+                                <FileText size={12} />
+                                <span>{project.prdName || 'PRD'}</span>
+                              </a>
+                            )}
+                            {project.briefLink && (
+                              <a href={project.briefLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
+                                <FileEdit size={12} />
+                                <span>{project.briefName || 'Design Brief'}</span>
+                              </a>
+                            )}
+                            {project.figmaLink && (
+                              <a href={project.figmaLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
+                                <Figma size={12} />
+                                <span>Figma</span>
+                              </a>
+                            )}
+                            {project.customLinks?.map((link: any, idx: number) => (
+                              <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="project-footer-link">
+                                <LinkIcon size={12} />
+                                <span>{link.name}</span>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
                         {/* Weekly Update Inline */}
                         {project.status !== 'done' && currentWeek && (() => {
                           const projectUpdates = weeklyUpdates.filter(u => u.project_id === project.id)
@@ -2798,41 +2948,6 @@ const [showFilters, setShowFilters] = useState(false)
                             />
                           )
                         })()}
-
-                        <div className="project-card-footer">
-                          <div className="project-links-footer">
-                            {project.deckLink && (
-                              <a href={project.deckLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <Presentation size={12} />
-                                <span>{project.deckName || 'Design Deck'}</span>
-                              </a>
-                            )}
-                            {project.prdLink && (
-                              <a href={project.prdLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <FileText size={12} />
-                                <span>{project.prdName || 'PRD'}</span>
-                              </a>
-                            )}
-                            {project.briefLink && (
-                              <a href={project.briefLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <FileEdit size={12} />
-                                <span>{project.briefName || 'Design Brief'}</span>
-                              </a>
-                            )}
-                            {project.figmaLink && (
-                              <a href={project.figmaLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <Figma size={12} />
-                                <span>Figma</span>
-                              </a>
-                            )}
-                            {project.customLinks?.map((link: any, idx: number) => (
-                              <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <LinkIcon size={12} />
-                                <span>{link.name}</span>
-                              </a>
-                            ))}
-                          </div>
-                        </div>
                         {(() => {
                           const imgs = allProjectImages.filter(i => i.project_id === project.id)
                           if (imgs.length === 0) return null
@@ -4964,6 +5079,251 @@ const [showFilters, setShowFilters] = useState(false)
                 }
               }}>Save Changes</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reviews View */}
+      {activeTab === 'reviews' && (
+        <div className="reviews-page">
+          {reviews.length === 0 && !editingReview ? (
+            <div className="reviews-empty">
+              <ListChecks size={40} strokeWidth={1.5} />
+              <h3>No reviews yet</h3>
+              <p>Create a review to stage projects for your weekly design review.</p>
+              <button className="primary-btn" style={{ marginTop: '1rem' }} onClick={() => {
+                setCreateReviewForm({ title: '', selectedProjectIds: [] })
+                setShowCreateReviewModal(true)
+              }}>+ New Review</button>
+            </div>
+          ) : editingReview ? (
+            <div className="review-edit">
+              <div className="review-edit-header">
+                {/* Row 1: Review selector */}
+                <div className="review-nav-top">
+                  <select className="review-nav-select" value={editingReview.id} onChange={e => loadReviewDetail(e.target.value)}>
+                    {(() => {
+                      const getWeek = (d: Date) => {
+                        const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+                        t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7))
+                        const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+                        return Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+                      }
+                      const groups: Record<string, typeof reviews> = {}
+                      for (const r of reviews) {
+                        const d = new Date(r.created_at + 'Z')
+                        const key = d.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+                        if (!groups[key]) groups[key] = []
+                        groups[key].push(r)
+                      }
+                      return Object.entries(groups).map(([label, items]) => (
+                        <optgroup key={label} label={label}>
+                          {items.map(r => {
+                            const d = new Date(r.created_at + 'Z')
+                            const wk = getWeek(d)
+                            const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            return <option key={r.id} value={r.id}>Week {wk} — {day}</option>
+                          })}
+                        </optgroup>
+                      ))
+                    })()}
+                  </select>
+                </div>
+
+                {/* Row 2: Title + primary actions */}
+                <div className="review-nav">
+                  <input
+                    className="review-title-input"
+                    value={editingReview.title || ''}
+                    onChange={e => setEditingReview({ ...editingReview, title: e.target.value })}
+                    onBlur={async () => {
+                      await authFetch(`/api/reviews/${editingReview.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title: editingReview.title })
+                      })
+                    }}
+                    placeholder="Review title"
+                  />
+                  <div className="review-nav-actions">
+                    <button className="secondary-btn" style={{ whiteSpace: 'nowrap', flexShrink: 0 }} onClick={() => {
+                      const sid = getSessionId(); window.open(`${window.location.origin}/review/${editingReview.id}${sid ? '?sid=' + sid : ''}`, '_blank')
+                    }}><Globe size={13} /> Public Review Site</button>
+                    <button className="primary-btn" style={{ whiteSpace: 'nowrap', flexShrink: 0 }} onClick={() => {
+                      setCreateReviewForm({ title: '', selectedProjectIds: [] })
+                      setShowCreateReviewModal(true)
+                    }}>+ New Review</button>
+                  </div>
+                </div>
+
+                {/* Row 3: Meta + actions inline */}
+                <div className="review-edit-meta-row">
+                  <span className="review-edit-meta">
+                    {editingReview.items?.length || 0} project{(editingReview.items?.length || 0) !== 1 ? 's' : ''} · {new Date(editingReview.created_at + 'Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                  <span className="project-meta-chip project-meta-action" style={{ opacity: 1 }} onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/review/${editingReview.id}`)
+                    setReviewCopied(true)
+                    setTimeout(() => setReviewCopied(false), 2000)
+                  }}>
+                    <Copy size={11} /> {reviewCopied ? 'Copied!' : 'Copy Link'}
+                  </span>
+                  <span className="project-meta-chip project-meta-action project-meta-action-delete" style={{ opacity: 1 }} onClick={() => setShowDeleteReviewModal(true)}>
+                    <Trash2 size={11} /> Delete
+                  </span>
+                </div>
+              </div>
+
+              {/* Add project picker */}
+              <div className="review-add-project">
+                <select
+                  className="review-project-select"
+                  value=""
+                  onChange={async (e) => {
+                    const projectId = e.target.value
+                    if (!projectId) return
+                    await authFetch(`/api/reviews/${editingReview.id}/items`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ project_id: projectId })
+                    })
+                    loadReviewDetail(editingReview.id)
+                  }}
+                >
+                  <option value="">Add a project...</option>
+                  {currentProjects
+                    .filter(p => !editingReview.items?.some((ri: any) => ri.project_id === p.id))
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Review items table */}
+              {editingReview.items && editingReview.items.length > 0 ? (
+                <DndContext
+                  sensors={prioritySensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={async (e: DragEndEvent) => {
+                    const { active, over } = e
+                    if (!over || active.id === over.id) return
+                    const items = editingReview.items as any[]
+                    const oldIndex = items.findIndex((i: any) => i.id === active.id)
+                    const newIndex = items.findIndex((i: any) => i.id === over.id)
+                    if (oldIndex === -1 || newIndex === -1) return
+                    const reordered = arrayMove(items, oldIndex, newIndex)
+                    setEditingReview({ ...editingReview, items: reordered })
+                    await authFetch(`/api/reviews/${editingReview.id}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ item_order: reordered.map((i: any) => i.id) })
+                    })
+                  }}
+                >
+                  <SortableContext items={(editingReview.items as any[]).map((i: any) => i.id)} strategy={verticalListSortingStrategy}>
+                    <table className="review-items-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: 36 }}></th>
+                          <th style={{ width: 36 }}>#</th>
+                          <th>Project</th>
+                          <th>Links</th>
+                          <th style={{ width: 40 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(editingReview.items as any[]).map((item: any, idx: number) => {
+                          const proj = projects.find(p => p.id === item.project_id)
+                          return (
+                            <ReviewItemRow
+                              key={item.id}
+                              item={item}
+                              index={idx}
+                              project={proj || null}
+                              onRemove={async () => {
+                                await authFetch(`/api/review-items/${item.id}`, { method: 'DELETE' })
+                                loadReviewDetail(editingReview.id)
+                              }}
+                            />
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </SortableContext>
+                </DndContext>
+              ) : (
+                <div className="reviews-empty" style={{ padding: '2rem' }}>
+                  <p>No projects added yet. Use the dropdown above to add projects.</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="reviews-empty"><Loader size={24} className="spin" /></div>
+          )}
+        </div>
+      )}
+
+      {/* Create Review Modal */}
+      {showCreateReviewModal && (
+        <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === overlayMouseDownTarget.current && (e.target as HTMLElement).classList.contains('modal-overlay')) setShowCreateReviewModal(false) }}>
+          <div className="modal" style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h2>New Review</h2>
+              <button className="modal-close-btn" onClick={() => setShowCreateReviewModal(false)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className={`float-field${createReviewForm.title ? ' has-value' : ''}`}>
+                <input type="text" value={createReviewForm.title} onChange={e => setCreateReviewForm({ ...createReviewForm, title: e.target.value })}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).closest('.modal')?.querySelector<HTMLButtonElement>('.primary-btn')?.click() }}
+                  placeholder=" " autoFocus />
+                <label>Title</label>
+              </div>
+            </div>
+            <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)' }}>
+              <button className="secondary-btn" onClick={() => setShowCreateReviewModal(false)}>Cancel</button>
+              <button
+                className="primary-btn"
+                disabled={!createReviewForm.title.trim()}
+                onClick={async () => {
+                  try {
+                    const res = await authFetch('/api/reviews', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ title: createReviewForm.title.trim() })
+                    })
+                    const review = await res.json()
+                    setShowCreateReviewModal(false)
+                    loadReviews(review.id)
+                  } catch (err) { console.error('Error creating review:', err) }
+                }}
+              >
+                Create Review
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteReviewModal && editingReview && (
+        <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setShowDeleteReviewModal(false) }}>
+          <div className="modal" style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h2>Delete Review</h2>
+              <button className="modal-close-btn" onClick={() => setShowDeleteReviewModal(false)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p>Are you sure you want to delete <strong>{editingReview.title}</strong>? This cannot be undone.</p>
+            </div>
+            <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)' }}>
+              <button className="secondary-btn" onClick={() => setShowDeleteReviewModal(false)}>Cancel</button>
+              <button className="danger-btn" onClick={async () => {
+                await authFetch(`/api/reviews/${editingReview.id}`, { method: 'DELETE' })
+                setShowDeleteReviewModal(false)
+                setEditingReview(null)
+                loadReviews()
+              }}>Delete</button>
             </div>
           </div>
         </div>
