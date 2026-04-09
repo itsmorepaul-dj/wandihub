@@ -1693,10 +1693,34 @@
   opacity: 0.8;
 }
 
-/* Project Name (unlinked) */
+/* Project Name */
 .project-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   font-weight: 500;
   color: var(--color-text-muted);
+}
+
+.project-jira-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--color-accent);
+  background: var(--color-accent-subtle);
+  border-radius: var(--radius-xs);
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.project-jira-badge:hover {
+  background: var(--color-accent);
+  color: #fff;
 }
 
 /* Project Link Icons */

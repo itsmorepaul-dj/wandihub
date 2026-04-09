@@ -2639,11 +2639,7 @@ const [showFilters, setShowFilters] = useState(false)
                           <div className="project-info-top">
                             <span className="project-name-cell">
                               {isOverdue && <span className="overdue-label">Overdue</span>}
-                              {project.url ? (
-                                <a href={project.url} target="_blank" rel="noopener noreferrer" className="project-name-link"><LinkIcon size={14} className="project-name-link-icon" />{project.name}</a>
-                              ) : (
-                                <span className="project-name">{project.name}</span>
-                              )}
+                              <span className="project-name">{project.name}{project.url && <a href={project.url} target="_blank" rel="noopener noreferrer" className="project-jira-badge" onClick={e => e.stopPropagation()}>JIRA</a>}</span>
                             </span>
                             <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444' }[project.status as string] }}>
                               <span className={`status-badge-dot ${getStatusColor(project.status)}`}></span>
@@ -2677,6 +2673,14 @@ const [showFilters, setShowFilters] = useState(false)
                               </span>
                             ) : null}
                             <span className="project-meta-spacer" />
+                            <span className="project-meta-chip project-meta-action" onClick={() => {
+                              const url = `${window.location.origin}${window.location.pathname}#/projects?project=${encodeURIComponent(project.name)}`
+                              navigator.clipboard.writeText(url)
+                              setCopiedReport(Date.now())
+                              setTimeout(() => setCopiedReport(null), 2000)
+                            }}>
+                              <LinkIcon size={11} /> Copy Link
+                            </span>
                             <span className="project-meta-chip project-meta-action" onClick={() => handleEditProject(project)}>
                               <Pencil size={11} /> Edit
                             </span>
