@@ -304,6 +304,18 @@ export const initSchema = async () => {
   // Migration: add caption column if missing
   await run(`ALTER TABLE project_images ADD COLUMN caption TEXT DEFAULT ''`).catch(() => {})
 
+  await run(`CREATE TABLE IF NOT EXISTS reviews (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'Design Review',
+    week TEXT, created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+  )`).catch(e => console.error('reviews init error:', e.message))
+
+  await run(`CREATE TABLE IF NOT EXISTS review_items (
+    id TEXT PRIMARY KEY, review_id TEXT NOT NULL, project_id TEXT NOT NULL,
+    rank INTEGER NOT NULL DEFAULT 0, notes TEXT DEFAULT '',
+    notes_updated_by TEXT DEFAULT '', notes_updated_at TEXT DEFAULT ''
+  )`).catch(e => console.error('review_items init error:', e.message))
+
   // Seed default business lines if empty
   const existing = await get('SELECT COUNT(*) as count FROM business_lines')
   if (existing?.count === 0) {

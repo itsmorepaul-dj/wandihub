@@ -27,11 +27,10 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Review agenda — create, navigate, and share public review pages with project status, designers, links, notes, and Gantt timelines',
   'Visual refresh — refined color palette, layered shadows, tighter typography, smoother animations across the entire UI',
   'Project images — paste or drag images into projects, view in lightbox with captions and keyboard navigation',
   'Card redesign — designers, hours, edit & delete moved to compact meta chips in header; attached images below links',
-  'Missing weekly updates warning — now always visible until all projects have entries, resets after weekly report',
-  'Bug fixes — fixed stale vacation icons, "Unknown" project names in reports, duplicate button, accordion double-click',
   'Rich text editor — weekly update form now uses contentEditable with inline rendered links, no more edit/preview toggle',
 ]
 
@@ -2876,36 +2875,22 @@ const [showFilters, setShowFilters] = useState(false)
                           })()}
                         <div className="project-card-footer">
                           <div className="project-links-footer">
-                            {project.deckLink && (
-                              <a href={project.deckLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <Presentation size={12} />
-                                <span>{project.deckName || 'Design Deck'}</span>
-                              </a>
-                            )}
-                            {project.prdLink && (
-                              <a href={project.prdLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <FileText size={12} />
-                                <span>{project.prdName || 'PRD'}</span>
-                              </a>
-                            )}
-                            {project.briefLink && (
-                              <a href={project.briefLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <FileEdit size={12} />
-                                <span>{project.briefName || 'Design Brief'}</span>
-                              </a>
-                            )}
-                            {project.figmaLink && (
-                              <a href={project.figmaLink} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <Figma size={12} />
-                                <span>Figma</span>
-                              </a>
-                            )}
-                            {project.customLinks?.map((link: any, idx: number) => (
-                              <a key={idx} href={link.url} target="_blank" rel="noopener noreferrer" className="project-footer-link">
-                                <LinkIcon size={12} />
-                                <span>{link.name}</span>
-                              </a>
-                            ))}
+                            {(() => {
+                              const footerLinks: React.ReactNode[] = []
+                              if (project.deckLink) footerLinks.push(<a key="deck" href={project.deckLink} target="_blank" rel="noopener noreferrer" className="project-footer-link"><Presentation size={12} /><span>{project.deckName || 'Design Deck'}</span></a>)
+                              if (project.prdLink) footerLinks.push(<a key="prd" href={project.prdLink} target="_blank" rel="noopener noreferrer" className="project-footer-link"><FileText size={12} /><span>{project.prdName || 'PRD'}</span></a>)
+                              if (project.briefLink) footerLinks.push(<a key="brief" href={project.briefLink} target="_blank" rel="noopener noreferrer" className="project-footer-link"><FileEdit size={12} /><span>{project.briefName || 'Design Brief'}</span></a>)
+                              if (project.figmaLink) footerLinks.push(<a key="figma" href={project.figmaLink} target="_blank" rel="noopener noreferrer" className="project-footer-link"><Figma size={12} /><span>Figma</span></a>)
+                              if (project.customLinks) project.customLinks.forEach((link: any, idx: number) => {
+                                footerLinks.push(<a key={`cl-${idx}`} href={link.url} target="_blank" rel="noopener noreferrer" className="project-footer-link"><LinkIcon size={12} /><span>{link.name}</span></a>)
+                              })
+                              return footerLinks.map((node, i) => (
+                                <span key={i} className="project-footer-link-wrap">
+                                  {i > 0 && <span className="project-link-sep">·</span>}
+                                  {node}
+                                </span>
+                              ))
+                            })()}
                           </div>
                         </div>
                         {/* Weekly Update Inline */}

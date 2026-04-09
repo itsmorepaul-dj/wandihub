@@ -257,7 +257,7 @@ function renderLinks(item: any): string {
       if (cl.url) links.push(`<a href="${escHtml(cl.url)}" target="_blank" rel="noopener">${svgLink}<span>${escHtml(cl.name || 'Link')}</span></a>`)
     }
   }
-  return links.join('')
+  return links.join('<span class="card-link-sep">·</span>')
 }
 
 function markdownToHtml(text: string): string {
@@ -830,9 +830,12 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       font-size: 0.65rem; font-weight: 500; color: #fff; letter-spacing: 0.01em;
     }
     .card-designers { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
-    .designer-badge { background: var(--rv-bg-tertiary); color: var(--rv-text-secondary); }
-    a.designer-badge { text-decoration: none; transition: background 0.15s; }
-    a.designer-badge:hover { background: var(--rv-hover); }
+    .designer-badge {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      background: var(--rv-bg-tertiary); color: var(--rv-text-secondary);
+    }
+    a.designer-badge { text-decoration: none; transition: background 0.15s, color 0.15s; cursor: pointer; }
+    a.designer-badge:hover { background: var(--rv-accent); color: #fff; }
 
     /* Gantt — mirrors project page exactly */
     .project-gantt {
@@ -933,15 +936,16 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
 
     /* Links section */
     .card-links {
-      display: flex; flex-wrap: wrap; gap: 0.25rem 0.6rem; padding: 0.6rem 1.25rem;
+      display: flex; flex-wrap: wrap; gap: 0.15rem 0; padding: 0.6rem 1.25rem;
       border-top: 1px solid var(--rv-border-subtle); align-items: center;
     }
     .card-links a {
-      display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.7rem;
+      display: inline-flex; align-items: center; gap: 0.14rem; font-size: 0.7rem;
       color: var(--rv-text-muted); text-decoration: none; transition: color 0.15s;
     }
     .card-links a:hover { color: var(--rv-accent); }
     .card-links a:hover span { text-decoration: underline; }
+    .card-link-sep { color: var(--rv-text-dim); font-size: 0.6rem; margin: 0 0.4rem; }
 
     /* Notes accordion */
     .card-notes { border-top: 1px solid var(--rv-border-subtle); }
@@ -1009,7 +1013,7 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
 
     /* ContentEditable editor */
     .notes-editor {
-      width: 100%; min-height: 100px; padding: 0.5rem 0.6rem; font-size: 0.8rem;
+      width: 100%; min-height: 300px; padding: 0.5rem 0.6rem; font-size: 0.8rem;
       font-family: inherit; line-height: 1.5;
       background: var(--rv-bg); border: 1px solid var(--rv-border); border-radius: 6px;
       color: var(--rv-text); outline: none; overflow-y: auto;

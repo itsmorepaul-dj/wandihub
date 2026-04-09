@@ -174,4 +174,4 @@ export interface ProjectImage {
   created_at: string
 }
 
-export type TabId = 'projects' | 'team' | 'calendar' | 'capacity' | 'reports' | 'settings'
+export type TabId = 'projects' | 'team' | 'calendar' | 'capacity' | 'reports' | 'reviews' | 'settings'
