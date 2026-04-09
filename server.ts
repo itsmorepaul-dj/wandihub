@@ -16,7 +16,7 @@ import dataRouter from './server/routes/data.js';
 import adminRouter from './server/routes/admin.js';
 import weeklyRouter, { startWeeklyCron } from './server/routes/weekly.js';
 import imagesRouter from './server/routes/images.js';
-import reviewRouter from './server/routes/review.js';
+import reviewRouter, { startReviewCron } from './server/routes/review.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -108,5 +108,6 @@ startup().then(() => {
     console.log(`API server running on http://localhost:${PORT}`);
     console.log(`Production mode: ${isProduction}`);
     startWeeklyCron();
+    startReviewCron();
   });
 });

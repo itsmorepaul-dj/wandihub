@@ -116,13 +116,27 @@ router.delete('/api/review-items/:id', async (req, res) => {
 
 router.put('/api/review-items/:id/notes', async (req, res) => {
   try {
-    const { notes } = req.body
+    const { notes, expected_updated_at } = req.body
     const email = getUserEmail(req)
+
+    // Optimistic locking: reject if someone else saved since we last loaded
+    if (expected_updated_at) {
+      const current = await get('SELECT notes_updated_at, notes_updated_by FROM review_items WHERE id = ?', [req.params.id]) as any
+      if (current?.notes_updated_at && current.notes_updated_at > expected_updated_at && current.notes_updated_by !== email) {
+        return res.status(409).json({
+          error: 'conflict',
+          updated_by: current.notes_updated_by,
+          updated_at: current.notes_updated_at,
+        })
+      }
+    }
+
     await run(
       'UPDATE review_items SET notes = ?, notes_updated_by = ?, notes_updated_at = datetime(\'now\') WHERE id = ?',
       [notes || '', email || 'anonymous', req.params.id]
     )
-    res.json({ ok: true })
+    const updated = await get('SELECT notes_updated_at FROM review_items WHERE id = ?', [req.params.id]) as any
+    res.json({ ok: true, notes_updated_at: updated?.notes_updated_at || null })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -405,7 +419,7 @@ router.get('/review/:id', async (req, res) => {
               </div>
               ${quickLinks.length > 0 ? `<div class="notes-quick-links">${quickLinks.join('')}</div>` : ''}
             </div>
-            <div class="notes-editor" contenteditable="true" data-item-id="${escHtml(item.id)}" data-placeholder="Add review notes...">${markdownToHtml(item.notes || '')}</div>
+            <div class="notes-editor" contenteditable="true" data-item-id="${escHtml(item.id)}" data-updated-at="${escHtml(item.notes_updated_at || '')}" data-placeholder="Add review notes...">${markdownToHtml(item.notes || '')}</div>
             <div class="notes-resize-handle" title="Drag to resize"></div>
           </div>
         </div>`
@@ -481,7 +495,20 @@ router.get('/review/:id', async (req, res) => {
         return r;
       }
 
-      // Auto-save with debounce
+      // Conflict toast
+      var conflictToast = document.createElement('div');
+      conflictToast.className = 'conflict-toast';
+      conflictToast.style.display = 'none';
+      document.body.appendChild(conflictToast);
+      var conflictTimer;
+      function showConflict(msg) {
+        conflictToast.textContent = msg;
+        conflictToast.style.display = 'block';
+        clearTimeout(conflictTimer);
+        conflictTimer = setTimeout(function() { conflictToast.style.display = 'none'; }, 6000);
+      }
+
+      // Auto-save with debounce + optimistic locking
       var sessionId = '${escHtml(sessionId)}';
       document.querySelectorAll('.notes-editor').forEach(function(editor) {
         var timer;
@@ -502,10 +529,24 @@ router.get('/review/:id', async (req, res) => {
             fetch('/api/review-items/' + editor.dataset.itemId + '/notes', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
-              body: JSON.stringify({ notes: md })
+              body: JSON.stringify({ notes: md, expected_updated_at: editor.dataset.updatedAt || '' })
             }).then(function(r) {
-              if (!r.ok) editor.classList.add('save-error');
-              else { editor.classList.remove('save-error'); editor.classList.add('save-ok'); setTimeout(function(){ editor.classList.remove('save-ok') }, 1500); }
+              if (r.status === 409) {
+                r.json().then(function(data) {
+                  var who = (data.updated_by || 'someone').split('@')[0];
+                  showConflict('This note was just edited by ' + who + ' — reload to see their changes');
+                  editor.classList.add('save-error');
+                });
+              } else if (!r.ok) {
+                editor.classList.add('save-error');
+              } else {
+                r.json().then(function(data) {
+                  if (data.notes_updated_at) editor.dataset.updatedAt = data.notes_updated_at;
+                });
+                editor.classList.remove('save-error');
+                editor.classList.add('save-ok');
+                setTimeout(function(){ editor.classList.remove('save-ok') }, 1500);
+              }
             }).catch(function() { editor.classList.add('save-error'); });
           }, 800);
         });
@@ -1026,6 +1067,16 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     }
     .notes-editor.save-error { border-color: var(--rv-danger); }
     .notes-editor.save-ok { border-color: var(--rv-success); }
+    .conflict-toast {
+      position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+      background: var(--rv-danger); color: #fff;
+      padding: 0.6rem 1.2rem; border-radius: 8px;
+      font-size: 0.8rem; font-weight: 500;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 9999; max-width: 90vw; text-align: center;
+      animation: toast-in 0.25s ease;
+    }
+    @keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
     .notes-editor div + div { margin-top: 1.0em; min-height: 1.5em; }
     .notes-editor:empty::before {
       content: attr(data-placeholder); color: var(--rv-text-dim);
@@ -1124,6 +1175,215 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
   </script>
 </body>
 </html>`
+}
+
+// ============ REVIEW SNAPSHOT GENERATION ============
+
+const getISOWeekStr = (d: Date = new Date()) => {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7))
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1))
+  const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`
+}
+
+const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked' }
+
+const generateReviewSnapshot = async (week: string) => {
+  // Get the most recent review
+  const latestReview = await get('SELECT * FROM reviews ORDER BY created_at DESC LIMIT 1') as any
+  if (!latestReview) {
+    console.log('Review snapshot skipped: no reviews exist')
+    return null
+  }
+
+  // Get review items with project data
+  const items = await all(
+    `SELECT ri.*, p.name as project_name, p.status, p.designers, p.businessLine,
+            p.startDate, p.endDate, p.estimatedHours,
+            p.deckName, p.deckLink, p.prdName, p.prdLink, p.briefName, p.briefLink,
+            p.figmaLink, p.customLinks
+     FROM review_items ri
+     LEFT JOIN projects p ON ri.project_id = p.id
+     WHERE ri.review_id = ?
+     ORDER BY ri.rank ASC`, [latestReview.id]
+  )
+
+  // Get all active projects
+  const activeProjects = await all(
+    `SELECT id, name, status, designers, businessLine, startDate, endDate, estimatedHours,
+            deckName, deckLink, prdName, prdLink, briefName, briefLink, figmaLink, customLinks
+     FROM projects WHERE status IN ('active', 'blocked')
+     ORDER BY name`
+  )
+
+  const sizeMap: Record<number, string> = { 35: 'XXS', 70: 'XS', 105: 'S', 175: 'M', 280: 'L', 455: 'XL', 910: 'XXL' }
+
+  const parseDesigners = (d: any) => {
+    if (!d) return []
+    try { return JSON.parse(d) } catch { return [] }
+  }
+  const parseBL = (bl: any) => {
+    if (!bl) return ['Unassigned']
+    try { const p = JSON.parse(bl); return Array.isArray(p) ? p : [bl] } catch { return [bl] }
+  }
+  const parseLinks = (p: any) => {
+    const links: { name: string; url: string }[] = []
+    if (p.deckLink) links.push({ name: p.deckName || 'Deck', url: p.deckLink })
+    if (p.prdLink) links.push({ name: p.prdName || 'PRD', url: p.prdLink })
+    if (p.briefLink) links.push({ name: p.briefName || 'Brief', url: p.briefLink })
+    if (p.figmaLink) links.push({ name: 'Figma', url: p.figmaLink })
+    try { const cl = JSON.parse(p.customLinks || '[]'); links.push(...cl) } catch { /* ignore */ }
+    return links
+  }
+  const formatDate = (d: string) => {
+    if (!d) return null
+    const dt = new Date(d + 'T00:00:00')
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  // Build review items for snapshot
+  const reviewItems = (items as any[]).map(item => {
+    const designers = parseDesigners(item.designers).map((d: string) => d.split(' ')[0])
+    const bls = parseBL(item.businessLine)
+    const links = parseLinks(item)
+    const tshirt = sizeMap[item.estimatedHours || 0]
+    const sizeLabel = tshirt ? `${tshirt} · ${item.estimatedHours}h` : item.estimatedHours ? `${item.estimatedHours}h` : null
+    return {
+      project_id: item.project_id,
+      project_name: item.project_name || 'Unknown',
+      status: item.status,
+      designers,
+      businessLines: bls,
+      estimatedHours: item.estimatedHours,
+      sizeLabel,
+      endDate: item.endDate,
+      links,
+      notes: item.notes || null,
+    }
+  })
+
+  // Build active projects for snapshot
+  const activeItems = (activeProjects as any[]).map(p => {
+    const designers = parseDesigners(p.designers).map((d: string) => d.split(' ')[0])
+    const bls = parseBL(p.businessLine)
+    const links = parseLinks(p)
+    return {
+      project_id: p.id,
+      project_name: p.name,
+      status: p.status,
+      designers,
+      businessLines: bls,
+      endDate: p.endDate,
+      links,
+    }
+  })
+
+  // Plain text
+  const reviewByBL: Record<string, typeof reviewItems> = {}
+  for (const item of reviewItems) {
+    for (const bl of item.businessLines) {
+      if (!reviewByBL[bl]) reviewByBL[bl] = []
+      reviewByBL[bl].push(item)
+    }
+  }
+
+  const activeByBL: Record<string, typeof activeItems> = {}
+  for (const item of activeItems) {
+    for (const bl of item.businessLines) {
+      if (!activeByBL[bl]) activeByBL[bl] = []
+      activeByBL[bl].push(item)
+    }
+  }
+
+  const plainLines = [
+    `W&I OPEN CRITIQUES — ${week}`,
+    `Projects selected for stakeholder and peer design review`,
+    `${reviewItems.length} project${reviewItems.length !== 1 ? 's' : ''} in review`,
+    '',
+    ...Object.entries(reviewByBL).sort(([a], [b]) => a.localeCompare(b)).flatMap(([bl, projs]) => [
+      bl.toUpperCase(),
+      ...projs.map(p => {
+        const lines = [`  • ${p.project_name}`, `    ${p.designers.join(', ') || 'unassigned'} · ${p.sizeLabel || 'no estimate'} · Due: ${formatDate(p.endDate) || 'no due date'}${p.links.length ? ` · ${p.links.map(l => l.name).join(', ')}` : ''}`]
+        if (p.notes) lines.push(`    Notes: ${p.notes.replace(/<[^>]+>/g, '')}`)
+        return lines.join('\n')
+      }),
+      '',
+    ]),
+    '─'.repeat(40),
+    '',
+    `ALL ACTIVE PROJECTS — ${activeItems.length} project${activeItems.length !== 1 ? 's' : ''}`,
+    '',
+    ...Object.entries(activeByBL).sort(([a], [b]) => a.localeCompare(b)).flatMap(([bl, projs]) => [
+      bl.toUpperCase(),
+      ...projs.map(p => `  • ${p.project_name} — ${statusLabels[p.status] || p.status} · ${p.designers.join(', ') || 'unassigned'} · Due: ${formatDate(p.endDate) || 'no due date'}${p.links.length ? ` · ${p.links.map(l => l.name).join(', ')}` : ''}`),
+      '',
+    ]),
+  ]
+
+  const dataJson = JSON.stringify({
+    week,
+    reviewId: latestReview.id,
+    reviewTitle: latestReview.title,
+    reviewItems,
+    activeItems,
+  })
+
+  await run(
+    `INSERT OR REPLACE INTO review_snapshots (id, week, generated_at, plain_text, data_json) VALUES (?, ?, datetime('now'), ?, ?)`,
+    [week, week, plainLines.join('\n'), dataJson]
+  )
+
+  console.log(`Review snapshot generated for ${week}`)
+  return { week, plainText: plainLines.join('\n'), dataJson }
+}
+
+// ============ REVIEW SNAPSHOT API ============
+
+router.get('/api/review-snapshots', async (_req, res) => {
+  try {
+    const snapshots = await all('SELECT id, week, generated_at FROM review_snapshots ORDER BY week DESC')
+    res.json(snapshots)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.get('/api/review-snapshots/:week', async (req, res) => {
+  try {
+    const snapshot = await get('SELECT * FROM review_snapshots WHERE week = ?', [req.params.week])
+    if (!snapshot) return res.status(404).json({ error: 'Snapshot not found' })
+    res.json(snapshot)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.post('/api/review-snapshots/generate', async (req, res) => {
+  try {
+    const week = (req.body.week as string) || getISOWeekStr()
+    const result = await generateReviewSnapshot(week)
+    if (!result) return res.status(404).json({ error: 'No reviews to snapshot' })
+    res.json(result)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// ============ TUESDAY 5PM ET CRON ============
+
+let lastReviewSnapshotCheck = ''
+
+export const startReviewCron = () => {
+  setInterval(() => {
+    const now = new Date()
+    const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    const day = et.getDay() // 2 = Tuesday
+    const hour = et.getHours()
+    const minute = et.getMinutes()
+    const checkKey = `${et.getFullYear()}-${et.getMonth()}-${et.getDate()}-${hour}-${minute}`
+
+    if (day === 2 && hour === 17 && minute === 0 && checkKey !== lastReviewSnapshotCheck) {
+      lastReviewSnapshotCheck = checkKey
+      const week = getISOWeekStr(now)
+      generateReviewSnapshot(week).catch(e => console.error('Auto review snapshot failed:', e))
+    }
+  }, 30_000)
+  console.log('Review snapshot cron started (Tuesday 5pm ET)')
 }
 
 export default router;

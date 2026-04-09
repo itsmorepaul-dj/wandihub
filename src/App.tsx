@@ -739,6 +739,8 @@ const [showFilters, setShowFilters] = useState(false)
   const [currentWeek, setCurrentWeek] = useState('')
   const [weeklyExpandedProject, setWeeklyExpandedProject] = useState<string | null>(null)
   const [weeklySnapshots, setWeeklySnapshots] = useState<{ id: string; week: string; generated_at: string }[]>([])
+  const [reviewSnapshots, setReviewSnapshots] = useState<{ id: string; week: string; generated_at: string }[]>([])
+  const [showReviewSnapshotHistory, setShowReviewSnapshotHistory] = useState(false)
   const [missingUpdates, setMissingUpdates] = useState<{ id: string; name: string }[]>([])
   
   // Server-Sent Events — live updates from server
@@ -906,15 +908,17 @@ const [showFilters, setShowFilters] = useState(false)
         const weekRes = await authFetch('/api/current-week')
         const { week } = await weekRes.json()
         setCurrentWeek(week)
-        const [updatesRes, generalRes, snapshotsRes, missingRes] = await Promise.all([
+        const [updatesRes, generalRes, snapshotsRes, missingRes, reviewSnapshotsRes] = await Promise.all([
           authFetch(`/api/weekly-updates?week=${week}`),
           authFetch(`/api/weekly-general?week=${week}`),
           authFetch('/api/weekly-snapshots'),
-          authFetch(`/api/weekly-updates/missing?week=${week}`)
+          authFetch(`/api/weekly-updates/missing?week=${week}`),
+          authFetch('/api/review-snapshots'),
         ])
         setWeeklyUpdates(await updatesRes.json())
         setWeeklyGeneral(await generalRes.json())
         setWeeklySnapshots(await snapshotsRes.json())
+        setReviewSnapshots(await reviewSnapshotsRes.json())
         const missingData = await missingRes.json()
         setMissingUpdates(missingData.projects || [])
       } catch (err) { console.error('Error loading weekly data:', err) }
@@ -4473,6 +4477,119 @@ const [showFilters, setShowFilters] = useState(false)
           } catch (err) { console.error('Error loading snapshot:', err) }
         }
 
+        const viewReviewSnapshot = async (snap: { id: string; week: string; generated_at: string }) => {
+          try {
+            const res = await authFetch(`/api/review-snapshots/${snap.week}`)
+            const snapData = await res.json()
+            const parsed = JSON.parse(snapData.data_json || '{}')
+            const reviewItems = (parsed.reviewItems || []) as any[]
+            const activeItems = (parsed.activeItems || []) as any[]
+
+            // Group review items by BL
+            const reviewByBL: Record<string, any[]> = {}
+            for (const item of reviewItems) {
+              for (const bl of (item.businessLines || ['Unassigned'])) {
+                if (!reviewByBL[bl]) reviewByBL[bl] = []
+                reviewByBL[bl].push(item)
+              }
+            }
+
+            // Group active items by BL
+            const activeByBL: Record<string, any[]> = {}
+            for (const item of activeItems) {
+              for (const bl of (item.businessLines || ['Unassigned'])) {
+                if (!activeByBL[bl]) activeByBL[bl] = []
+                activeByBL[bl].push(item)
+              }
+            }
+
+            const genDate = new Date(snapData.generated_at)
+            const dateStr = genDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+
+            const rich = (
+              <div className="rr">
+                <div className="rr-date">{dateStr} · {snap.week}</div>
+                <div className="rr-subtitle">Projects selected for stakeholder and peer design review · {reviewItems.length} project{reviewItems.length !== 1 ? 's' : ''}</div>
+
+                {Object.entries(reviewByBL).sort(([a], [b]) => a.localeCompare(b)).map(([bl, projs]) => (
+                  <div key={bl} className="rr-section">
+                    <div className="rr-section-header-row">
+                      <div className="rr-section-header" style={{ color: '#f59e0b' }}>
+                        <span className="rr-section-dot" style={{ background: '#f59e0b' }} />
+                        <span>{bl}</span>
+                        <span className="rr-section-count">{projs.length}</span>
+                      </div>
+                    </div>
+                    <div className="rr-update-list">
+                      {projs.map((p: any, i: number) => (
+                        <div key={i} className="rr-update-card" style={{ background: 'var(--color-bg-elevated)', borderLeftColor: '#f59e0b' }}>
+                          <div className="rr-update-project">{p.project_name}</div>
+                          <div className="rr-update-meta-line">
+                            {(p.designers || []).map((d: string, di: number) => <span key={di} className="rr-update-designers"><User size={10} /> {d}</span>)}
+                            {p.sizeLabel && <span className="rr-size-pill">{p.sizeLabel}</span>}
+                            {p.endDate && <span className="rr-active-due">Project end: {formatShortDate(p.endDate)}</span>}
+                          </div>
+                          {p.links?.length > 0 && (
+                            <div className="rr-update-links">
+                              {p.links.map((l: any, li: number) => <span key={li}>{li > 0 && <span className="rr-link-sep">·</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                            </div>
+                          )}
+                          {p.notes && (
+                            <div className="rr-update-desc" style={{ color: 'var(--color-text)' }}>
+                              <span dangerouslySetInnerHTML={{ __html: p.notes }} />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {reviewItems.length === 0 && <div className="rr-empty">No projects in review this week.</div>}
+
+                <div className="rr-divider" />
+
+                <div className="rr-section">
+                  <div className="rr-section-header-row">
+                    <div className="rr-section-header" style={{ color: '#3b82f6' }}>
+                      <span className="rr-section-dot" style={{ background: '#3b82f6' }} />
+                      <span>All Active Projects</span>
+                      <span className="rr-section-count">{activeItems.length}</span>
+                    </div>
+                  </div>
+                  {Object.entries(activeByBL).sort(([a], [b]) => a.localeCompare(b)).map(([bl, projs]) => (
+                    <div key={bl} className="rr-active-group">
+                      <div className="rr-active-group-label">{bl}</div>
+                      {projs.map((p: any, i: number) => {
+                        const sizeMap: Record<number, string> = { 35: 'XXS', 70: 'XS', 105: 'S', 175: 'M', 280: 'L', 455: 'XL', 910: 'XXL' }
+                        const tshirt = sizeMap[p.estimatedHours || 0]
+                        const sz = tshirt ? `${tshirt} · ${p.estimatedHours}h` : p.estimatedHours ? `${p.estimatedHours}h` : null
+                        return (
+                        <div key={i} className="rr-active-row">
+                          <div className="rr-active-row-main">
+                            <span className="rr-active-name">{p.project_name}</span>
+                            {(p.designers || []).map((d: string, di: number) => <span key={di} className="rr-active-designers"><User size={10} /> {d}</span>)}
+                            {sz && <span className="rr-size-pill">{sz}</span>}
+                            {p.endDate && <span className="rr-active-due">Project end: {formatShortDate(p.endDate)}</span>}
+                          </div>
+                          {p.links?.length > 0 && (
+                            <div className="rr-active-links">
+                              {p.links.map((l: any, li: number) => <span key={li}>{li > 0 && <span className="rr-link-sep">·</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                            </div>
+                          )}
+                        </div>
+                        )
+                      })}
+                    </div>
+                  ))}
+                  {activeItems.length === 0 && <div className="rr-empty">No active projects.</div>}
+                </div>
+              </div>
+            )
+            openReport(`W&I Open Critiques — ${snap.week}`, snapData.plain_text || '', rich)
+          } catch (err) { console.error('Error loading review snapshot:', err) }
+        }
+
         const syncOpenCritsDoc = async () => {
           setOpenCritsSyncing(true)
           try {
@@ -4494,39 +4611,197 @@ const [showFilters, setShowFilters] = useState(false)
         }
 
         const generateProjectReview = () => {
-          const blGroups: Record<string, Project[]> = {}
-          for (const p of projects.filter(pr => pr.status !== 'done')) {
+          const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked' }
+          const sizeMap: Record<number, string> = { 35: 'XXS', 70: 'XS', 105: 'S', 175: 'M', 280: 'L', 455: 'XL', 910: 'XXL' }
+
+          // Review projects grouped by BL
+          const reviewProjs = currentProjects.filter(p => p.status === 'review')
+          const reviewBlGroups: Record<string, Project[]> = {}
+          for (const p of reviewProjs) {
             for (const bl of (p.businessLines || ['Unassigned'])) {
-              if (!blGroups[bl]) blGroups[bl] = []
-              blGroups[bl].push(p)
+              if (!reviewBlGroups[bl]) reviewBlGroups[bl] = []
+              reviewBlGroups[bl].push(p)
             }
           }
-          const lines = [
-            `PROJECT REVIEW — ${todayStr}`,
+
+          // Active projects grouped by BL
+          const activeProjs = currentProjects.filter(p => p.status === 'active' || p.status === 'blocked')
+          const activeBlGroups: Record<string, Project[]> = {}
+          for (const p of activeProjs) {
+            for (const bl of (p.businessLines || ['Unassigned'])) {
+              if (!activeBlGroups[bl]) activeBlGroups[bl] = []
+              activeBlGroups[bl].push(p)
+            }
+          }
+
+          // Review item notes from the public review site
+          const reviewItemNotes: Record<string, string> = {}
+          if (editingReview?.items) {
+            for (const item of editingReview.items as any[]) {
+              if (item.notes && item.notes.trim()) {
+                reviewItemNotes[item.project_id] = item.notes.trim()
+              }
+            }
+          }
+
+          const getLinks = (p: Project) => [
+            p.deckLink && { name: p.deckName || 'Deck', url: p.deckLink },
+            p.prdLink && { name: p.prdName || 'PRD', url: p.prdLink },
+            p.briefLink && { name: p.briefName || 'Brief', url: p.briefLink },
+            p.figmaLink && { name: 'Figma', url: p.figmaLink },
+            ...(p.customLinks || []),
+          ].filter(Boolean) as { name: string; url: string }[]
+
+          const getSizeLabel = (p: Project) => {
+            const tshirt = sizeMap[p.estimatedHours || 0]
+            return tshirt ? `${tshirt} · ${p.estimatedHours}h` : p.estimatedHours ? `${p.estimatedHours}h` : null
+          }
+
+          const sectionCopy = (text: string) => {
+            navigator.clipboard.writeText(text).then(() => {
+              setCopiedReport(Date.now())
+              setTimeout(() => setCopiedReport(null), 2000)
+            })
+          }
+
+          // --- Plain text ---
+          const plainLines = [
+            `W&I OPEN CRITIQUES — ${todayStr}`,
+            `Projects selected for stakeholder and peer design review`,
+            `${reviewProjs.length} project${reviewProjs.length !== 1 ? 's' : ''} in review`,
             '',
-            ...Object.entries(blGroups).flatMap(([bl, projs]) => [
+            ...Object.entries(reviewBlGroups).sort(([a], [b]) => a.localeCompare(b)).flatMap(([bl, projs]) => [
               bl.toUpperCase(),
               ...projs.map(p => {
                 const designers = (p.designers || []).map(d => d.split(' ')[0]).join(', ')
-                const status = p.status.toUpperCase()
-                const hours = p.estimatedHours ? `${p.estimatedHours} hrs (${Math.round((p.estimatedHours / 35) * 10) / 10} wks)` : 'no estimate'
+                const sz = getSizeLabel(p) || 'no estimate'
                 const due = p.endDate ? formatShortDate(p.endDate) : 'no due date'
-                return `  • [${status}] ${p.name}\n    Designer: ${designers || 'unassigned'} | Estimate: ${hours} | Due: ${due}`
+                const links = getLinks(p).map(l => l.name).join(', ')
+                const rNotes = reviewItemNotes[p.id]
+                const lines = [`  • ${p.name}`, `    ${designers || 'unassigned'} · ${sz} · Due: ${due}${links ? ` · ${links}` : ''}`]
+                if (rNotes) lines.push(`    Notes: ${rNotes.replace(/<[^>]+>/g, '')}`)
+                return lines.join('\n')
               }),
               '',
             ]),
-            ...(noEstimate.length > 0 ? [
-              'MISSING ESTIMATES',
-              ...noEstimate.map(p => `  • ${p.name}`),
+            '─'.repeat(40),
+            '',
+            `ALL ACTIVE PROJECTS — ${activeProjs.length} project${activeProjs.length !== 1 ? 's' : ''}`,
+            '',
+            ...Object.entries(activeBlGroups).sort(([a], [b]) => a.localeCompare(b)).flatMap(([bl, projs]) => [
+              bl.toUpperCase(),
+              ...projs.map(p => {
+                const designers = (p.designers || []).map(d => d.split(' ')[0]).join(', ')
+                const status = statusLabels[p.status] || p.status
+                const due = p.endDate ? formatShortDate(p.endDate) : 'no due date'
+                const links = getLinks(p).map(l => l.name).join(', ')
+                return `  • ${p.name} — ${status} · ${designers || 'unassigned'} · Due: ${due}${links ? ` · ${links}` : ''}`
+              }),
               '',
-            ] : []),
-            ...(noDesigner.length > 0 ? [
-              'MISSING DESIGNERS',
-              ...noDesigner.map(p => `  • ${p.name}`),
-              '',
-            ] : []),
+            ]),
           ]
-          openReport('Project Review', lines.join('\n'))
+
+          // --- Rich JSX ---
+          const renderReviewCard = (p: Project) => {
+            const designerNames = (p.designers || []).map(d => d.split(' ')[0])
+            const links = getLinks(p)
+            const sizeLabel = getSizeLabel(p)
+            const due = p.endDate ? formatShortDate(p.endDate) : null
+            const notes = reviewItemNotes[p.id]
+
+            return (
+              <div key={p.id} className="rr-update-card" style={{ background: 'var(--color-bg-elevated)', borderLeftColor: '#f59e0b' }}>
+                <div className="rr-update-project">{p.name}</div>
+                <div className="rr-update-meta-line">
+                  {designerNames.map((d, i) => <span key={i} className="rr-update-designers"><User size={10} /> {d}</span>)}
+                  {sizeLabel && <span className="rr-size-pill">{sizeLabel}</span>}
+                  {due && <span className="rr-active-due">Project end: {due}</span>}
+                </div>
+                {links.length > 0 && (
+                  <div className="rr-update-links">
+                    {links.map((l, i) => <span key={i}>{i > 0 && <span className="rr-link-sep">·</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                  </div>
+                )}
+                {notes && (
+                  <div className="rr-update-desc" style={{ color: 'var(--color-text)' }}>
+                    <span dangerouslySetInnerHTML={{ __html: notes }} />
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          const renderActiveRow = (p: Project) => {
+            const designerNames = (p.designers || []).map(d => d.split(' ')[0])
+            const links = getLinks(p)
+            const sizeLabel = getSizeLabel(p)
+            const due = p.endDate ? formatShortDate(p.endDate) : null
+            return (
+              <div key={p.id} className="rr-active-row">
+                <div className="rr-active-row-main">
+                  <span className="rr-active-name">{p.name}</span>
+                  {designerNames.map((d, i) => <span key={i} className="rr-active-designers"><User size={10} /> {d}</span>)}
+                  {sizeLabel && <span className="rr-size-pill">{sizeLabel}</span>}
+                  {due && <span className="rr-active-due">Project end: {due}</span>}
+                </div>
+                {links.length > 0 && (
+                  <div className="rr-active-links">
+                    {links.map((l, i) => <span key={i}>{i > 0 && <span className="rr-link-sep">·</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          const rich = (
+            <div className="rr">
+              <div className="rr-date">{todayStr}</div>
+              <div className="rr-subtitle">Projects selected for stakeholder and peer design review · {reviewProjs.length} project{reviewProjs.length !== 1 ? 's' : ''}</div>
+
+              {Object.entries(reviewBlGroups).sort(([a], [b]) => a.localeCompare(b)).map(([bl, projs]) => (
+                <div key={bl} className="rr-section">
+                  <div className="rr-section-header-row">
+                    <div className="rr-section-header" style={{ color: '#f59e0b' }}>
+                      <span className="rr-section-dot" style={{ background: '#f59e0b' }} />
+                      <span>{bl}</span>
+                      <span className="rr-section-count">{projs.length}</span>
+                    </div>
+                    <button className="rr-copy-section" onClick={() => sectionCopy(`${bl}\n${projs.map(p => `  • ${p.name}`).join('\n')}`)}>
+                      <ClipboardCopy size={12} /> Copy
+                    </button>
+                  </div>
+                  <div className="rr-update-list">{projs.map(renderReviewCard)}</div>
+                </div>
+              ))}
+
+              {reviewProjs.length === 0 && (
+                <div className="rr-empty">No projects currently in review.</div>
+              )}
+
+              <div className="rr-divider" />
+
+              <div className="rr-section">
+                <div className="rr-section-header-row">
+                  <div className="rr-section-header" style={{ color: '#3b82f6' }}>
+                    <span className="rr-section-dot" style={{ background: '#3b82f6' }} />
+                    <span>All Active Projects</span>
+                    <span className="rr-section-count">{activeProjs.length}</span>
+                  </div>
+                </div>
+                {Object.entries(activeBlGroups).sort(([a], [b]) => a.localeCompare(b)).map(([bl, projs]) => (
+                  <div key={bl} className="rr-active-group">
+                    <div className="rr-active-group-label">{bl}</div>
+                    {projs.map(renderActiveRow)}
+                  </div>
+                ))}
+                {activeProjs.length === 0 && (
+                  <div className="rr-empty">No active projects.</div>
+                )}
+              </div>
+            </div>
+          )
+
+          openReport('W&I Open Critiques', plainLines.join('\n'), rich)
         }
 
         const generateCapacityStats = () => {
@@ -4674,23 +4949,12 @@ const [showFilters, setShowFilters] = useState(false)
             generate: generateWeeklyStatus,
           },
           {
-            id: 'open-crits',
-            title: 'W&I Open Crits',
-            description: 'Creates a new dated tab in the shared Google Doc with the full project list, links, and designer assignments for Wednesday crits.',
+            id: 'project-review',
+            title: 'W&I Open Critiques',
+            description: 'Projects selected for stakeholder and peer design review, plus a full active project listing.',
             icon: <Palette size={24} />,
             color: '#8b5cf6',
-            stats: `${projects.filter(p => p.status === 'active' || p.status === 'review').length} active projects across ${new Set(projects.flatMap(p => p.businessLines || [])).size} business lines`,
-            docUrl: `https://docs.google.com/document/d/1QTw96d8wjB4UyrPwb6gXYpwpnLOBBrZuo7xoB48Z08k/edit`,
-            syncDoc: syncOpenCritsDoc,
-            syncing: openCritsSyncing,
-          },
-          {
-            id: 'project-review',
-            title: 'Project Review',
-            description: 'All active projects grouped by business line with status, designer, estimate, and due date.',
-            icon: <FileBarChart size={24} />,
-            color: '#f59e0b',
-            stats: `${projects.filter(p => p.status !== 'done').length} in progress, ${noEstimate.length} missing estimates`,
+            stats: `${projects.filter(p => p.status === 'review').length} in review, ${projects.filter(p => p.status === 'active' || p.status === 'blocked').length} active`,
             generate: generateProjectReview,
           },
           {
@@ -4724,13 +4988,25 @@ const [showFilters, setShowFilters] = useState(false)
               : `${archivedProjects.length} archived across ${Object.keys(archivedByQuarter).length} quarter${Object.keys(archivedByQuarter).length !== 1 ? 's' : ''}`,
             generate: archivedProjects.length > 0 ? generateQuarterReview : undefined,
           },
+          {
+            id: 'open-crits',
+            title: 'W&I Open Crits (Legacy)',
+            description: 'Creates a new dated tab in the shared Google Doc. Replaced by W&I Open Critiques.',
+            icon: <Palette size={24} />,
+            color: '#8b5cf6',
+            stats: `${projects.filter(p => p.status === 'active' || p.status === 'review').length} active projects across ${new Set(projects.flatMap(p => p.businessLines || [])).size} business lines`,
+            docUrl: `https://docs.google.com/document/d/1QTw96d8wjB4UyrPwb6gXYpwpnLOBBrZuo7xoB48Z08k/edit`,
+            syncDoc: syncOpenCritsDoc,
+            syncing: openCritsSyncing,
+            disabled: true,
+          },
         ]
 
         return (
         <div className="reports-page">
           <div className="reports-grid">
             {reports.map(report => (
-              <div key={report.id} className={`report-card${report.id === 'weekly-status' && weeklySnapshots.length > 0 ? ' report-card-has-history' : ''}`}>
+              <div key={report.id} className={`report-card${(report.id === 'weekly-status' && weeklySnapshots.length > 0) || (report.id === 'project-review' && reviewSnapshots.length > 0) ? ' report-card-has-history' : ''}${report.disabled ? ' report-card-disabled' : ''}`} style={report.disabled ? { opacity: 0.3, pointerEvents: 'none' } : undefined}>
                 <div className="report-card-icon" style={{ color: report.color }}>
                   {report.icon}
                 </div>
@@ -4767,6 +5043,25 @@ const [showFilters, setShowFilters] = useState(false)
                       <div className="snapshot-accordion-body">
                         {weeklySnapshots.map(snap => (
                           <button key={snap.id} className="snapshot-item" onClick={() => viewSnapshot(snap)}>
+                            <span className="snapshot-week">{snap.week}</span>
+                            <span className="snapshot-date">{new Date(snap.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {report.id === 'project-review' && reviewSnapshots.length > 0 && (
+                  <div className="snapshot-accordion">
+                    <button className="snapshot-accordion-toggle" onClick={() => setShowReviewSnapshotHistory(v => !v)}>
+                      {showReviewSnapshotHistory ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      <Clock size={12} />
+                      <span>Past Reports ({reviewSnapshots.length})</span>
+                    </button>
+                    {showReviewSnapshotHistory && (
+                      <div className="snapshot-accordion-body">
+                        {reviewSnapshots.map(snap => (
+                          <button key={snap.id} className="snapshot-item" onClick={() => viewReviewSnapshot(snap)}>
                             <span className="snapshot-week">{snap.week}</span>
                             <span className="snapshot-date">{new Date(snap.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                           </button>

@@ -294,6 +294,40 @@ export const initSchema = async () => {
     data_json TEXT DEFAULT '{}'
   )`).catch(e => console.error('weekly_snapshots init error:', e.message))
 
+  await run(`CREATE TABLE IF NOT EXISTS review_snapshots (
+    id TEXT PRIMARY KEY, week TEXT NOT NULL UNIQUE,
+    generated_at TEXT DEFAULT (datetime('now')),
+    plain_text TEXT DEFAULT '',
+    data_json TEXT DEFAULT '{}'
+  )`).catch(e => console.error('review_snapshots init error:', e.message))
+
+  // Seed a sample review snapshot if table is empty
+  const existingReviewSnap = await get('SELECT id FROM review_snapshots LIMIT 1').catch(() => null)
+  if (!existingReviewSnap) {
+    const sampleWeek = '2026-W14'
+    const sampleData = JSON.stringify({
+      week: sampleWeek,
+      reviewId: 'sample',
+      reviewTitle: 'W&I Open Critique — Week 14',
+      reviewItems: [
+        { project_id: 's1', project_name: 'MarketWatch Redesign', status: 'review', designers: ['Sarah'], businessLines: ['MarketWatch'], estimatedHours: 280, sizeLabel: 'L · 280h', endDate: '2026-04-18', links: [{ name: 'Figma', url: '#' }, { name: 'PRD', url: '#' }], notes: 'Navigation patterns finalized. Need stakeholder sign-off on mobile breakpoints.' },
+        { project_id: 's2', project_name: 'WSJ App Onboarding', status: 'review', designers: ['Mike', 'Priya'], businessLines: ['WSJ'], estimatedHours: 175, sizeLabel: 'M · 175h', endDate: '2026-04-25', links: [{ name: 'Deck', url: '#' }, { name: 'Figma', url: '#' }], notes: 'User testing results in. Iterating on step 3 flow.' },
+        { project_id: 's3', project_name: 'Barron\'s Portfolio Dashboard', status: 'review', designers: ['Alex'], businessLines: ['Barron\'s'], estimatedHours: 105, sizeLabel: 'S · 105h', endDate: '2026-05-02', links: [{ name: 'Figma', url: '#' }], notes: null },
+      ],
+      activeItems: [
+        { project_id: 'a1', project_name: 'DJ News Alerts Refresh', status: 'active', designers: ['Jordan'], businessLines: ['Dow Jones'], endDate: '2026-05-09', links: [{ name: 'Brief', url: '#' }] },
+        { project_id: 'a2', project_name: 'WSJ Podcast Player', status: 'active', designers: ['Sarah', 'Tim'], businessLines: ['WSJ'], endDate: '2026-04-30', links: [{ name: 'Figma', url: '#' }, { name: 'PRD', url: '#' }] },
+        { project_id: 'a3', project_name: 'MarketWatch Charts v2', status: 'blocked', designers: ['Mike'], businessLines: ['MarketWatch'], endDate: '2026-05-16', links: [{ name: 'Figma', url: '#' }] },
+        { project_id: 'a4', project_name: 'Barron\'s Subscriber Portal', status: 'active', designers: ['Priya'], businessLines: ['Barron\'s'], endDate: '2026-06-01', links: [{ name: 'Deck', url: '#' }, { name: 'Brief', url: '#' }] },
+      ],
+    })
+    const samplePlain = `W&I OPEN CRITIQUES — 2026-W14\nProjects selected for stakeholder and peer design review\n3 projects in review\n\nBARRON'S\n  • Barron's Portfolio Dashboard\n    Alex · S · 105h · Due: May 2\n\nMARKETWATCH\n  • MarketWatch Redesign\n    Sarah · L · 280h · Due: Apr 18 · Figma, PRD\n    Notes: Navigation patterns finalized. Need stakeholder sign-off on mobile breakpoints.\n\nWSJ\n  • WSJ App Onboarding\n    Mike, Priya · M · 175h · Due: Apr 25 · Deck, Figma\n    Notes: User testing results in. Iterating on step 3 flow.\n\n────────────────────────────────────────\n\nALL ACTIVE PROJECTS — 4 projects\n\nBARRON'S\n  • Barron's Subscriber Portal — Active · Priya · Due: Jun 1 · Deck, Brief\n\nDOW JONES\n  • DJ News Alerts Refresh — Active · Jordan · Due: May 9 · Brief\n\nMARKETWATCH\n  • MarketWatch Charts v2 — Blocked · Mike · Due: May 16 · Figma\n\nWSJ\n  • WSJ Podcast Player — Active · Sarah, Tim · Due: Apr 30 · Figma, PRD`
+    await run(
+      `INSERT INTO review_snapshots (id, week, generated_at, plain_text, data_json) VALUES (?, ?, '2026-04-01T17:00:00.000Z', ?, ?)`,
+      [sampleWeek, sampleWeek, samplePlain, sampleData]
+    ).catch(e => console.log('Review snapshot seed:', e.message))
+  }
+
   await run(`CREATE TABLE IF NOT EXISTS project_images (
     id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
     filename TEXT NOT NULL, original_name TEXT DEFAULT '',

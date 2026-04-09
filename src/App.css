@@ -4911,7 +4911,7 @@ input:checked + .slider:before {
 
 .report-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 1.25rem;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -5263,6 +5263,24 @@ a.report-view-btn {
   font-weight: 600;
   color: var(--color-text);
 }
+.rr-update-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  margin-top: 0.15rem;
+}
+.rr-size-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  border-radius: 99px;
+  background: var(--color-bg-tertiary);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
 .rr-update-desc {
   font-size: 0.8rem;
   color: var(--color-text);
@@ -5343,6 +5361,69 @@ a.report-view-btn {
   color: var(--text-secondary);
   font-style: italic;
   padding: 0.25rem 0;
+}
+.rr-subtitle {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: -0.25rem;
+  margin-bottom: 0.5rem;
+}
+.rr-divider {
+  border-top: 1px solid var(--color-border-subtle);
+  margin: 0.75rem 0;
+}
+.rr-active-group {
+  margin-bottom: 1rem;
+}
+.rr-active-group-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-dim);
+  padding: 0.3rem 0 0.15rem;
+}
+.rr-active-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.5rem 0;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+}
+.rr-active-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.rr-active-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.rr-update-designers,
+.rr-active-designers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--color-text-muted);
+}
+.rr-active-due {
+  color: var(--color-text-muted);
+}
+.rr-active-links {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding-left: 0.1rem;
+}
+.rr-active-links a {
+  font-size: 0.65rem;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.rr-active-links a:hover {
+  text-decoration: underline;
 }
 
 /* Done chips */
