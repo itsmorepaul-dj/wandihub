@@ -27,11 +27,11 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Pending status — new project status for not-yet-started work, grayed out in capacity like done, sorted last',
+  'W&I Open Critiques — redesigned report with review site notes, t-shirt sizing, per-designer icons, and full active project listing by business line',
+  'Review snapshots — automatic Tuesday 5pm ET reports with accordion history, matching the weekly status pattern',
+  'Concurrent edit protection — review site notes now detect conflicts when two people edit at the same time',
   'Review agenda — create, navigate, and share public review pages with project status, designers, links, notes, and Gantt timelines',
-  'Visual refresh — refined color palette, layered shadows, tighter typography, smoother animations across the entire UI',
-  'Project images — paste or drag images into projects, view in lightbox with captions and keyboard navigation',
-  'Card redesign — designers, hours, edit & delete moved to compact meta chips in header; attached images below links',
-  'Rich text editor — weekly update form now uses contentEditable with inline rendered links, no more edit/preview toggle',
 ]
 
 
@@ -152,6 +152,7 @@ const REVIEW_STATUS_MAP: Record<string, { label: string; color: string }> = {
   review: { label: 'In Review', color: '#f59e0b' },
   done: { label: 'Done', color: '#22c55e' },
   blocked: { label: 'Blocked', color: '#ef4444' },
+  pending: { label: 'Pending', color: '#94a3b8' },
 }
 
 function ReviewItemRow({ item, index, project, onRemove }: {
@@ -1814,6 +1815,7 @@ const [showFilters, setShowFilters] = useState(false)
       case 'review': return 'bg-yellow-500'
       case 'done': return 'bg-green-500'
       case 'blocked': return 'bg-red-500'
+      case 'pending': return 'bg-slate-400'
     }
   }
 
@@ -1823,6 +1825,7 @@ const [showFilters, setShowFilters] = useState(false)
       case 'review': return 'In Review'
       case 'done': return 'Done'
       case 'blocked': return 'Blocked'
+      case 'pending': return 'Pending'
     }
   }
 
@@ -1970,7 +1973,7 @@ const [showFilters, setShowFilters] = useState(false)
   }, {})
 
   // Status priority: blocked first, then review, active, done last
-  const statusOrder: Record<string, number> = { blocked: 0, review: 1, active: 2, done: 3 }
+  const statusOrder: Record<string, number> = { blocked: 0, review: 1, active: 2, done: 3, pending: 4 }
   const getStatusOrder = (s: string) => statusOrder[s] ?? 2
 
   // Sort projects by selected criteria (only current/non-archived)
@@ -2047,7 +2050,7 @@ const [showFilters, setShowFilters] = useState(false)
   const projectDesigners = [...new Set(team.map(m => m.name))].sort()
   
   // Get unique statuses
-  const projectStatuses = ['active', 'review', 'done', 'blocked'].sort()
+  const projectStatuses = ['active', 'review', 'done', 'blocked', 'pending'].sort()
 
   // Determine if filter UI should show
   const showProjectFilter = () => {
@@ -2522,7 +2525,7 @@ const [showFilters, setShowFilters] = useState(false)
                 return (
                   <div className="projects-summary">
                     <div className="summary-stats">
-                      {([['active', 'Active', '#3b82f6'], ['review', 'In Review', '#f59e0b'], ['done', 'Done', '#22c55e'], ['blocked', 'Blocked', '#ef4444']] as const).map(([status, label, color]) => {
+                      {([['active', 'Active', '#3b82f6'], ['review', 'In Review', '#f59e0b'], ['done', 'Done', '#22c55e'], ['blocked', 'Blocked', '#ef4444'], ['pending', 'Pending', '#94a3b8']] as const).map(([status, label, color]) => {
                         const count = currentProjects.filter(p => p.status === status).length
                         return (
                           <div key={status} className="summary-stat" style={count > 0 ? { color } : undefined}>
@@ -2717,7 +2720,7 @@ const [showFilters, setShowFilters] = useState(false)
                           className={`filter-pill ${projectFilters.statuses.includes(status) ? 'active' : ''}`}
                           onClick={() => toggleStatusFilter(status)}
                         >
-                          {status === 'active' ? 'Active' : status === 'review' ? 'In Review' : status === 'done' ? 'Done' : 'Blocked'}
+                          {status === 'active' ? 'Active' : status === 'review' ? 'In Review' : status === 'done' ? 'Done' : status === 'blocked' ? 'Blocked' : 'Pending'}
                         </button>
                       ))}
                     </>
@@ -2744,7 +2747,7 @@ const [showFilters, setShowFilters] = useState(false)
 
                   const renderProjectRow = (project: any) => {
                     const isOverdue = (() => {
-                      if (!project.endDate || project.status === 'done') return false
+                      if (!project.endDate || project.status === 'done' || project.status === 'pending') return false
                       const end = parseLocalDate(project.endDate)
                       if (!end) return false
                       const today = new Date()
@@ -2760,7 +2763,7 @@ const [showFilters, setShowFilters] = useState(false)
                               {isOverdue && <span className="overdue-label">Overdue</span>}
                               <span className="project-name">{project.name}{project.url && <a href={project.url} target="_blank" rel="noopener noreferrer" className="project-jira-badge" onClick={e => e.stopPropagation()}>JIRA</a>}</span>
                             </span>
-                            <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444' }[project.status as string] }}>
+                            <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8' }[project.status as string] }}>
                               <span className={`status-badge-dot ${getStatusColor(project.status)}`}></span>
                               {getStatusLabel(project.status)}
                             </span>
@@ -2771,7 +2774,7 @@ const [showFilters, setShowFilters] = useState(false)
                                 <User size={11} />
                                 {(project.designers || []).map((d: string) => d.split(' ')[0]).join(', ')}
                               </span>
-                            ) : project.status !== 'done' ? (
+                            ) : project.status !== 'done' && project.status !== 'pending' ? (
                               <span className="project-meta-chip project-meta-warn">
                                 <User size={11} /> No designer
                               </span>
@@ -2786,7 +2789,7 @@ const [showFilters, setShowFilters] = useState(false)
                                   return <>{size ? `${size} · ` : ''}{project.estimatedHours}h ({weeks}w)</>
                                 })()}
                               </span>
-                            ) : project.status !== 'done' ? (
+                            ) : project.status !== 'done' && project.status !== 'pending' ? (
                               <span className="project-meta-chip project-meta-warn">
                                 <Clock size={11} /> No estimate
                               </span>
@@ -2898,7 +2901,7 @@ const [showFilters, setShowFilters] = useState(false)
                           </div>
                         </div>
                         {/* Weekly Update Inline */}
-                        {project.status !== 'done' && currentWeek && (() => {
+                        {project.status !== 'done' && project.status !== 'pending' && currentWeek && (() => {
                           const projectUpdates = weeklyUpdates.filter(u => u.project_id === project.id)
                           const assignedDesignerNames = project.designers || []
                           const primaryDesigner = team.find(t => assignedDesignerNames.includes(t.name))
@@ -3591,7 +3594,7 @@ const [showFilters, setShowFilters] = useState(false)
                   .filter((a: CapacityAssignment) => {
                     if (a.designer_id !== m.id) return false
                     const proj = projects.find(p => p.name === a.project_name)
-                    return !proj || (proj.status !== 'done' && proj.status !== 'blocked')
+                    return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending')
                   })
                   .reduce((s: number, a: CapacityAssignment) => s + (a.allocation_percent || 0), 0)
                 return sum + ((m.weekly_hours || 35) * assigned / 100 * 13)
@@ -3738,7 +3741,7 @@ const [showFilters, setShowFilters] = useState(false)
                 const allocatedHours = memberAssignments
                   .filter((a: CapacityAssignment) => {
                     const proj = projects.find(p => p.name === a.project_name)
-                    return !proj || (proj.status !== 'done' && proj.status !== 'blocked')
+                    return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending')
                   })
                   .reduce((sum: number, a: CapacityAssignment) => {
                     const allocPct = a.allocation_percent || 0
@@ -3764,7 +3767,7 @@ const [showFilters, setShowFilters] = useState(false)
                             <span className="last-name">{member.name.split(' ').slice(1).join(' ')}</span>
                           )}
                         </span>
-                        <span className="designer-hours">{memberAssignments.filter((a: CapacityAssignment) => { const proj = projects.find(p => p.name === a.project_name); return !proj || proj.status !== 'done' }).length} projects</span>
+                        <span className="designer-hours">{memberAssignments.filter((a: CapacityAssignment) => { const proj = projects.find(p => p.name === a.project_name); return !proj || (proj.status !== 'done' && proj.status !== 'pending') }).length} projects</span>
                       </div>
                       <div className="designer-mini-gauge">
                         <svg viewBox="0 0 80 50" className="mini-gauge-svg">
@@ -3826,7 +3829,7 @@ const [showFilters, setShowFilters] = useState(false)
                             let endingProjects = 0
                             for (const a of memberAssignments) {
                               const proj = projects.find(p => p.name === a.project_name)
-                              if (!proj || proj.status === 'done' || proj.status === 'blocked') continue
+                              if (!proj || proj.status === 'done' || proj.status === 'blocked' || proj.status === 'pending') continue
                               const pStart = proj.startDate ? parseLocalDate(proj.startDate) : null
                               const pEnd = proj.endDate ? parseLocalDate(proj.endDate) : null
                               let overlaps = false
@@ -3912,7 +3915,7 @@ const [showFilters, setShowFilters] = useState(false)
                         ) : (() => {
                           const activeAssignments = memberAssignments.filter((a: CapacityAssignment) => {
                             const proj = projects.find(p => p.name === a.project_name)
-                            return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'review')
+                            return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'review' && proj.status !== 'pending')
                           })
                           // Sort active assignments by force ranking (best rank across all business lines), then alphabetical
                           activeAssignments.sort((a, b) => {
@@ -3941,6 +3944,10 @@ const [showFilters, setShowFilters] = useState(false)
                             const proj = projects.find(p => p.name === a.project_name)
                             return proj?.status === 'done'
                           })
+                          const pendingAssignments = memberAssignments.filter((a: CapacityAssignment) => {
+                            const proj = projects.find(p => p.name === a.project_name)
+                            return proj?.status === 'pending'
+                          })
 
                           const renderChip = (assignment: CapacityAssignment, isDone: boolean, isBlocked?: boolean, isReview?: boolean) => {
                             const allocPct = assignment.allocation_percent || 0
@@ -3951,7 +3958,7 @@ const [showFilters, setShowFilters] = useState(false)
                             const hasTimeline = proj?.timeline && proj.timeline.length > 0
                             const timelineTotal = hasTimeline ? proj.timeline.reduce((s, r) => s + calcRangeHours(r.startDate, r.endDate), 0) : 0
                             const isOverdue = (() => {
-                              if (!proj?.endDate || proj.status === 'done') return false
+                              if (!proj?.endDate || proj.status === 'done' || proj.status === 'pending') return false
                               const end = parseLocalDate(proj.endDate)
                               if (!end) return false
                               const today = new Date()
@@ -4030,7 +4037,7 @@ const [showFilters, setShowFilters] = useState(false)
                                   return <div className="chip-est"><Clock size={10} /> {size ? `${size} · ` : ''}{hrs}h est ({weeksStr}wk)</div>
                                 })()}
                                 {proj && capacityData && (() => {
-                                  const projAssignments = capacityData.assignments.filter(a => a.project_id === proj.id && a.project_status !== 'done' && a.project_status !== 'blocked')
+                                  const projAssignments = capacityData.assignments.filter(a => a.project_id === proj.id && a.project_status !== 'done' && a.project_status !== 'blocked' && a.project_status !== 'pending')
                                   if (projAssignments.length === 0) return null
                                   const totalWeeklyHrs = projAssignments.reduce((s, a) => {
                                     const designerMember = capacityData.team.find(m => m.id === a.designer_id)
@@ -4084,6 +4091,12 @@ const [showFilters, setShowFilters] = useState(false)
                                 <div className="assignment-chips-blocked">
                                   <div className="chips-blocked-label">Blocked</div>
                                   {blockedAssignments.map((a: CapacityAssignment) => renderChip(a, false, true))}
+                                </div>
+                              )}
+                              {pendingAssignments.length > 0 && (
+                                <div className="assignment-chips-done">
+                                  <div className="chips-done-label">Pending</div>
+                                  {pendingAssignments.map((a: CapacityAssignment) => renderChip(a, true))}
                                 </div>
                               )}
                               {doneAssignments.length > 0 && (
@@ -4193,13 +4206,14 @@ const [showFilters, setShowFilters] = useState(false)
         const reviewProjects = currentProjects.filter(p => p.status === 'review')
         const blockedProjects = currentProjects.filter(p => p.status === 'blocked')
         const doneProjects = currentProjects.filter(p => p.status === 'done')
+        const pendingProjects = currentProjects.filter(p => p.status === 'pending')
         const overdueProjects = currentProjects.filter(p => {
-          if (!p.endDate || p.status === 'done') return false
+          if (!p.endDate || p.status === 'done' || p.status === 'pending') return false
           const end = parseLocalDate(p.endDate)
           return end ? end < today : false
         })
-        const noEstimate = currentProjects.filter(p => p.status !== 'done' && (!p.estimatedHours || p.estimatedHours <= 0))
-        const noDesigner = currentProjects.filter(p => p.status !== 'done' && (!p.designers || p.designers.length === 0))
+        const noEstimate = currentProjects.filter(p => p.status !== 'done' && p.status !== 'pending' && (!p.estimatedHours || p.estimatedHours <= 0))
+        const noDesigner = currentProjects.filter(p => p.status !== 'done' && p.status !== 'pending' && (!p.designers || p.designers.length === 0))
 
         const openReport = (title: string, content: string, richContent?: React.ReactNode) => {
           setReportModal({ open: true, title, content, richContent })
@@ -4611,7 +4625,7 @@ const [showFilters, setShowFilters] = useState(false)
         }
 
         const generateProjectReview = () => {
-          const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked' }
+          const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending' }
           const sizeMap: Record<number, string> = { 35: 'XXS', 70: 'XS', 105: 'S', 175: 'M', 280: 'L', 455: 'XL', 910: 'XXL' }
 
           // Review projects grouped by BL
@@ -4816,7 +4830,7 @@ const [showFilters, setShowFilters] = useState(false)
               const assignments = capAssignments.filter(a => a.designer_id === m.id)
               const activeAssignments = assignments.filter(a => {
                 const proj = projects.find(p => p.name === a.project_name)
-                return !proj || (proj.status !== 'done' && proj.status !== 'blocked')
+                return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending')
               })
               const allocatedHours = activeAssignments.reduce((sum, a) => {
                 return sum + parseFloat(((available * (a.allocation_percent || 0)) / 100).toFixed(1))
@@ -4830,7 +4844,7 @@ const [showFilters, setShowFilters] = useState(false)
               const totalEstimated = activeProjects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
               const totalAllocated = capAssignments.reduce((sum, a) => {
                 const proj = projects.find(p => p.name === a.project_name)
-                if (!proj || proj.status === 'done' || proj.status === 'blocked') return sum
+                if (!proj || proj.status === 'done' || proj.status === 'blocked' || proj.status === 'pending') return sum
                 if (!proj.startDate || !proj.endDate) return sum
                 const designer = capTeam.find(m => m.id === a.designer_id)
                 if (!designer || excludedDesigners.has(designer.id)) return sum
@@ -4871,7 +4885,7 @@ const [showFilters, setShowFilters] = useState(false)
             }
           }
           const designerCounts: Record<string, number> = {}
-          for (const p of currentProjects.filter(pr => pr.status !== 'done')) {
+          for (const p of currentProjects.filter(pr => pr.status !== 'done' && pr.status !== 'pending')) {
             for (const d of (p.designers || [])) {
               designerCounts[d] = (designerCounts[d] || 0) + 1
             }
@@ -4881,7 +4895,7 @@ const [showFilters, setShowFilters] = useState(false)
             '',
             'OVERVIEW',
             `  Total: ${currentProjects.length}${archivedProjects.length > 0 ? ` (${archivedProjects.length} archived)` : ''}`,
-            `  Active: ${activeProjects.length} | Review: ${reviewProjects.length} | Blocked: ${blockedProjects.length} | Done: ${doneProjects.length}`,
+            `  Active: ${activeProjects.length} | Review: ${reviewProjects.length} | Blocked: ${blockedProjects.length} | Pending: ${pendingProjects.length} | Done: ${doneProjects.length}`,
             `  Overdue: ${overdueProjects.length}`,
             `  Missing estimates: ${noEstimate.length} | Missing designers: ${noDesigner.length}`,
             '',
@@ -4945,7 +4959,7 @@ const [showFilters, setShowFilters] = useState(false)
             description: 'Project status summary by active, review, blocked, and done. Includes designers, hours, and due dates.',
             icon: <ListChecks size={24} />,
             color: '#3b82f6',
-            stats: `${activeProjects.length} active, ${reviewProjects.length} review, ${blockedProjects.length} blocked`,
+            stats: `${activeProjects.length} active, ${reviewProjects.length} review, ${blockedProjects.length} blocked, ${pendingProjects.length} pending`,
             generate: generateWeeklyStatus,
           },
           {
@@ -6271,15 +6285,15 @@ const [showFilters, setShowFilters] = useState(false)
               <div className="form-section">
                 <div className="form-section-title">Status</div>
                 <div className="status-options" style={{ marginBottom: '0.6rem' }}>
-                  {(['active', 'review', 'done', 'blocked'] as const).map(s => (
+                  {(['active', 'review', 'done', 'blocked', 'pending'] as const).map(s => (
                     <button
                       key={s}
                       type="button"
                       className={`status-option ${projectFormData.status === s ? 'active' : ''}`}
                       onClick={() => setProjectFormData({ ...projectFormData, status: s })}
                     >
-                      <span className={`status-dot ${s === 'active' ? 'bg-blue-500' : s === 'review' ? 'bg-yellow-500' : s === 'done' ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                      <span className={`status-dot ${s === 'active' ? 'bg-blue-500' : s === 'review' ? 'bg-yellow-500' : s === 'done' ? 'bg-green-500' : s === 'blocked' ? 'bg-red-500' : 'bg-slate-400'}`}></span>
+                      {s === 'review' ? 'In Review' : s.charAt(0).toUpperCase() + s.slice(1)}
                     </button>
                   ))}
                 </div>

@@ -186,6 +186,44 @@ git push origin <commit-hash>:main --force
 
 ---
 
+### ✅ 2026-04-10
+**Date:** 2026-04-10
+**Site version:** `2026.04.10.0720`
+
+#### What was built
+
+**New "Pending" project status**
+- Slate gray (`#94a3b8`) status added across entire stack: type system, UI maps, switches, filter pills, form buttons, status badges, sort order (last, after done)
+- Treated like "done" in capacity: excluded from utilization gauges, allocation calculations, designer project counts, weekly heatmap, and active assignment lists
+- Shown as grayed-out chips in designer capacity cards (same visual as done)
+- Excluded from: overdue warnings, "no designer"/"no estimate" warnings, weekly update forms, report designer counts
+- Added to: summary stats bar, project statistics report, weekly status card stats, server-side review status maps
+- CSS class `.bg-slate-400`, DESIGN.md color map updated
+
+**W&I Open Critiques report (replaced Project Review)**
+- Two-section report: review projects grouped by business line (with notes, t-shirt size pills, per-designer User icons, links) + all active projects (concise listing by BL)
+- Uses review site notes from `editingReview?.items` instead of weekly highlights/lowlights
+- Individual `<User size={10} />` icons per designer, size pills via `.rr-size-pill`, "Project end:" date prefix
+- Legacy W&I Open Crits card disabled (30% opacity, bottom of page, `pointerEvents: 'none'`)
+
+**Review snapshot system**
+- New `review_snapshots` DB table (same schema as `weekly_snapshots`)
+- `generateReviewSnapshot(week)` captures latest review items + all active projects
+- API: `GET/POST /api/review-snapshots`, `GET /api/review-snapshots/:week`
+- Tuesday 5pm ET cron via `startReviewCron()` (30-second check interval)
+- Frontend accordion for past review reports (mirrors weekly snapshot UI)
+
+**Optimistic locking for review notes**
+- `PUT /api/review-items/:id/notes` accepts `expected_updated_at`, compares against DB `notes_updated_at`
+- Returns 409 with `updated_by` and `updated_at` on conflict
+- Client-side conflict toast (red, bottom-center, auto-dismiss 6s) with `save-error` CSS class
+
+#### Bug fixes
+- **Orphaned weekly updates** — Fixed "General/Unknown" entries in weekly status report on production. Two orphaned `weekly_updates` rows referenced deleted projects. Deleted orphans from production DB and changed `LEFT JOIN projects` → `INNER JOIN` in weekly updates list query and `generateSnapshot()` to prevent future display of orphaned records
+- **Market Data custom links** — Removed junk test data from Market Data project in local DB
+
+---
+
 ### ✅ v260316-capacity-model
 **Date:** 2026-03-16
 **Time:** ~3:10 PM PST

@@ -166,7 +166,7 @@ Or use `<div className="modal-footer">` for right-aligned actions.
 ```jsx
 <span className="status-dot" style={{ background: statusColors[status] }} />
 ```
-Status color map: `{ active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444' }`
+Status color map: `{ active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8' }`
 
 ### Empty States
 

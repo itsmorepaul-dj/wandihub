@@ -623,6 +623,10 @@
   background-color: #ef4444;
 }
 
+.bg-slate-400 {
+  background-color: #94a3b8;
+}
+
 .due-date {
   color: var(--color-text-muted);
   font-size: 0.85rem;
