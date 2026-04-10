@@ -1369,7 +1369,7 @@ const [showFilters, setShowFilters] = useState(false)
   const handleAddProject = () => {
     setEditingProject(null)
     setProjectFormData({
-      name: '', url: '', status: 'active', startDate: '', endDate: '', designers: [],
+      name: '', description: '', url: '', status: 'active', startDate: '', endDate: '', designers: [],
       businessLines: [],
       deckName: '', deckLink: '', prdName: '', prdLink: '', briefName: '', briefLink: '', figmaLink: '',
       customLinks: [],
