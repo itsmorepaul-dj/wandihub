@@ -5360,11 +5360,14 @@ a.report-view-btn {
 .rr-update-links {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 0.1rem 0.15rem;
-  line-height: 1.1;
+  align-items: baseline;
+  gap: 0.1rem 0;
+  line-height: 1.6;
   margin-top: -0.1rem;
   margin-bottom: 0.8rem;
+}
+.rr-update-links > span {
+  white-space: nowrap;
 }
 .rr-update-links a {
   font-size: 0.7rem;
@@ -5464,9 +5467,14 @@ a.report-view-btn {
 }
 .rr-active-links {
   display: flex;
-  align-items: center;
-  gap: 0.1rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.1rem 0;
+  line-height: 1.6;
   padding-left: 0.1rem;
+}
+.rr-active-links > span {
+  white-space: nowrap;
 }
 .rr-active-links a {
   font-size: 0.65rem;

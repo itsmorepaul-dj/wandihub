@@ -4322,7 +4322,7 @@ const [showFilters, setShowFilters] = useState(false)
                 <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
                 {links.length > 0 && (
                   <div className="rr-update-links">
-                    {links.map((l, i) => <span key={i}>{i > 0 && <span className="rr-link-sep">|</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                    {links.map((l, i) => <span key={i}><span className="rr-link-sep">·</span><a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
                   </div>
                 )}
                 <div className="rr-update-desc">{renderMarkdownLinks(u.description)}</div>
@@ -4468,7 +4468,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
                   {links.length > 0 && (
                     <div className="rr-update-links">
-                      {links.map((l, i) => <span key={i}>{i > 0 && <span className="rr-link-sep">|</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                      {links.map((l, i) => <span key={i}><span className="rr-link-sep">·</span><a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
                     </div>
                   )}
                   <div className="rr-update-desc">{renderMarkdownLinks(u.description)}</div>
@@ -4588,7 +4588,7 @@ const [showFilters, setShowFilters] = useState(false)
                           </div>
                           {p.links?.length > 0 && (
                             <div className="rr-update-links">
-                              {p.links.map((l: any, li: number) => <span key={li}>{li > 0 && <span className="rr-link-sep">·</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                              {p.links.map((l: any, li: number) => <span key={li}><span className="rr-link-sep">·</span><a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
                             </div>
                           )}
                           {p.notes && (
@@ -4631,7 +4631,7 @@ const [showFilters, setShowFilters] = useState(false)
                           </div>
                           {p.links?.length > 0 && (
                             <div className="rr-active-links">
-                              {p.links.map((l: any, li: number) => <span key={li}>{li > 0 && <span className="rr-link-sep">·</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                              {p.links.map((l: any, li: number) => <span key={li}><span className="rr-link-sep">·</span><a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
                             </div>
                           )}
                         </div>
@@ -4776,7 +4776,7 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
                 {links.length > 0 && (
                   <div className="rr-update-links">
-                    {links.map((l, i) => <span key={i}>{i > 0 && <span className="rr-link-sep">·</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                    {links.map((l, i) => <span key={i}><span className="rr-link-sep">·</span><a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
                   </div>
                 )}
                 {notes && (
@@ -4803,7 +4803,7 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
                 {links.length > 0 && (
                   <div className="rr-active-links">
-                    {links.map((l, i) => <span key={i}>{i > 0 && <span className="rr-link-sep">·</span>}<a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
+                    {links.map((l, i) => <span key={i}><span className="rr-link-sep">·</span><a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
                   </div>
                 )}
               </div>
