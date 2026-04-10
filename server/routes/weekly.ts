@@ -29,7 +29,7 @@ router.get('/weekly-updates', async (req, res) => {
                p.businessLine as business_lines
                FROM weekly_updates wu
                LEFT JOIN team t ON wu.designer_id = t.id
-               LEFT JOIN projects p ON wu.project_id = p.id
+               JOIN projects p ON wu.project_id = p.id
                WHERE wu.week = ?`
     const params: any[] = [week]
     if (projectId) {
@@ -158,7 +158,7 @@ const generateSnapshot = async (week: string) => {
     `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
      FROM weekly_updates wu
      LEFT JOIN team t ON wu.designer_id = t.id
-     LEFT JOIN projects p ON wu.project_id = p.id
+     JOIN projects p ON wu.project_id = p.id
      WHERE wu.week = ? ORDER BY wu.created_at DESC`, [week]
   )
   const general = await all(
