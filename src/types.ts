@@ -8,6 +8,7 @@ export interface TimelineRange {
 export interface Project {
   id: string
   name: string
+  description?: string
   url?: string
   status: 'active' | 'review' | 'done' | 'blocked' | 'pending'
   startDate?: string

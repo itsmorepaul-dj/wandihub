@@ -27,11 +27,11 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Project descriptions — optional description field in the edit modal, displayed on project cards below the title',
+  'Duplicate from archive — duplicate an archived project directly into active without restoring it first',
+  'Weekly updates for all statuses — the weekly report accordion now appears on projects in any status, not just active/review/blocked',
+  'Multi-designer icon — project cards show the group icon when more than one designer is assigned',
   'Pending status — new project status for not-yet-started work, grayed out in capacity like done, sorted last',
-  'W&I Open Critiques — redesigned report with review site notes, t-shirt sizing, per-designer icons, and full active project listing by business line',
-  'Review snapshots — automatic Tuesday 5pm ET reports with accordion history, matching the weekly status pattern',
-  'Concurrent edit protection — review site notes now detect conflicts when two people edit at the same time',
-  'Review agenda — create, navigate, and share public review pages with project status, designers, links, notes, and Gantt timelines',
 ]
 
 
@@ -248,6 +248,7 @@ function App() {
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [projectFormData, setProjectFormData] = useState({
     name: '',
+    description: '',
     url: '',
     status: 'active' as Project['status'],
     startDate: '',
@@ -1383,6 +1384,7 @@ const [showFilters, setShowFilters] = useState(false)
     setEditingProject(project)
     setProjectFormData({
       name: project.name,
+      description: project.description || '',
       url: project.url || '',
       status: project.status,
       startDate: project.startDate || '',
@@ -1684,7 +1686,7 @@ const [showFilters, setShowFilters] = useState(false)
   }
 
   const unarchiveProject = async (projectId: string) => {
-    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: null } : p))
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: null, status: 'active' } : p))
     await authFetch(`/api/projects/${projectId}/unarchive`, { method: 'PUT' })
   }
 
@@ -2175,7 +2177,11 @@ const [showFilters, setShowFilters] = useState(false)
             <div className="changelog-popover">
               <div className="changelog-title">What's new</div>
               <ul className="changelog-list">
-                {CHANGELOG.map((item, i) => <li key={i}>{item}</li>)}
+                {CHANGELOG.map((item, i) => {
+                  const dash = item.indexOf('—')
+                  if (dash === -1) return <li key={i}>{item}</li>
+                  return <li key={i}><strong>{item.slice(0, dash).trim()}</strong> — {item.slice(dash + 1).trim()}</li>
+                })}
               </ul>
             </div>
           )}
@@ -2634,16 +2640,50 @@ const [showFilters, setShowFilters] = useState(false)
                                   <div key={p.id} className="archive-card">
                                     <div className="archive-card-header">
                                       <span className="archive-card-name">{p.name}</span>
-                                      {isAdmin && (
-                                        <button className="archive-restore-btn" title="Restore to active projects" onClick={() => unarchiveProject(p.id)}>
-                                          <RotateCcw size={13} />
-                                          Restore
+                                      <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                        <button className="archive-restore-btn" title="Duplicate as new active project" onClick={() => {
+                                          const phase = p.name.match(/Phase\s+(\d+)/i)
+                                          const nextPhase = phase ? parseInt(phase[1]) + 1 : 2
+                                          const newName = phase
+                                            ? p.name.replace(/Phase\s+\d+/i, `Phase ${nextPhase}`)
+                                            : `${p.name} (Phase ${nextPhase})`
+                                          setProjectFormData({
+                                            name: newName,
+                                            description: p.description || '',
+                                            url: p.url || '',
+                                            status: 'active',
+                                            startDate: '',
+                                            endDate: '',
+                                            designers: p.designers || [],
+                                            businessLines: p.businessLines || [],
+                                            deckName: p.deckName || '',
+                                            deckLink: p.deckLink || '',
+                                            prdName: p.prdName || '',
+                                            prdLink: p.prdLink || '',
+                                            briefName: p.briefName || '',
+                                            briefLink: p.briefLink || '',
+                                            figmaLink: p.figmaLink || '',
+                                            customLinks: p.customLinks || [],
+                                            timeline: p.timeline || [],
+                                            estimatedHours: 0,
+                                          })
+                                          setEditingProject(null)
+                                          setShowProjectModal(true)
+                                        }}>
+                                          <Copy size={13} />
+                                          Duplicate
                                         </button>
-                                      )}
+                                        {isAdmin && (
+                                          <button className="archive-restore-btn" title="Restore to active projects" onClick={() => unarchiveProject(p.id)}>
+                                            <RotateCcw size={13} />
+                                            Restore
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                     <div className="archive-card-meta">
                                       {p.designers && p.designers.length > 0 && (
-                                        <span className="archive-card-tag"><User size={12} />{p.designers.map(d => d.split(' ')[0]).join(', ')}</span>
+                                        <span className="archive-card-tag">{p.designers.length > 1 ? <Users size={12} /> : <User size={12} />}{p.designers.map(d => d.split(' ')[0]).join(', ')}</span>
                                       )}
                                       {p.startDate && p.endDate && (
                                         <span className="archive-card-tag"><Calendar size={12} />{formatShortDate(p.startDate)} – {formatShortDate(p.endDate)}</span>
@@ -2768,10 +2808,13 @@ const [showFilters, setShowFilters] = useState(false)
                               {getStatusLabel(project.status)}
                             </span>
                           </div>
+                          {project.description && (
+                            <div className="project-description">{project.description}</div>
+                          )}
                           <div className="project-meta">
                             {(project.designers || []).length > 0 ? (
                               <span className="project-meta-chip">
-                                <User size={11} />
+                                {(project.designers || []).length > 1 ? <Users size={11} /> : <User size={11} />}
                                 {(project.designers || []).map((d: string) => d.split(' ')[0]).join(', ')}
                               </span>
                             ) : project.status !== 'done' && project.status !== 'pending' ? (
@@ -2901,7 +2944,7 @@ const [showFilters, setShowFilters] = useState(false)
                           </div>
                         </div>
                         {/* Weekly Update Inline */}
-                        {project.status !== 'done' && project.status !== 'pending' && currentWeek && (() => {
+                        {currentWeek && (() => {
                           const projectUpdates = weeklyUpdates.filter(u => u.project_id === project.id)
                           const assignedDesignerNames = project.designers || []
                           const primaryDesigner = team.find(t => assignedDesignerNames.includes(t.name))
@@ -6236,6 +6279,16 @@ const [showFilters, setShowFilters] = useState(false)
                     />
                     <label htmlFor="project-url">Jira Project Link</label>
                   </div>
+                </div>
+                <div className={`float-field${projectFormData.description ? ' has-value' : ''}`} style={{ marginTop: '0.5rem' }}>
+                  <textarea
+                    id="project-description"
+                    value={projectFormData.description}
+                    onChange={e => setProjectFormData({ ...projectFormData, description: e.target.value })}
+                    placeholder=" "
+                    rows={2}
+                  />
+                  <label htmlFor="project-description">Description (optional)</label>
                 </div>
                 <div className="form-group" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
                   <div className="form-section-title" style={{ marginBottom: '0.5rem' }}>Business Lines</div>

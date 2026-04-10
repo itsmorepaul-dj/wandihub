@@ -96,7 +96,7 @@ router.put('/projects/:id/archive', async (req, res) => {
 router.put('/projects/:id/unarchive', async (req, res) => {
   try {
     const proj = await get('SELECT name, archivedQuarter FROM projects WHERE id = ?', [req.params.id]) as any
-    await run("UPDATE projects SET archivedQuarter = NULL, updatedAt = datetime('now') WHERE id = ?", [req.params.id])
+    await run("UPDATE projects SET archivedQuarter = NULL, status = 'active', updatedAt = datetime('now') WHERE id = ?", [req.params.id])
     await updateDbVersion()
     await logActivity('project', 'update', proj?.name || req.params.id, getUserEmail(req), `Restored from archive (${proj?.archivedQuarter || 'unknown'})`)
     res.json({ success: true })
