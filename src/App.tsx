@@ -6284,18 +6284,17 @@ const [showFilters, setShowFilters] = useState(false)
               {/* Status & Schedule */}
               <div className="form-section">
                 <div className="form-section-title">Status</div>
-                <div className="status-options" style={{ marginBottom: '0.6rem' }}>
-                  {(['active', 'review', 'done', 'blocked', 'pending'] as const).map(s => (
-                    <button
-                      key={s}
-                      type="button"
-                      className={`status-option ${projectFormData.status === s ? 'active' : ''}`}
-                      onClick={() => setProjectFormData({ ...projectFormData, status: s })}
-                    >
-                      <span className={`status-dot ${s === 'active' ? 'bg-blue-500' : s === 'review' ? 'bg-yellow-500' : s === 'done' ? 'bg-green-500' : s === 'blocked' ? 'bg-red-500' : 'bg-slate-400'}`}></span>
-                      {s === 'review' ? 'In Review' : s.charAt(0).toUpperCase() + s.slice(1)}
-                    </button>
-                  ))}
+                <div className="status-select-wrapper" style={{ marginBottom: '0.6rem' }}>
+                  <span className={`status-dot ${getStatusColor(projectFormData.status)}`} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', zIndex: 1 }}></span>
+                  <select
+                    className="status-select"
+                    value={projectFormData.status}
+                    onChange={e => setProjectFormData({ ...projectFormData, status: e.target.value as Project['status'] })}
+                  >
+                    {(['active', 'review', 'done', 'blocked', 'pending'] as const).map(s => (
+                      <option key={s} value={s}>{getStatusLabel(s)}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="form-section-title" style={{ marginBottom: '0.4rem' }}>Schedule</div>

@@ -1259,6 +1259,32 @@
   color: var(--color-text);
 }
 
+.status-select-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+.status-select {
+  width: 100%;
+  padding: 0.5rem 0.75rem 0.5rem 2rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+}
+
+.status-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
 .avatar-options {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
