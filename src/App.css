@@ -6102,6 +6102,10 @@ select:focus-visible {
   border-radius: var(--radius-sm);
   padding: 16px;
 }
+.business-line-card .project-attached-images {
+  padding: 0.5rem 0 0;
+  border-top: none;
+}
 
 .business-line-header {
   display: flex;

@@ -27,6 +27,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Business line images — add, caption, and delete images on business lines in settings, with thumbnails on the card',
+  'Archive & quarter management for all — restore projects and run quarter rollovers without needing admin',
   'Project descriptions — optional description field in the edit modal, displayed on project cards below the title',
   'Duplicate from archive — duplicate an archived project directly into active without restoring it first',
   'Weekly updates for all statuses — the weekly report accordion now appears on projects in any status, not just active/review/blocked',
@@ -703,6 +705,8 @@ const [showFilters, setShowFilters] = useState(false)
   const [businessLineFormData, setBusinessLineFormData] = useState({
     name: '', customLinks: [] as { name: string; url: string }[]
   })
+  const [blImages, setBlImages] = useState<ProjectImage[]>([])
+  const [uploadingBlImage, setUploadingBlImage] = useState(false)
   
   // Notes state
   const [notes, setNotes] = useState<Note[]>([])
@@ -1354,6 +1358,48 @@ const [showFilters, setShowFilters] = useState(false)
   const deleteBusinessLine = async (id: string) => {
     await authFetch(`/api/business-lines/${id}`, { method: 'DELETE' })
     setBusinessLines(businessLines.filter(bl => bl.id !== id))
+  }
+
+  const uploadBlImage = async (blId: string, file: Blob, originalName: string) => {
+    setUploadingBlImage(true)
+    try {
+      const res = await authFetch('/api/images', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'image/png', 'X-Project-Id': blId, 'X-Original-Name': originalName },
+        body: file,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        alert(`Image upload failed: ${err.error || res.statusText}`)
+        setUploadingBlImage(false)
+        return
+      }
+      const saved = await res.json() as ProjectImage
+      setBlImages(prev => [saved, ...prev])
+      setAllProjectImages(prev => [saved, ...prev])
+    } catch (err) { console.error('BL image upload error:', err) }
+    setUploadingBlImage(false)
+  }
+
+  const deleteBlImage = async (imageId: string) => {
+    try {
+      await authFetch(`/api/images/${imageId}`, { method: 'DELETE' })
+      setBlImages(prev => prev.filter(img => img.id !== imageId))
+      setAllProjectImages(prev => prev.filter(img => img.id !== imageId))
+    } catch (err) { console.error('BL image delete error:', err) }
+  }
+
+  const updateBlImageCaption = async (imageId: string, caption: string) => {
+    try {
+      const res = await authFetch(`/api/images/${imageId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caption }),
+      })
+      const saved = await res.json() as ProjectImage
+      setBlImages(prev => prev.map(img => img.id === imageId ? saved : img))
+      setAllProjectImages(prev => prev.map(img => img.id === imageId ? saved : img))
+    } catch (err) { console.error('BL caption update error:', err) }
   }
 
   // Handle clicking a project event in day modal - switch to projects page
@@ -5931,6 +5977,7 @@ const [showFilters, setShowFilters] = useState(false)
               <button className="primary-btn" onClick={() => {
                 setEditingBusinessLine(null)
                 setBusinessLineFormData({ name: '', customLinks: [] })
+                setBlImages([])
                 setShowBusinessLineModal(true)
               }}>
                 + Add Business Line
@@ -5952,6 +5999,7 @@ const [showFilters, setShowFilters] = useState(false)
                             name: line.name,
                             customLinks: line.customLinks || []
                           })
+                          authFetch(`/api/images?project_id=${line.id}`).then(r => r.json()).then(setBlImages).catch(() => setBlImages([]))
                           setShowBusinessLineModal(true)
                         }}>
                           <Pencil size={14} />
@@ -5972,6 +6020,24 @@ const [showFilters, setShowFilters] = useState(false)
                         </a>
                       ))}
                     </div>
+                    {(() => {
+                      const imgs = allProjectImages.filter(i => i.project_id === line.id)
+                      if (imgs.length === 0) return null
+                      return (
+                        <div className="project-attached-images">
+                          <span className="project-attached-label">Attached images</span>
+                          <div className="project-images-inline">
+                            {imgs.slice(0, 4).map((img, idx) => (
+                              <div key={img.id} className="project-image-thumb">
+                                <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
+                                  onClick={() => setLightbox({ images: imgs, index: idx })} />
+                              </div>
+                            ))}
+                            {imgs.length > 4 && <span className="project-card-images">+{imgs.length - 4} more</span>}
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 ))}
               </div>
@@ -7306,6 +7372,65 @@ const [showFilters, setShowFilters] = useState(false)
                   </button>
                 )}
               </div>
+
+              {/* Images */}
+              {editingBusinessLine && (
+                <div className="form-section">
+                  <div className="form-section-title">Images</div>
+                  <div
+                    className={`project-image-drop${uploadingBlImage ? ' uploading' : ''}`}
+                    onPaste={async (e) => {
+                      const items = e.clipboardData?.items
+                      if (!items) return
+                      for (const item of Array.from(items)) {
+                        if (item.type.startsWith('image/')) {
+                          e.preventDefault()
+                          const file = item.getAsFile()
+                          if (file) await uploadBlImage(editingBusinessLine.id, file, file.name || 'pasted-image.png')
+                          return
+                        }
+                      }
+                    }}
+                    onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('dragover') }}
+                    onDragLeave={e => e.currentTarget.classList.remove('dragover')}
+                    onDrop={async (e) => {
+                      e.preventDefault()
+                      e.currentTarget.classList.remove('dragover')
+                      const files = e.dataTransfer?.files
+                      if (!files) return
+                      for (const file of Array.from(files)) {
+                        if (file.type.startsWith('image/')) {
+                          await uploadBlImage(editingBusinessLine.id, file, file.name)
+                        }
+                      }
+                    }}
+                    tabIndex={0}
+                  >
+                    {uploadingBlImage && <div className="project-image-uploading"><Loader size={14} className="spin" /> Uploading...</div>}
+                    {!uploadingBlImage && blImages.length === 0 && (
+                      <div className="project-image-placeholder">Paste or drag an image here</div>
+                    )}
+                    {blImages.length > 0 && (
+                      <div className="project-image-grid">
+                        {blImages.map((img, idx) => (
+                          <div key={img.id} className="project-image-item">
+                            <div className="project-image-thumb">
+                              <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
+                                onClick={() => setLightbox({ images: blImages, index: idx })} />
+                              <button className="project-image-delete" onClick={() => deleteBlImage(img.id)} title="Delete image">
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                            <input className="project-image-caption" placeholder="Add caption..."
+                              defaultValue={img.caption || ''}
+                              onBlur={e => { if (e.target.value !== (img.caption || '')) updateBlImageCaption(img.id, e.target.value) }} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="modal-footer">
