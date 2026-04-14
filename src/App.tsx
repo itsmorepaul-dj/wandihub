@@ -2673,12 +2673,10 @@ const [showFilters, setShowFilters] = useState(false)
                                           <Copy size={13} />
                                           Duplicate
                                         </button>
-                                        {isAdmin && (
-                                          <button className="archive-restore-btn" title="Restore to active projects" onClick={() => unarchiveProject(p.id)}>
-                                            <RotateCcw size={13} />
-                                            Restore
-                                          </button>
-                                        )}
+                                        <button className="archive-restore-btn" title="Restore to active projects" onClick={() => unarchiveProject(p.id)}>
+                                          <RotateCcw size={13} />
+                                          Restore
+                                        </button>
                                       </div>
                                     </div>
                                     <div className="archive-card-meta">
@@ -5869,37 +5867,35 @@ const [showFilters, setShowFilters] = useState(false)
           </div>
 
           {/* Quarter Management */}
-          {isAdmin && (
-            <div className="settings-section settings-admin-only">
-              <div className="settings-header">
-                <h2>Quarter Management</h2>
+          <div className="settings-section">
+            <div className="settings-header">
+              <h2>Quarter Management</h2>
+            </div>
+            <div className="settings-general-card">
+              <div className="settings-row">
+                <span>Current Quarter</span>
+                <span style={{ fontWeight: 600 }}>{getCurrentFiscalQuarter()}</span>
               </div>
-              <div className="settings-general-card">
-                <div className="settings-row">
-                  <span>Current Quarter</span>
-                  <span style={{ fontWeight: 600 }}>{getCurrentFiscalQuarter()}</span>
-                </div>
-                <div className="settings-row">
-                  <span>Previous Quarter</span>
-                  <span style={{ fontWeight: 600 }}>{getPreviousFiscalQuarter()}</span>
-                </div>
-                <div className="settings-row">
-                  <span>Done (unarchived)</span>
-                  <span>{currentProjects.filter(p => p.status === 'done').length} projects</span>
-                </div>
-                <div className="settings-row">
-                  <span>Archived</span>
-                  <span>{archivedProjects.length} projects across {Object.keys(archivedByQuarter).length} quarter{Object.keys(archivedByQuarter).length !== 1 ? 's' : ''}</span>
-                </div>
-                <div className="settings-row">
-                  <span />
-                  <button className="primary-btn" onClick={handleQuarterRollover}>
-                    Archive to {getPreviousFiscalQuarter()}
-                  </button>
-                </div>
+              <div className="settings-row">
+                <span>Previous Quarter</span>
+                <span style={{ fontWeight: 600 }}>{getPreviousFiscalQuarter()}</span>
+              </div>
+              <div className="settings-row">
+                <span>Done (unarchived)</span>
+                <span>{currentProjects.filter(p => p.status === 'done').length} projects</span>
+              </div>
+              <div className="settings-row">
+                <span>Archived</span>
+                <span>{archivedProjects.length} projects across {Object.keys(archivedByQuarter).length} quarter{Object.keys(archivedByQuarter).length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="settings-row">
+                <span />
+                <button className="primary-btn" onClick={handleQuarterRollover}>
+                  Archive to {getPreviousFiscalQuarter()}
+                </button>
               </div>
             </div>
-          )}
+          </div>
 
           {/* Holidays Section (All Users) */}
           <div className="settings-section">
