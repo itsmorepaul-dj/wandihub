@@ -32,8 +32,6 @@ const CHANGELOG = [
   'Project descriptions — optional description field in the edit modal, displayed on project cards below the title',
   'Duplicate from archive — duplicate an archived project directly into active without restoring it first',
   'Weekly updates for all statuses — the weekly report accordion now appears on projects in any status, not just active/review/blocked',
-  'Multi-designer icon — project cards show the group icon when more than one designer is assigned',
-  'Pending status — new project status for not-yet-started work, grayed out in capacity like done, sorted last',
 ]
 
 
