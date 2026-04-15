@@ -359,6 +359,14 @@ router.get('/review/:id', async (req, res) => {
       designers: item.designers ? JSON.parse(item.designers) : [],
     }))
 
+    // Load images for each review item
+    for (const item of parsed) {
+      item.images = await all(
+        'SELECT * FROM project_images WHERE project_id = ? ORDER BY created_at ASC',
+        [item.id]
+      ) as any[]
+    }
+
     const allReviews = await all('SELECT id, title, week, created_at FROM reviews ORDER BY created_at DESC') as any[]
     const teamMembers = await all('SELECT name, slack FROM team') as { name: string; slack: string }[]
     const slackByName = new Map(teamMembers.map(t => [t.name, t.slack]))
@@ -398,12 +406,38 @@ router.get('/review/:id', async (req, res) => {
         }
       }
 
+      const hasImages = item.images && item.images.length > 0
+
+      // Build image grid HTML (shared between auth and unauth)
+      const imageGridHtml = (images: any[], editable: boolean) => {
+        if (images.length === 0 && !editable) return ''
+        const thumbs = images.map((img: any, idx: number) => `
+          <div class="review-image-item" data-image-id="${escHtml(img.id)}">
+            <div class="review-image-thumb">
+              <img src="/api/images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
+                data-lightbox-trigger data-item-id="${escHtml(item.id)}" data-image-index="${idx}" />
+              ${editable ? `<button class="review-image-delete" data-image-id="${escHtml(img.id)}" title="Delete image">&times;</button>` : ''}
+            </div>
+            ${editable
+              ? `<input class="review-image-caption" placeholder="Add caption..." value="${escHtml(img.caption || '')}" data-image-id="${escHtml(img.id)}" data-original-caption="${escHtml(img.caption || '')}" />`
+              : (img.caption ? `<div class="review-image-caption-ro" title="${escHtml(img.caption)}">${escHtml(img.caption)}</div>` : '')}
+          </div>`).join('')
+        return images.length > 0 ? `<div class="review-image-grid">${thumbs}</div>` : ''
+      }
+
+      const imagesDataTag = `<script type="application/json" class="review-images-data" data-item-id="${escHtml(item.id)}">${JSON.stringify(item.images || [])}</script>`
+
       let notesSection = ''
       if (isAuthed) {
+        const badges: string[] = []
+        if (hasNotes) badges.push('has notes')
+        if (hasImages) badges.push('has images')
+        const badgeHtml = badges.length > 0 ? ` <span class="notes-badge">${badges.join(' &amp; ')}</span>` : ''
+
         notesSection = `<div class="card-notes">
-          <button class="notes-accordion${hasNotes ? ' has-notes' : ''}" data-item-id="${escHtml(item.id)}">
+          <button class="notes-accordion${hasNotes || hasImages ? ' has-notes' : ''}" data-item-id="${escHtml(item.id)}">
             <svg class="notes-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            Open Notes${hasNotes ? ' <span class="notes-badge">has notes</span>' : ''}
+            Open Notes${badgeHtml}
           </button>
           <div class="notes-panel" style="display:none">
             <div class="notes-toolbar">
@@ -423,17 +457,35 @@ router.get('/review/:id', async (req, res) => {
               ${quickLinks.length > 0 ? `<div class="notes-quick-links">${quickLinks.join('')}</div>` : ''}
             </div>
             <div class="notes-editor" contenteditable="true" data-item-id="${escHtml(item.id)}" data-updated-at="${escHtml(item.notes_updated_at || '')}" data-placeholder="Add review notes...">${markdownToHtml(item.notes || '')}</div>
+            <div class="review-images" data-item-id="${escHtml(item.id)}">
+              <div class="review-images-label">Images</div>
+              <div class="review-image-drop" data-item-id="${escHtml(item.id)}" tabindex="0">
+                ${imageGridHtml(item.images, true)}
+                <div class="review-image-placeholder"${hasImages ? ' style="display:none"' : ''}>Paste or drag an image here</div>
+              </div>
+            </div>
+            ${imagesDataTag}
             <div class="notes-resize-handle" title="Drag to resize"></div>
           </div>
         </div>`
-      } else if (hasNotes) {
+      } else if (hasNotes || hasImages) {
+        const badges: string[] = []
+        if (hasNotes) badges.push('has notes')
+        if (hasImages) badges.push('has images')
+        const badgeHtml = ` <span class="notes-badge">${badges.join(' &amp; ')}</span>`
+
         notesSection = `<div class="card-notes">
           <button class="notes-accordion has-notes" data-item-id="${escHtml(item.id)}">
             <svg class="notes-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            Open Notes <span class="notes-badge">has notes</span>
+            Open Notes${badgeHtml}
           </button>
           <div class="notes-panel" style="display:none">
-            <div class="notes-rendered">${renderNotesHtml(item.notes)}</div>
+            ${hasNotes ? `<div class="notes-rendered">${renderNotesHtml(item.notes)}</div>` : ''}
+            ${hasImages ? `<div class="review-images">
+              <div class="review-images-label">Images</div>
+              ${imageGridHtml(item.images, false)}
+            </div>` : ''}
+            ${imagesDataTag}
           </div>
         </div>`
       }
@@ -480,6 +532,83 @@ router.get('/review/:id', async (req, res) => {
           btn.classList.toggle('open', !isOpen);
         });
       });
+
+      // ============ LIGHTBOX (all users) ============
+      var rvLbOverlay = document.createElement('div');
+      rvLbOverlay.className = 'rv-lightbox-overlay';
+      rvLbOverlay.style.display = 'none';
+      rvLbOverlay.innerHTML = '<button class="rv-lightbox-close">&times;</button>' +
+        '<button class="rv-lightbox-nav rv-lightbox-prev">&lsaquo;</button>' +
+        '<div class="rv-lightbox-content"><img /><div class="rv-lightbox-caption"></div><div class="rv-lightbox-counter"></div></div>' +
+        '<button class="rv-lightbox-nav rv-lightbox-next">&rsaquo;</button>';
+      document.body.appendChild(rvLbOverlay);
+
+      var rvLbState = { images: [], index: 0 };
+
+      // Parse images data from embedded JSON scripts
+      var reviewItemImages = {};
+      document.querySelectorAll('.review-images-data').forEach(function(el) {
+        try { reviewItemImages[el.dataset.itemId] = JSON.parse(el.textContent || '[]'); } catch(e) {}
+      });
+
+      function rvLbRender() {
+        var img = rvLbState.images[rvLbState.index];
+        if (!img) return;
+        rvLbOverlay.querySelector('.rv-lightbox-content img').src = '/api/images/' + img.id;
+        rvLbOverlay.querySelector('.rv-lightbox-content img').alt = img.caption || img.original_name || '';
+        var cap = rvLbOverlay.querySelector('.rv-lightbox-caption');
+        cap.textContent = img.caption || '';
+        cap.style.display = img.caption ? '' : 'none';
+        var ctr = rvLbOverlay.querySelector('.rv-lightbox-counter');
+        ctr.textContent = rvLbState.images.length > 1 ? (rvLbState.index + 1) + ' / ' + rvLbState.images.length : '';
+        rvLbOverlay.querySelector('.rv-lightbox-prev').style.display = rvLbState.index > 0 ? '' : 'none';
+        rvLbOverlay.querySelector('.rv-lightbox-next').style.display = rvLbState.index < rvLbState.images.length - 1 ? '' : 'none';
+      }
+
+      function rvLbOpen(itemId, index) {
+        var imgs = reviewItemImages[itemId];
+        if (!imgs || imgs.length === 0) return;
+        rvLbState.images = imgs;
+        rvLbState.index = Math.min(index || 0, imgs.length - 1);
+        rvLbRender();
+        rvLbOverlay.style.display = '';
+        document.body.style.overflow = 'hidden';
+      }
+
+      function rvLbClose() {
+        rvLbOverlay.style.display = 'none';
+        document.body.style.overflow = '';
+      }
+
+      rvLbOverlay.querySelector('.rv-lightbox-close').addEventListener('click', rvLbClose);
+      rvLbOverlay.addEventListener('click', function(e) {
+        if (e.target === rvLbOverlay) rvLbClose();
+      });
+      rvLbOverlay.querySelector('.rv-lightbox-content').addEventListener('click', function(e) { e.stopPropagation(); });
+      rvLbOverlay.querySelector('.rv-lightbox-prev').addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (rvLbState.index > 0) { rvLbState.index--; rvLbRender(); }
+      });
+      rvLbOverlay.querySelector('.rv-lightbox-next').addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (rvLbState.index < rvLbState.images.length - 1) { rvLbState.index++; rvLbRender(); }
+      });
+      document.addEventListener('keydown', function(e) {
+        if (rvLbOverlay.style.display === 'none') return;
+        if (e.key === 'Escape') rvLbClose();
+        if (e.key === 'ArrowLeft' && rvLbState.index > 0) { rvLbState.index--; rvLbRender(); }
+        if (e.key === 'ArrowRight' && rvLbState.index < rvLbState.images.length - 1) { rvLbState.index++; rvLbRender(); }
+      });
+
+      // Open lightbox on thumbnail click
+      document.addEventListener('click', function(e) {
+        var trigger = e.target.closest('[data-lightbox-trigger]');
+        if (trigger) {
+          e.preventDefault();
+          rvLbOpen(trigger.dataset.itemId, parseInt(trigger.dataset.imageIndex || '0', 10));
+        }
+      });
+
       ${isAuthed ? `
       // htmlToMarkdown
       function htmlToMd(el) {
@@ -665,7 +794,8 @@ router.get('/review/:id', async (req, res) => {
 
       // Resize handle
       document.querySelectorAll('.notes-resize-handle').forEach(function(handle) {
-        var editor = handle.previousElementSibling;
+        var editor = handle.closest('.notes-panel').querySelector('.notes-editor');
+        if (!editor) return;
         handle.addEventListener('mousedown', function(e) {
           e.preventDefault();
           var startY = e.clientY;
@@ -675,6 +805,152 @@ router.get('/review/:id', async (req, res) => {
           document.addEventListener('mousemove', onMove);
           document.addEventListener('mouseup', onUp);
         });
+      });
+
+      // ============ IMAGE UPLOAD / DELETE / CAPTION ============
+
+      function uploadReviewImage(itemId, file, originalName) {
+        var dropZone = document.querySelector('.review-image-drop[data-item-id="' + itemId + '"]');
+        if (!dropZone) return;
+        dropZone.classList.add('uploading');
+        fetch('/api/images', {
+          method: 'POST',
+          headers: {
+            'Content-Type': file.type || 'image/png',
+            'X-Project-Id': itemId,
+            'X-Original-Name': originalName || 'image.png',
+            'x-session-id': sessionId
+          },
+          body: file
+        }).then(function(r) { return r.json(); })
+        .then(function(img) {
+          dropZone.classList.remove('uploading');
+          // Hide placeholder
+          var ph = dropZone.querySelector('.review-image-placeholder');
+          if (ph) ph.style.display = 'none';
+          // Ensure grid exists
+          var grid = dropZone.querySelector('.review-image-grid');
+          if (!grid) {
+            grid = document.createElement('div');
+            grid.className = 'review-image-grid';
+            dropZone.insertBefore(grid, ph);
+          }
+          // Append thumbnail
+          var div = document.createElement('div');
+          div.className = 'review-image-item';
+          div.dataset.imageId = img.id;
+          var idx = grid.children.length;
+          div.innerHTML = '<div class="review-image-thumb">' +
+            '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />' +
+            '<button class="review-image-delete" data-image-id="' + img.id + '" title="Delete image">&times;</button>' +
+            '</div>' +
+            '<input class="review-image-caption" placeholder="Add caption..." value="" data-image-id="' + img.id + '" data-original-caption="" />';
+          grid.appendChild(div);
+          // Update images data for lightbox
+          if (!reviewItemImages[itemId]) reviewItemImages[itemId] = [];
+          reviewItemImages[itemId].push(img);
+          // Update accordion badge
+          var card = dropZone.closest('.card-notes');
+          if (card) {
+            var btn = card.querySelector('.notes-accordion');
+            if (btn && !btn.querySelector('.notes-badge')) {
+              btn.insertAdjacentHTML('beforeend', ' <span class="notes-badge">has images</span>');
+              btn.classList.add('has-notes');
+            }
+          }
+        })
+        .catch(function(err) {
+          dropZone.classList.remove('uploading');
+          console.error('Image upload failed:', err);
+        });
+      }
+
+      // Paste on drop zones
+      document.querySelectorAll('.review-image-drop').forEach(function(drop) {
+        drop.addEventListener('paste', function(e) {
+          var items = e.clipboardData && e.clipboardData.items;
+          if (!items) return;
+          for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') === 0) {
+              e.preventDefault();
+              e.stopPropagation();
+              var file = items[i].getAsFile();
+              if (file) uploadReviewImage(drop.dataset.itemId, file, file.name || 'pasted-image.png');
+              return;
+            }
+          }
+        });
+
+        // Drag and drop
+        drop.addEventListener('dragover', function(e) { e.preventDefault(); drop.classList.add('dragover'); });
+        drop.addEventListener('dragleave', function(e) { e.preventDefault(); drop.classList.remove('dragover'); });
+        drop.addEventListener('drop', function(e) {
+          e.preventDefault();
+          drop.classList.remove('dragover');
+          var files = e.dataTransfer && e.dataTransfer.files;
+          if (!files) return;
+          for (var i = 0; i < files.length; i++) {
+            if (files[i].type.indexOf('image') === 0) {
+              uploadReviewImage(drop.dataset.itemId, files[i], files[i].name);
+            }
+          }
+        });
+      });
+
+      // Delete images (event delegation)
+      document.addEventListener('click', function(e) {
+        var delBtn = e.target.closest('.review-image-delete');
+        if (!delBtn) return;
+        var imageId = delBtn.dataset.imageId;
+        if (!imageId) return;
+        fetch('/api/images/' + imageId, {
+          method: 'DELETE',
+          headers: { 'x-session-id': sessionId }
+        }).then(function(r) {
+          if (!r.ok) return;
+          var item = delBtn.closest('.review-image-item');
+          var grid = item && item.parentElement;
+          var dropZone = grid && grid.closest('.review-image-drop');
+          if (item) item.remove();
+          // Update lightbox data
+          for (var key in reviewItemImages) {
+            reviewItemImages[key] = reviewItemImages[key].filter(function(img) { return img.id !== imageId; });
+          }
+          // Re-index remaining thumbnails
+          if (grid) {
+            var imgs = grid.querySelectorAll('[data-lightbox-trigger]');
+            for (var i = 0; i < imgs.length; i++) imgs[i].dataset.imageIndex = i;
+          }
+          // Show placeholder if empty
+          if (dropZone && grid && grid.children.length === 0) {
+            grid.remove();
+            var ph = dropZone.querySelector('.review-image-placeholder');
+            if (ph) ph.style.display = '';
+          }
+        }).catch(function(err) { console.error('Delete failed:', err); });
+      });
+
+      // Caption update on blur (event delegation)
+      document.addEventListener('focusout', function(e) {
+        if (!e.target.classList || !e.target.classList.contains('review-image-caption')) return;
+        var input = e.target;
+        var imageId = input.dataset.imageId;
+        var newCaption = input.value.trim();
+        var oldCaption = input.dataset.originalCaption || '';
+        if (newCaption === oldCaption) return;
+        input.dataset.originalCaption = newCaption;
+        fetch('/api/images/' + imageId, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+          body: JSON.stringify({ caption: newCaption })
+        }).then(function(r) { return r.json(); }).then(function(img) {
+          // Update lightbox data
+          for (var key in reviewItemImages) {
+            reviewItemImages[key] = reviewItemImages[key].map(function(i) {
+              return i.id === imageId ? Object.assign({}, i, { caption: newCaption }) : i;
+            });
+          }
+        }).catch(function(err) { console.error('Caption update failed:', err); });
       });
       ` : ''}
     </script>`
@@ -1128,6 +1404,115 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       color: var(--rv-link); text-decoration: underline; text-underline-offset: 2px;
     }
     .notes-rendered a:hover { opacity: 0.8; }
+
+    /* Review item images */
+    .review-images {
+      margin-top: 0.75rem; padding-top: 0.6rem;
+      border-top: 1px solid var(--rv-border-subtle);
+    }
+    .review-images-label {
+      font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--rv-text-dim); margin-bottom: 0.4rem;
+    }
+    .review-image-drop {
+      border: 1.5px dashed var(--rv-border); border-radius: 6px;
+      padding: 0.5rem; min-height: 48px; transition: border-color 0.15s, background 0.15s;
+      cursor: default; outline: none;
+    }
+    .review-image-drop:focus-within, .review-image-drop:focus {
+      border-color: var(--rv-border-hover);
+    }
+    .review-image-drop.dragover {
+      border-color: var(--rv-accent); background: rgba(37,99,235,0.04);
+    }
+    [data-theme="dark"] .review-image-drop.dragover { background: rgba(59,130,246,0.06); }
+    .review-image-drop.uploading { opacity: 0.6; pointer-events: none; }
+    .review-image-placeholder {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.72rem; color: var(--rv-text-dim); padding: 0.5rem 0;
+      font-style: italic;
+    }
+    .review-image-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 0.5rem;
+    }
+    .review-image-item { display: flex; flex-direction: column; gap: 0.2rem; }
+    .review-image-thumb {
+      position: relative; aspect-ratio: 4/3; overflow: hidden;
+      border-radius: 4px; background: var(--rv-bg-tertiary);
+      border: 1px solid var(--rv-border-subtle);
+    }
+    .review-image-thumb img {
+      width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer;
+    }
+    .review-image-delete {
+      position: absolute; top: 3px; right: 3px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: rgba(0,0,0,0.6); color: #fff; border: none;
+      font-size: 14px; line-height: 1; cursor: pointer;
+      display: none; align-items: center; justify-content: center;
+      transition: background 0.15s;
+    }
+    .review-image-delete:hover { background: var(--rv-danger); }
+    .review-image-item:hover .review-image-delete { display: flex; }
+    .review-image-caption {
+      width: 100%; font-size: 0.68rem; font-family: inherit;
+      color: var(--rv-text-secondary); background: transparent;
+      border: 1px solid transparent; border-radius: 3px;
+      padding: 0.15rem 0.3rem; outline: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .review-image-caption::placeholder { color: var(--rv-text-dim); font-style: italic; }
+    .review-image-caption:hover { border-color: var(--rv-border); }
+    .review-image-caption:focus {
+      border-color: var(--rv-accent); background: var(--rv-bg);
+    }
+    .review-image-caption-ro {
+      font-size: 0.68rem; color: var(--rv-text-muted); padding: 0.1rem 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* Lightbox */
+    .rv-lightbox-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,0.85);
+      display: flex; align-items: center; justify-content: center;
+      animation: rv-lb-in 0.2s ease;
+    }
+    @keyframes rv-lb-in { from { opacity: 0; } to { opacity: 1; } }
+    .rv-lightbox-close {
+      position: absolute; top: 1rem; right: 1rem;
+      background: rgba(255,255,255,0.1); border: none; color: #fff;
+      width: 36px; height: 36px; border-radius: 50%; font-size: 1.25rem;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s; z-index: 2;
+    }
+    .rv-lightbox-close:hover { background: rgba(255,255,255,0.2); }
+    .rv-lightbox-content {
+      display: flex; flex-direction: column; align-items: center;
+      max-width: 90vw; max-height: 90vh;
+    }
+    .rv-lightbox-content img {
+      max-width: 90vw; max-height: 78vh; object-fit: contain;
+      border-radius: 4px;
+    }
+    .rv-lightbox-caption {
+      color: #fff; font-size: 0.85rem; margin-top: 0.75rem;
+      text-align: center; max-width: 600px; opacity: 0.9;
+    }
+    .rv-lightbox-counter {
+      color: rgba(255,255,255,0.5); font-size: 0.7rem; margin-top: 0.3rem;
+    }
+    .rv-lightbox-nav {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,0.1); border: none; color: #fff;
+      width: 44px; height: 44px; border-radius: 50%; font-size: 1.5rem;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s; z-index: 2;
+    }
+    .rv-lightbox-nav:hover { background: rgba(255,255,255,0.2); }
+    .rv-lightbox-prev { left: 1rem; }
+    .rv-lightbox-next { right: 1rem; }
 
     /* Empty state */
     .empty-state { text-align: center; color: var(--rv-text-dim); padding: 3rem 1rem; font-size: 0.9rem; }

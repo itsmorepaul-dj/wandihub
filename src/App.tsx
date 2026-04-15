@@ -27,6 +27,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Review item images — upload, caption, and delete images per review project in the Open Notes accordion, with lightbox viewing on the public review site',
   'Review descriptions — optional rich text field under the review title for adding summaries or context, visible on the public review page',
   'Link insertion fix — highlighting text in review notes and adding a link now correctly replaces the selection instead of inserting at the beginning',
   'Business line images — add, caption, and delete images on business lines in settings, with thumbnails on the card',
