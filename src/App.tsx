@@ -27,6 +27,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Archive status — archive projects directly from the project board with one click, placing them into the current fiscal quarter\'s archive',
   'Review item images — upload, caption, and delete images per review project in the Open Notes accordion, with lightbox viewing on the public review site',
   'Review descriptions — optional rich text field under the review title for adding summaries or context, visible on the public review page',
   'Link insertion fix — highlighting text in review notes and adding a link now correctly replaces the selection instead of inserting at the beginning',
@@ -1728,6 +1729,16 @@ const [showFilters, setShowFilters] = useState(false)
     return getDjFiscalLabel(prev.getMonth() + 1, prev.getFullYear())
   }
 
+  const archiveProject = async (projectId: string) => {
+    const quarter = getCurrentFiscalQuarter()
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: 'archived' as const, archivedQuarter: quarter } : p))
+    await authFetch(`/api/projects/${projectId}/archive`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quarter })
+    })
+  }
+
   const unarchiveProject = async (projectId: string) => {
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: null, status: 'active' } : p))
     await authFetch(`/api/projects/${projectId}/unarchive`, { method: 'PUT' })
@@ -1744,7 +1755,7 @@ const [showFilters, setShowFilters] = useState(false)
       `Archive done projects to ${quarter}?`,
       `This will archive ${doneCount} done project${doneCount !== 1 ? 's' : ''} into ${quarter}. They'll move to the archive section and can be restored anytime.`,
       async () => {
-        setProjects(prev => prev.map(p => p.status === 'done' && !p.archivedQuarter ? { ...p, archivedQuarter: quarter } : p))
+        setProjects(prev => prev.map(p => p.status === 'done' && !p.archivedQuarter ? { ...p, status: 'archived' as const, archivedQuarter: quarter } : p))
         await authFetch('/api/quarter-rollover', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1861,6 +1872,7 @@ const [showFilters, setShowFilters] = useState(false)
       case 'done': return 'bg-green-500'
       case 'blocked': return 'bg-red-500'
       case 'pending': return 'bg-slate-400'
+      case 'archived': return 'bg-stone-500'
     }
   }
 
@@ -1871,6 +1883,7 @@ const [showFilters, setShowFilters] = useState(false)
       case 'done': return 'Done'
       case 'blocked': return 'Blocked'
       case 'pending': return 'Pending'
+      case 'archived': return 'Archived'
     }
   }
 
@@ -2009,8 +2022,8 @@ const [showFilters, setShowFilters] = useState(false)
   })
 
   // Separate archived from current projects
-  const currentProjects = projects.filter(p => !p.archivedQuarter)
-  const archivedProjects = projects.filter(p => !!p.archivedQuarter)
+  const currentProjects = projects.filter(p => p.status !== 'archived')
+  const archivedProjects = projects.filter(p => p.status === 'archived')
   const archivedByQuarter = archivedProjects.reduce<Record<string, Project[]>>((acc, p) => {
     const q = p.archivedQuarter!
     ;(acc[q] ||= []).push(p)
@@ -2018,7 +2031,7 @@ const [showFilters, setShowFilters] = useState(false)
   }, {})
 
   // Status priority: blocked first, then review, active, done last
-  const statusOrder: Record<string, number> = { blocked: 0, review: 1, active: 2, done: 3, pending: 4 }
+  const statusOrder: Record<string, number> = { blocked: 0, review: 1, active: 2, done: 3, pending: 4, archived: 5 }
   const getStatusOrder = (s: string) => statusOrder[s] ?? 2
 
   // Sort projects by selected criteria (only current/non-archived)
@@ -2844,7 +2857,7 @@ const [showFilters, setShowFilters] = useState(false)
                               {isOverdue && <span className="overdue-label">Overdue</span>}
                               <span className="project-name">{project.name}{project.url && <a href={project.url} target="_blank" rel="noopener noreferrer" className="project-jira-badge" onClick={e => e.stopPropagation()}>JIRA</a>}</span>
                             </span>
-                            <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8' }[project.status as string] }}>
+                            <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8', archived: '#78716c' }[project.status as string] }}>
                               <span className={`status-badge-dot ${getStatusColor(project.status)}`}></span>
                               {getStatusLabel(project.status)}
                             </span>
@@ -2889,6 +2902,9 @@ const [showFilters, setShowFilters] = useState(false)
                             </span>
                             <span className="project-meta-chip project-meta-action" onClick={() => handleEditProject(project)}>
                               <Pencil size={11} /> Edit
+                            </span>
+                            <span className="project-meta-chip project-meta-action" onClick={() => archiveProject(project.id)}>
+                              <Archive size={11} /> Archive
                             </span>
                             <span className="project-meta-chip project-meta-action project-meta-action-delete" onClick={() => handleDeleteProject(project.id)}>
                               <Trash2 size={11} /> Delete
@@ -3678,7 +3694,7 @@ const [showFilters, setShowFilters] = useState(false)
                   .filter((a: CapacityAssignment) => {
                     if (a.designer_id !== m.id) return false
                     const proj = projects.find(p => p.name === a.project_name)
-                    return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending')
+                    return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending' && proj.status !== 'archived')
                   })
                   .reduce((s: number, a: CapacityAssignment) => s + (a.allocation_percent || 0), 0)
                 return sum + ((m.weekly_hours || 35) * assigned / 100 * 13)
@@ -3825,7 +3841,7 @@ const [showFilters, setShowFilters] = useState(false)
                 const allocatedHours = memberAssignments
                   .filter((a: CapacityAssignment) => {
                     const proj = projects.find(p => p.name === a.project_name)
-                    return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending')
+                    return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending' && proj.status !== 'archived')
                   })
                   .reduce((sum: number, a: CapacityAssignment) => {
                     const allocPct = a.allocation_percent || 0
@@ -3851,7 +3867,7 @@ const [showFilters, setShowFilters] = useState(false)
                             <span className="last-name">{member.name.split(' ').slice(1).join(' ')}</span>
                           )}
                         </span>
-                        <span className="designer-hours">{memberAssignments.filter((a: CapacityAssignment) => { const proj = projects.find(p => p.name === a.project_name); return !proj || (proj.status !== 'done' && proj.status !== 'pending') }).length} projects</span>
+                        <span className="designer-hours">{memberAssignments.filter((a: CapacityAssignment) => { const proj = projects.find(p => p.name === a.project_name); return !proj || (proj.status !== 'done' && proj.status !== 'pending' && proj.status !== 'archived') }).length} projects</span>
                       </div>
                       <div className="designer-mini-gauge">
                         <svg viewBox="0 0 80 50" className="mini-gauge-svg">
@@ -3913,7 +3929,7 @@ const [showFilters, setShowFilters] = useState(false)
                             let endingProjects = 0
                             for (const a of memberAssignments) {
                               const proj = projects.find(p => p.name === a.project_name)
-                              if (!proj || proj.status === 'done' || proj.status === 'blocked' || proj.status === 'pending') continue
+                              if (!proj || proj.status === 'done' || proj.status === 'blocked' || proj.status === 'pending' || proj.status === 'archived') continue
                               const pStart = proj.startDate ? parseLocalDate(proj.startDate) : null
                               const pEnd = proj.endDate ? parseLocalDate(proj.endDate) : null
                               let overlaps = false
@@ -3999,7 +4015,7 @@ const [showFilters, setShowFilters] = useState(false)
                         ) : (() => {
                           const activeAssignments = memberAssignments.filter((a: CapacityAssignment) => {
                             const proj = projects.find(p => p.name === a.project_name)
-                            return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'review' && proj.status !== 'pending')
+                            return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'review' && proj.status !== 'pending' && proj.status !== 'archived')
                           })
                           // Sort active assignments by force ranking (best rank across all business lines), then alphabetical
                           activeAssignments.sort((a, b) => {
@@ -4042,7 +4058,7 @@ const [showFilters, setShowFilters] = useState(false)
                             const hasTimeline = proj?.timeline && proj.timeline.length > 0
                             const timelineTotal = hasTimeline ? proj.timeline.reduce((s, r) => s + calcRangeHours(r.startDate, r.endDate), 0) : 0
                             const isOverdue = (() => {
-                              if (!proj?.endDate || proj.status === 'done' || proj.status === 'pending') return false
+                              if (!proj?.endDate || proj.status === 'done' || proj.status === 'pending' || proj.status === 'archived') return false
                               const end = parseLocalDate(proj.endDate)
                               if (!end) return false
                               const today = new Date()
@@ -4121,7 +4137,7 @@ const [showFilters, setShowFilters] = useState(false)
                                   return <div className="chip-est"><Clock size={10} /> {size ? `${size} · ` : ''}{hrs}h est ({weeksStr}wk)</div>
                                 })()}
                                 {proj && capacityData && (() => {
-                                  const projAssignments = capacityData.assignments.filter(a => a.project_id === proj.id && a.project_status !== 'done' && a.project_status !== 'blocked' && a.project_status !== 'pending')
+                                  const projAssignments = capacityData.assignments.filter(a => a.project_id === proj.id && a.project_status !== 'done' && a.project_status !== 'blocked' && a.project_status !== 'pending' && a.project_status !== 'archived')
                                   if (projAssignments.length === 0) return null
                                   const totalWeeklyHrs = projAssignments.reduce((s, a) => {
                                     const designerMember = capacityData.team.find(m => m.id === a.designer_id)
@@ -4709,7 +4725,7 @@ const [showFilters, setShowFilters] = useState(false)
         }
 
         const generateProjectReview = () => {
-          const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending' }
+          const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending', archived: 'Archived' }
           const sizeMap: Record<number, string> = { 35: 'XXS', 70: 'XS', 105: 'S', 175: 'M', 280: 'L', 455: 'XL', 910: 'XXL' }
 
           // Review projects grouped by BL
@@ -4914,7 +4930,7 @@ const [showFilters, setShowFilters] = useState(false)
               const assignments = capAssignments.filter(a => a.designer_id === m.id)
               const activeAssignments = assignments.filter(a => {
                 const proj = projects.find(p => p.name === a.project_name)
-                return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending')
+                return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending' && proj.status !== 'archived')
               })
               const allocatedHours = activeAssignments.reduce((sum, a) => {
                 return sum + parseFloat(((available * (a.allocation_percent || 0)) / 100).toFixed(1))
@@ -4928,7 +4944,7 @@ const [showFilters, setShowFilters] = useState(false)
               const totalEstimated = activeProjects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
               const totalAllocated = capAssignments.reduce((sum, a) => {
                 const proj = projects.find(p => p.name === a.project_name)
-                if (!proj || proj.status === 'done' || proj.status === 'blocked' || proj.status === 'pending') return sum
+                if (!proj || proj.status === 'done' || proj.status === 'blocked' || proj.status === 'pending' || proj.status === 'archived') return sum
                 if (!proj.startDate || !proj.endDate) return sum
                 const designer = capTeam.find(m => m.id === a.designer_id)
                 if (!designer || excludedDesigners.has(designer.id)) return sum

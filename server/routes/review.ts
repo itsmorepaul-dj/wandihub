@@ -384,8 +384,8 @@ router.get('/review/:id', async (req, res) => {
         if (slack) return `<a href="${escHtml(slack)}" target="_blank" rel="noopener" class="status-badge designer-badge">${slackSvg} ${escHtml(firstName)}</a>`
         return `<span class="status-badge designer-badge">${escHtml(firstName)}</span>`
       }).join('')
-      const statusColors: Record<string, string> = { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8' }
-      const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending' }
+      const statusColors: Record<string, string> = { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8', archived: '#78716c' }
+      const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending', archived: 'Archived' }
       const statusColor = statusColors[item.status] || '#6b7280'
       const statusLabel = statusLabels[item.status] || item.status
 
@@ -1668,7 +1668,7 @@ const getISOWeekStr = (d: Date = new Date()) => {
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`
 }
 
-const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending' }
+const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending', archived: 'Archived' }
 
 const generateReviewSnapshot = async (week: string) => {
   // Get the most recent review

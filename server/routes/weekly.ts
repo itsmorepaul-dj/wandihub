@@ -167,7 +167,7 @@ const generateSnapshot = async (week: string) => {
      LEFT JOIN team t ON wg.designer_id = t.id
      WHERE wg.week = ? ORDER BY wg.category, wg.created_at DESC`, [week]
   )
-  const projects = await all(`SELECT id, name, status, businessLine, startDate, endDate, estimatedHours, designers, deckLink, prdLink, briefLink, figmaLink, customLinks FROM projects WHERE status != 'done' OR archivedQuarter IS NULL`)
+  const projects = await all(`SELECT id, name, status, businessLine, startDate, endDate, estimatedHours, designers, deckLink, prdLink, briefLink, figmaLink, customLinks FROM projects WHERE status != 'archived'`)
 
   const highlights = updates.filter((u: any) => u.type === 'highlight')
   const lowlights = updates.filter((u: any) => u.type === 'lowlight')

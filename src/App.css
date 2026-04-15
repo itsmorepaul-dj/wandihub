@@ -633,6 +633,10 @@
   background-color: #94a3b8;
 }
 
+.bg-stone-500 {
+  background-color: #78716c;
+}
+
 .due-date {
   color: var(--color-text-muted);
   font-size: 0.85rem;

@@ -2,7 +2,7 @@ import { Pencil, Trash2, ExternalLink } from 'lucide-react'
 
 interface ExampleCardProps {
   title: string
-  status: 'active' | 'review' | 'done' | 'blocked'
+  status: 'active' | 'review' | 'done' | 'blocked' | 'archived'
   designers?: string[]
   businessLine?: string
   onEdit?: () => void
@@ -15,6 +15,7 @@ const statusConfig: Record<string, { label: string; dotClass: string }> = {
   review: { label: 'In Review', dotClass: 'bg-yellow-500' },
   done: { label: 'Done', dotClass: 'bg-green-500' },
   blocked: { label: 'Blocked', dotClass: 'bg-red-500' },
+  archived: { label: 'Archived', dotClass: 'bg-stone-500' },
 }
 
 export function ExampleCard({

@@ -10,7 +10,7 @@ export interface Project {
   name: string
   description?: string
   url?: string
-  status: 'active' | 'review' | 'done' | 'blocked' | 'pending'
+  status: 'active' | 'review' | 'done' | 'blocked' | 'pending' | 'archived'
   startDate?: string
   endDate?: string
   designers: string[]

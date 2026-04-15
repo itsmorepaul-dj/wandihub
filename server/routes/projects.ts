@@ -86,7 +86,8 @@ router.put('/projects/:id/archive', async (req, res) => {
     const { quarter } = req.body
     if (!quarter) return res.status(400).json({ error: 'quarter is required (e.g., Q3-FY26)' })
     const proj = await get('SELECT name FROM projects WHERE id = ?', [req.params.id]) as any
-    await run("UPDATE projects SET archivedQuarter = ?, updatedAt = datetime('now') WHERE id = ?", [quarter, req.params.id])
+    await run("UPDATE projects SET status = 'archived', archivedQuarter = ?, updatedAt = datetime('now') WHERE id = ?", [quarter, req.params.id])
+    await run('UPDATE project_assignments SET allocation_percent = 0 WHERE project_id = ?', [req.params.id])
     await updateDbVersion()
     await logActivity('project', 'update', proj?.name || req.params.id, getUserEmail(req), `Archived to ${quarter}`)
     res.json({ success: true })
@@ -109,7 +110,7 @@ router.post('/quarter-rollover', async (req, res) => {
     if (!quarter) return res.status(400).json({ error: 'quarter is required (e.g., Q3-FY26)' })
     const doneProjects = await all("SELECT id, name FROM projects WHERE status = 'done' AND archivedQuarter IS NULL") as any[]
     for (const p of doneProjects) {
-      await run("UPDATE projects SET archivedQuarter = ?, updatedAt = datetime('now') WHERE id = ?", [quarter, p.id])
+      await run("UPDATE projects SET status = 'archived', archivedQuarter = ?, updatedAt = datetime('now') WHERE id = ?", [quarter, p.id])
       await run('UPDATE project_assignments SET allocation_percent = 0 WHERE project_id = ?', [p.id])
     }
     await updateDbVersion()

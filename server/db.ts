@@ -197,6 +197,7 @@ export const initSchema = async () => {
 
   await run(`ALTER TABLE projects ADD COLUMN estimatedHours REAL DEFAULT 0`).catch(() => {})
   await run(`ALTER TABLE projects ADD COLUMN archivedQuarter TEXT DEFAULT NULL`).catch(() => {})
+  await run(`UPDATE projects SET status = 'archived' WHERE archivedQuarter IS NOT NULL AND status != 'archived'`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS team (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT, brands TEXT,
