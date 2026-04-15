@@ -408,34 +408,44 @@ router.get('/review/:id', async (req, res) => {
 
       const hasImages = item.images && item.images.length > 0
 
-      // Build image grid HTML (shared between auth and unauth)
-      const imageGridHtml = (images: any[], editable: boolean) => {
-        if (images.length === 0 && !editable) return ''
+      // Editable image grid for inside the accordion (auth only)
+      const editableImageGridHtml = (images: any[]) => {
         const thumbs = images.map((img: any, idx: number) => `
           <div class="review-image-item" data-image-id="${escHtml(img.id)}">
             <div class="review-image-thumb">
               <img src="/api/images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
                 data-lightbox-trigger data-item-id="${escHtml(item.id)}" data-image-index="${idx}" />
-              ${editable ? `<button class="review-image-delete" data-image-id="${escHtml(img.id)}" title="Delete image">&times;</button>` : ''}
+              <button class="review-image-delete" data-image-id="${escHtml(img.id)}" title="Delete image">&times;</button>
             </div>
-            ${editable
-              ? `<input class="review-image-caption" placeholder="Add caption..." value="${escHtml(img.caption || '')}" data-image-id="${escHtml(img.id)}" data-original-caption="${escHtml(img.caption || '')}" />`
-              : (img.caption ? `<div class="review-image-caption-ro" title="${escHtml(img.caption)}">${escHtml(img.caption)}</div>` : '')}
+            <input class="review-image-caption" placeholder="Add caption..." value="${escHtml(img.caption || '')}" data-image-id="${escHtml(img.id)}" data-original-caption="${escHtml(img.caption || '')}" />
           </div>`).join('')
         return images.length > 0 ? `<div class="review-image-grid">${thumbs}</div>` : ''
       }
+
+      // Always-visible inline thumbnail strip (like project cards)
+      const inlineImagesHtml = hasImages ? (() => {
+        const imgs = item.images as any[]
+        const shown = imgs.slice(0, 4)
+        const thumbs = shown.map((img: any, idx: number) => `
+          <div class="review-inline-thumb">
+            <img src="/api/images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
+              data-lightbox-trigger data-item-id="${escHtml(item.id)}" data-image-index="${idx}" />
+          </div>`).join('')
+        const more = imgs.length > 4 ? `<span class="review-inline-more">+${imgs.length - 4} more</span>` : ''
+        return `<div class="review-inline-images">
+          <span class="review-inline-images-label">Attached images</span>
+          <div class="review-inline-images-row">${thumbs}${more}</div>
+        </div>`
+      })() : ''
 
       const imagesDataTag = `<script type="application/json" class="review-images-data" data-item-id="${escHtml(item.id)}">${JSON.stringify(item.images || [])}</script>`
 
       let notesSection = ''
       if (isAuthed) {
-        const badges: string[] = []
-        if (hasNotes) badges.push('has notes')
-        if (hasImages) badges.push('has images')
-        const badgeHtml = badges.length > 0 ? ` <span class="notes-badge">${badges.join(' &amp; ')}</span>` : ''
+        const badgeHtml = hasNotes ? ' <span class="notes-badge">has notes</span>' : ''
 
         notesSection = `<div class="card-notes">
-          <button class="notes-accordion${hasNotes || hasImages ? ' has-notes' : ''}" data-item-id="${escHtml(item.id)}">
+          <button class="notes-accordion${hasNotes ? ' has-notes' : ''}" data-item-id="${escHtml(item.id)}">
             <svg class="notes-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             Open Notes${badgeHtml}
           </button>
@@ -460,31 +470,22 @@ router.get('/review/:id', async (req, res) => {
             <div class="review-images" data-item-id="${escHtml(item.id)}">
               <div class="review-images-label">Images</div>
               <div class="review-image-drop" data-item-id="${escHtml(item.id)}" tabindex="0">
-                ${imageGridHtml(item.images, true)}
-                <div class="review-image-placeholder"${hasImages ? ' style="display:none"' : ''}>Paste or drag an image here</div>
+                ${editableImageGridHtml(item.images)}
+                <div class="review-image-placeholder"${hasImages ? ' style="display:none"' : ''}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Click here, then paste — or drag an image</div>
               </div>
             </div>
             ${imagesDataTag}
             <div class="notes-resize-handle" title="Drag to resize"></div>
           </div>
         </div>`
-      } else if (hasNotes || hasImages) {
-        const badges: string[] = []
-        if (hasNotes) badges.push('has notes')
-        if (hasImages) badges.push('has images')
-        const badgeHtml = ` <span class="notes-badge">${badges.join(' &amp; ')}</span>`
-
+      } else if (hasNotes) {
         notesSection = `<div class="card-notes">
           <button class="notes-accordion has-notes" data-item-id="${escHtml(item.id)}">
             <svg class="notes-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            Open Notes${badgeHtml}
+            Open Notes <span class="notes-badge">has notes</span>
           </button>
           <div class="notes-panel" style="display:none">
-            ${hasNotes ? `<div class="notes-rendered">${renderNotesHtml(item.notes)}</div>` : ''}
-            ${hasImages ? `<div class="review-images">
-              <div class="review-images-label">Images</div>
-              ${imageGridHtml(item.images, false)}
-            </div>` : ''}
+            <div class="notes-rendered">${renderNotesHtml(item.notes)}</div>
             ${imagesDataTag}
           </div>
         </div>`
@@ -504,6 +505,8 @@ router.get('/review/:id', async (req, res) => {
         ${gantt}
         ${linksSection}
         ${notesSection}
+        ${inlineImagesHtml}
+        ${!hasImages && !isAuthed ? '' : imagesDataTag}
       </div>`
     }
 
@@ -849,13 +852,35 @@ router.get('/review/:id', async (req, res) => {
           // Update images data for lightbox
           if (!reviewItemImages[itemId]) reviewItemImages[itemId] = [];
           reviewItemImages[itemId].push(img);
-          // Update accordion badge
-          var card = dropZone.closest('.card-notes');
-          if (card) {
-            var btn = card.querySelector('.notes-accordion');
-            if (btn && !btn.querySelector('.notes-badge')) {
-              btn.insertAdjacentHTML('beforeend', ' <span class="notes-badge">has images</span>');
-              btn.classList.add('has-notes');
+          // Update inline thumbnail strip
+          var projectCard = dropZone.closest('.project-card');
+          if (projectCard) {
+            var inlineSection = projectCard.querySelector('.review-inline-images');
+            if (!inlineSection) {
+              inlineSection = document.createElement('div');
+              inlineSection.className = 'review-inline-images';
+              inlineSection.innerHTML = '<span class="review-inline-images-label">Attached images</span><div class="review-inline-images-row"></div>';
+              projectCard.appendChild(inlineSection);
+            }
+            var row = inlineSection.querySelector('.review-inline-images-row');
+            var thumbCount = row.querySelectorAll('.review-inline-thumb').length;
+            if (thumbCount < 4) {
+              var inlineThumb = document.createElement('div');
+              inlineThumb.className = 'review-inline-thumb';
+              var idx = reviewItemImages[itemId].length - 1;
+              inlineThumb.innerHTML = '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />';
+              row.insertBefore(inlineThumb, row.querySelector('.review-inline-more'));
+            } else {
+              var moreSpan = row.querySelector('.review-inline-more');
+              var total = reviewItemImages[itemId].length;
+              if (moreSpan) {
+                moreSpan.textContent = '+' + (total - 4) + ' more';
+              } else {
+                moreSpan = document.createElement('span');
+                moreSpan.className = 'review-inline-more';
+                moreSpan.textContent = '+' + (total - 4) + ' more';
+                row.appendChild(moreSpan);
+              }
             }
           }
         })
@@ -926,6 +951,31 @@ router.get('/review/:id', async (req, res) => {
             grid.remove();
             var ph = dropZone.querySelector('.review-image-placeholder');
             if (ph) ph.style.display = '';
+          }
+          // Rebuild inline thumbnail strip
+          var projectCard = delBtn.closest('.project-card');
+          if (projectCard) {
+            var itemIdForInline = dropZone ? dropZone.dataset.itemId : null;
+            var remaining = itemIdForInline ? (reviewItemImages[itemIdForInline] || []) : [];
+            var inlineSection = projectCard.querySelector('.review-inline-images');
+            if (remaining.length === 0 && inlineSection) {
+              inlineSection.remove();
+            } else if (inlineSection) {
+              var row = inlineSection.querySelector('.review-inline-images-row');
+              row.innerHTML = '';
+              remaining.slice(0, 4).forEach(function(img, idx) {
+                var t = document.createElement('div');
+                t.className = 'review-inline-thumb';
+                t.innerHTML = '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemIdForInline + '" data-image-index="' + idx + '" />';
+                row.appendChild(t);
+              });
+              if (remaining.length > 4) {
+                var m = document.createElement('span');
+                m.className = 'review-inline-more';
+                m.textContent = '+' + (remaining.length - 4) + ' more';
+                row.appendChild(m);
+              }
+            }
           }
         }).catch(function(err) { console.error('Delete failed:', err); });
       });
@@ -1419,18 +1469,22 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       padding: 0.5rem; min-height: 48px; transition: border-color 0.15s, background 0.15s;
       cursor: default; outline: none;
     }
-    .review-image-drop:focus-within, .review-image-drop:focus {
-      border-color: var(--rv-border-hover);
-    }
+    .review-image-drop:focus-within, .review-image-drop:focus,
     .review-image-drop.dragover {
       border-color: var(--rv-accent); background: rgba(37,99,235,0.04);
     }
+    [data-theme="dark"] .review-image-drop:focus-within,
+    [data-theme="dark"] .review-image-drop:focus,
     [data-theme="dark"] .review-image-drop.dragover { background: rgba(59,130,246,0.06); }
     .review-image-drop.uploading { opacity: 0.6; pointer-events: none; }
     .review-image-placeholder {
       display: flex; align-items: center; justify-content: center;
-      font-size: 0.72rem; color: var(--rv-text-dim); padding: 0.5rem 0;
-      font-style: italic;
+      font-size: 0.72rem; color: var(--rv-text-dim); padding: 0.75rem 0;
+      font-style: italic; gap: 0.35rem;
+    }
+    .review-image-drop:focus .review-image-placeholder,
+    .review-image-drop:focus-within .review-image-placeholder {
+      color: var(--rv-accent);
     }
     .review-image-grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -1470,6 +1524,31 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     .review-image-caption-ro {
       font-size: 0.68rem; color: var(--rv-text-muted); padding: 0.1rem 0;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* Always-visible inline image thumbnails */
+    .review-inline-images {
+      padding: 0.5rem 1.25rem; border-top: 1px solid var(--rv-border-subtle);
+    }
+    .review-inline-images-label {
+      display: block; font-size: 0.65rem; font-weight: 600;
+      color: var(--rv-text-muted); text-transform: uppercase;
+      letter-spacing: 0.05em; margin-bottom: 0.3rem;
+    }
+    .review-inline-images-row {
+      display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;
+    }
+    .review-inline-thumb {
+      width: 80px; height: 60px; overflow: hidden; border-radius: 4px;
+      background: var(--rv-bg-tertiary); border: 1px solid var(--rv-border-subtle);
+      flex-shrink: 0;
+    }
+    .review-inline-thumb img {
+      width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer;
+    }
+    .review-inline-thumb:hover { border-color: var(--rv-border-hover); }
+    .review-inline-more {
+      font-size: 0.7rem; color: var(--rv-text-dim); font-weight: 500;
     }
 
     /* Lightbox */
