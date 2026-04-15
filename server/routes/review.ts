@@ -46,12 +46,12 @@ router.get('/api/reviews/:id', async (req, res) => {
 
 router.post('/api/reviews', async (req, res) => {
   try {
-    const { title, week, project_ids } = req.body
+    const { title, week, project_ids, description } = req.body
     const id = Math.random().toString(36).substring(2) + Date.now().toString(36)
     const email = getUserEmail(req)
     await run(
-      'INSERT INTO reviews (id, title, week, created_by) VALUES (?, ?, ?, ?)',
-      [id, title || 'Design Review', week || null, email]
+      'INSERT INTO reviews (id, title, week, created_by, description) VALUES (?, ?, ?, ?, ?)',
+      [id, title || 'Design Review', week || null, email, description || '']
     )
     if (project_ids && Array.isArray(project_ids)) {
       for (let i = 0; i < project_ids.length; i++) {
@@ -69,12 +69,15 @@ router.post('/api/reviews', async (req, res) => {
 
 router.put('/api/reviews/:id', async (req, res) => {
   try {
-    const { title, week, item_order } = req.body
+    const { title, week, description, item_order } = req.body
     if (title !== undefined) {
       await run('UPDATE reviews SET title = ?, updated_at = datetime(\'now\') WHERE id = ?', [title, req.params.id])
     }
     if (week !== undefined) {
       await run('UPDATE reviews SET week = ?, updated_at = datetime(\'now\') WHERE id = ?', [week, req.params.id])
+    }
+    if (description !== undefined) {
+      await run('UPDATE reviews SET description = ?, updated_at = datetime(\'now\') WHERE id = ?', [description, req.params.id])
     }
     if (item_order && Array.isArray(item_order)) {
       for (let i = 0; i < item_order.length; i++) {
@@ -459,10 +462,12 @@ router.get('/review/:id', async (req, res) => {
     const title = escHtml(review.title || 'Design Review')
     const week = review.week ? ` — ${escHtml(review.week)}` : ''
     const createdAt = review.created_at ? new Date(review.created_at + 'Z').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''
+    const descriptionHtml = review.description ? `<div class="page-description">${escHtml(review.description).replace(/\n/g, '<br>')}</div>` : ''
 
     const header = `<div class="page-header">
       <h1>${title}${week}</h1>
       <div class="page-meta">${createdAt} · ${parsed.length} project${parsed.length !== 1 ? 's' : ''}</div>
+      ${descriptionHtml}
     </div>`
 
     const notesScript = `<script>
@@ -579,6 +584,7 @@ router.get('/review/:id', async (req, res) => {
       });
 
       // Toolbar: link popover
+      var savedRange = null;
       document.querySelectorAll('.notes-toolbar-btn[data-action="link"]').forEach(function(btn) {
         btn.addEventListener('mousedown', function(e) { e.preventDefault(); });
         btn.addEventListener('click', function() {
@@ -588,6 +594,7 @@ router.get('/review/:id', async (req, res) => {
           popover.style.display = isOpen ? 'none' : 'flex';
           if (!isOpen) {
             var sel = window.getSelection();
+            savedRange = (sel && sel.rangeCount > 0) ? sel.getRangeAt(0).cloneRange() : null;
             var nameInput = popover.querySelector('[data-field="name"]');
             nameInput.value = (sel && sel.toString()) || '';
             popover.querySelector('[data-field="url"]').value = '';
@@ -607,6 +614,12 @@ router.get('/review/:id', async (req, res) => {
           var panel = btn.closest('.notes-panel');
           var editor = panel.querySelector('.notes-editor');
           editor.focus();
+          if (savedRange) {
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(savedRange);
+            savedRange = null;
+          }
           var safeName = name.replace(/</g, '&lt;').replace(/>/g, '&gt;');
           var safeUrl = url.replace(/"/g, '&quot;');
           document.execCommand('insertHTML', false, '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" class="notes-inline-link">' + safeName + '</a>');
@@ -841,6 +854,10 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     .page-header { margin-bottom: 2rem; }
     .page-header h1 { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.025em; }
     .page-meta { font-size: 0.8rem; color: var(--rv-text-muted); margin-top: 0.25rem; }
+    .page-description {
+      font-size: 0.85rem; color: var(--rv-text-secondary); margin-top: 0.5rem;
+      line-height: 1.6; max-width: 720px;
+    }
 
     /* Cards stack */
     .cards-stack { display: flex; flex-direction: column; gap: 1.25rem; }

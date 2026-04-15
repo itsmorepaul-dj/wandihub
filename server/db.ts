@@ -343,6 +343,8 @@ export const initSchema = async () => {
     week TEXT, created_by TEXT,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
   )`).catch(e => console.error('reviews init error:', e.message))
+  // Migration: add description column if missing
+  await run(`ALTER TABLE reviews ADD COLUMN description TEXT DEFAULT ''`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS review_items (
     id TEXT PRIMARY KEY, review_id TEXT NOT NULL, project_id TEXT NOT NULL,
