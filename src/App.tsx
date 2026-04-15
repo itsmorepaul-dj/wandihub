@@ -30,10 +30,6 @@ const CHANGELOG = [
   'Review descriptions — optional rich text field under the review title for adding summaries or context, visible on the public review page',
   'Link insertion fix — highlighting text in review notes and adding a link now correctly replaces the selection instead of inserting at the beginning',
   'Business line images — add, caption, and delete images on business lines in settings, with thumbnails on the card',
-  'Archive & quarter management for all — restore projects and run quarter rollovers without needing admin',
-  'Project descriptions — optional description field in the edit modal, displayed on project cards below the title',
-  'Duplicate from archive — duplicate an archived project directly into active without restoring it first',
-  'Weekly updates for all statuses — the weekly report accordion now appears on projects in any status, not just active/review/blocked',
 ]
 
 
