@@ -27,6 +27,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Review item descriptions — add an optional description per project in a review, visible on the public review page below the project header',
   'Archive status — archive projects directly from the project board with one click, placing them into the current fiscal quarter\'s archive',
   'Review item images — upload, caption, and delete images per review project in the Open Notes accordion, with lightbox viewing on the public review site',
   'Review descriptions — optional rich text field under the review title for adding summaries or context, visible on the public review page',
