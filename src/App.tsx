@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Per-entry copy — copy individual entries in the weekly status report view with a clipboard icon on hover. Bullet toggle converts existing lines.',
   'Rich text toolbar — bold, bullets with sub-bullet indentation, and links in all text fields. Report copy now pastes into Google Docs with formatting intact.',
   'Archive from board — archive projects directly from the status chip on project cards, no need to go through Settings',
   'Weekly general updates — add general highlights, lowlights, FYIs, and people updates to the weekly status report from the Current Week panel in Reports',
@@ -4440,6 +4441,21 @@ const [showFilters, setShowFilters] = useState(false)
             })
           }
 
+          const entryTextForUpdate = (u: WeeklyUpdate, brand: string) => {
+            const proj = currentProjects.find(p => p.id === u.project_id)
+            const linksMd = [
+              proj?.deckLink && `[${proj.deckName || 'Deck'}](${proj.deckLink})`,
+              proj?.prdLink && `[${proj.prdName || 'PRD'}](${proj.prdLink})`,
+              proj?.briefLink && `[${proj.briefName || 'Brief'}](${proj.briefLink})`,
+              proj?.figmaLink && `[Figma](${proj.figmaLink})`,
+            ].filter(Boolean) as string[]
+            const lines = [`**${brand}: ${u.project_name || 'Unknown'}**`, u.description]
+            if (linksMd.length > 0) lines.push(`Related: ${linksMd.join(', ')}`)
+            if (u.risk_reason) lines.push(`At risk: ${u.risk_reason}`)
+            if (u.resolution) lines.push(`Path to resolution: ${u.resolution}`)
+            return lines.join('\n')
+          }
+
           const renderUpdateEntry = (u: WeeklyUpdate, type: 'highlight' | 'lowlight') => {
             const brand = getBrand(u)
             const proj = currentProjects.find(p => p.id === u.project_id)
@@ -4452,6 +4468,7 @@ const [showFilters, setShowFilters] = useState(false)
             ].filter(Boolean) as { name: string; url: string }[]
             return (
               <div key={u.id} className={`rr-update-card rr-update-${type}`}>
+                <button className="rr-copy-entry" onClick={() => sectionCopy(entryTextForUpdate(u, brand))} title="Copy entry"><ClipboardCopy size={11} /></button>
                 <div className="rr-update-brand">{brand}</div>
                 <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
                 {links.length > 0 && (
@@ -4491,6 +4508,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-update-list">
                     {generalHighlights.filter(e => e.content.trim()).map(e => (
                       <div key={e.id} className="rr-update-card rr-update-highlight">
+                        <button className="rr-copy-entry" onClick={() => sectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
                         <div className="rr-update-brand">General</div>
                         <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
                       </div>
@@ -4518,6 +4536,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-update-list">
                     {generalLowlights.filter(e => e.content.trim()).map(e => (
                       <div key={e.id} className="rr-update-card rr-update-lowlight">
+                        <button className="rr-copy-entry" onClick={() => sectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
                         <div className="rr-update-brand">General</div>
                         <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
                       </div>
@@ -4545,6 +4564,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-update-list">
                     {fyis.filter(e => e.content.trim()).map(e => (
                       <div key={e.id} className="rr-update-card rr-update-fyi">
+                        <button className="rr-copy-entry" onClick={() => sectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
                         <div className="rr-update-brand">General</div>
                         <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
                       </div>
@@ -4571,6 +4591,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-update-list">
                     {peopleUpdates.filter(e => e.content.trim()).map(e => (
                       <div key={e.id} className="rr-update-card rr-update-people">
+                        <button className="rr-copy-entry" onClick={() => sectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
                         <div className="rr-update-brand">General</div>
                         <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
                       </div>
@@ -4603,7 +4624,30 @@ const [showFilters, setShowFilters] = useState(false)
               return 'General'
             }
 
+            const snapEntryText = (u: WeeklyUpdate, brand: string) => {
+              const proj = currentProjects.find(p => p.id === u.project_id)
+              const linksMd = [
+                proj?.deckLink && `[${proj.deckName || 'Deck'}](${proj.deckLink})`,
+                proj?.prdLink && `[${proj.prdName || 'PRD'}](${proj.prdLink})`,
+                proj?.briefLink && `[${proj.briefName || 'Brief'}](${proj.briefLink})`,
+                proj?.figmaLink && `[Figma](${proj.figmaLink})`,
+              ].filter(Boolean) as string[]
+              const lines = [`**${brand}: ${u.project_name || 'Unknown'}**`, u.description]
+              if (linksMd.length > 0) lines.push(`Related: ${linksMd.join(', ')}`)
+              if (u.risk_reason) lines.push(`At risk: ${u.risk_reason}`)
+              if (u.resolution) lines.push(`Path to resolution: ${u.resolution}`)
+              return lines.join('\n')
+            }
+
+            const snapSectionCopy = (text: string) => {
+              copyRichText(text).then(() => {
+                setCopiedReport(Date.now())
+                setTimeout(() => setCopiedReport(null), 2000)
+              })
+            }
+
             const snapRenderEntry = (u: WeeklyUpdate, type: 'highlight' | 'lowlight') => {
+              const brand = snapGetBrand(u)
               const proj = currentProjects.find(p => p.id === u.project_id)
               const links = [
                 proj?.deckLink && { name: proj.deckName || 'Deck', url: proj.deckLink },
@@ -4614,7 +4658,8 @@ const [showFilters, setShowFilters] = useState(false)
               ].filter(Boolean) as { name: string; url: string }[]
               return (
                 <div key={u.id} className={`rr-update-card rr-update-${type}`}>
-                  <div className="rr-update-brand">{snapGetBrand(u)}</div>
+                  <button className="rr-copy-entry" onClick={() => snapSectionCopy(snapEntryText(u, brand))} title="Copy entry"><ClipboardCopy size={11} /></button>
+                  <div className="rr-update-brand">{brand}</div>
                   <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
                   {links.length > 0 && (
                     <div className="rr-update-links">
@@ -4671,6 +4716,7 @@ const [showFilters, setShowFilters] = useState(false)
                     {section.items.length > 0 ? (
                       <div className="rr-general-list">{section.items.map((e: WeeklyGeneral) => (
                         <div key={e.id} className="rr-general-item">
+                          <button className="rr-copy-entry" onClick={() => snapSectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
                           <span>{renderMarkdownLinks(e.content)}</span>
                           <span className="rr-general-author">{(e.designer_name || '').split(' ')[0]}</span>
                         </div>
@@ -5734,7 +5780,7 @@ const [showFilters, setShowFilters] = useState(false)
                     setReviewCopied(true)
                     setTimeout(() => setReviewCopied(false), 2000)
                   }}>
-                    <Copy size={11} /> {reviewCopied ? 'Copied!' : 'Copy Link'}
+                    <ClipboardCopy size={11} /> {reviewCopied ? 'Copied!' : 'Copy Link'}
                   </span>
                   <span className="project-meta-chip project-meta-action project-meta-action-delete" style={{ opacity: 1 }} onClick={() => setShowDeleteReviewModal(true)}>
                     <Trash2 size={11} /> Delete

@@ -34,6 +34,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
 }, ref) => {
   const editorRef = useRef<HTMLDivElement>(null)
   const lastEmittedRef = useRef<string>(value)
+  const isEditingRef = useRef(false)
   const savedRangeRef = useRef<Range | null>(null)
   const linkAnchorRef = useRef<HTMLDivElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
@@ -48,6 +49,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
   }))
 
   useEffect(() => {
+    if (isEditingRef.current) return
     if (value !== lastEmittedRef.current && editorRef.current) {
       editorRef.current.innerHTML = markdownToHtml(value)
       lastEmittedRef.current = value
@@ -85,7 +87,9 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
     }
     const md = htmlToMarkdown(editorRef.current)
     lastEmittedRef.current = md
+    isEditingRef.current = true
     onChange(md)
+    requestAnimationFrame(() => { isEditingRef.current = false })
   }, [onChange])
 
   const updateToolbarState = useCallback(() => {
@@ -128,57 +132,45 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
     updateToolbarState()
   }, [syncEditor, updateToolbarState])
 
+  const placeCursor = useCallback((node: Node) => {
+    const range = document.createRange()
+    const sel = window.getSelection()
+    range.setStart(node, 0)
+    range.collapse(true)
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+  }, [])
+
   const insertBullet = useCallback(() => {
     if (!editorRef.current) return
     editorRef.current.focus()
     const currentDiv = getCurrentLineDiv()
     if (currentDiv?.classList.contains('rte-bullet')) {
-      document.execCommand('insertHTML', false, '<br>&#8203;')
-      requestAnimationFrame(() => {
-        const newDiv = getCurrentLineDiv()
-        if (newDiv) {
-          newDiv.classList.add('rte-bullet')
-          newDiv.dataset.indent = currentDiv.dataset.indent || '0'
-          newDiv.innerHTML = newDiv.innerHTML.replace('&#8203;', '').replace('\u200B', '') || '<br>'
-          const range = document.createRange()
-          const sel = window.getSelection()
-          range.setStart(newDiv, 0)
-          range.collapse(true)
-          sel?.removeAllRanges()
-          sel?.addRange(range)
-        }
-        syncEditor()
-      })
+      currentDiv.classList.remove('rte-bullet')
+      delete currentDiv.dataset.indent
+      syncEditor()
       return
     }
+    if (currentDiv) {
+      currentDiv.classList.add('rte-bullet')
+      currentDiv.dataset.indent = '0'
+      syncEditor()
+      return
+    }
+    const newBullet = document.createElement('div')
+    newBullet.className = 'rte-bullet'
+    newBullet.dataset.indent = '0'
+    newBullet.innerHTML = '<br>'
     const isEmpty = !editorRef.current.textContent?.trim()
     if (isEmpty) {
-      editorRef.current.innerHTML = '<div class="rte-bullet" data-indent="0"><br></div>'
-      const bullet = editorRef.current.querySelector('.rte-bullet')
-      if (bullet) {
-        const range = document.createRange()
-        const sel = window.getSelection()
-        range.setStart(bullet, 0)
-        range.collapse(true)
-        sel?.removeAllRanges()
-        sel?.addRange(range)
-      }
+      editorRef.current.innerHTML = ''
+      editorRef.current.appendChild(newBullet)
     } else {
-      document.execCommand('insertHTML', false, '</div><div class="rte-bullet" data-indent="0"><br></div>')
-      requestAnimationFrame(() => {
-        const newBullet = editorRef.current?.querySelector('.rte-bullet:last-of-type')
-        if (newBullet) {
-          const range = document.createRange()
-          const sel = window.getSelection()
-          range.setStart(newBullet, 0)
-          range.collapse(true)
-          sel?.removeAllRanges()
-          sel?.addRange(range)
-        }
-      })
+      editorRef.current.appendChild(newBullet)
     }
+    placeCursor(newBullet)
     syncEditor()
-  }, [getCurrentLineDiv, syncEditor])
+  }, [getCurrentLineDiv, syncEditor, placeCursor])
 
   const indentBullet = useCallback((direction: 'indent' | 'outdent') => {
     const currentDiv = getCurrentLineDiv()
@@ -277,17 +269,26 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
           return
         }
         const indent = currentDiv.dataset.indent || '0'
+        const sel = window.getSelection()
+        if (!sel || sel.rangeCount === 0) return
+        const range = sel.getRangeAt(0)
+        const afterRange = document.createRange()
+        afterRange.setStart(range.endContainer, range.endOffset)
+        afterRange.setEnd(currentDiv, currentDiv.childNodes.length)
+        const fragment = afterRange.extractContents()
         const newBullet = document.createElement('div')
         newBullet.className = 'rte-bullet'
         newBullet.dataset.indent = indent
-        newBullet.innerHTML = '<br>'
+        if (fragment.textContent?.trim() || fragment.querySelector('a, strong, b')) {
+          newBullet.appendChild(fragment)
+        } else {
+          newBullet.innerHTML = '<br>'
+        }
+        if (!currentDiv.textContent?.trim() && !currentDiv.querySelector('a, strong, b')) {
+          currentDiv.innerHTML = '<br>'
+        }
         currentDiv.after(newBullet)
-        const range = document.createRange()
-        const sel = window.getSelection()
-        range.setStart(newBullet, 0)
-        range.collapse(true)
-        sel?.removeAllRanges()
-        sel?.addRange(range)
+        placeCursor(newBullet)
         syncEditor()
         return
       }
