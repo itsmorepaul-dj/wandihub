@@ -27,12 +27,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Archive from board — archive projects directly from the status chip on project cards, no need to go through Settings',
+  'Weekly general updates — add general highlights, lowlights, FYIs, and people updates to the weekly status report from the Current Week panel in Reports',
   'Review item descriptions — add an optional description per project in a review, visible on the public review page below the project header',
-  'Archive status — archive projects directly from the project board with one click, placing them into the current fiscal quarter\'s archive',
-  'Review item images — upload, caption, and delete images per review project in the Open Notes accordion, with lightbox viewing on the public review site',
-  'Review descriptions — optional rich text field under the review title for adding summaries or context, visible on the public review page',
-  'Link insertion fix — highlighting text in review notes and adding a link now correctly replaces the selection instead of inserting at the beginning',
-  'Business line images — add, caption, and delete images on business lines in settings, with thumbnails on the card',
 ]
 
 
@@ -756,6 +753,7 @@ const [showFilters, setShowFilters] = useState(false)
   const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode }>({ open: false, title: '', content: '' })
   const [showArchive, setShowArchive] = useState(false)
   const [showSnapshotHistory, setShowSnapshotHistory] = useState(false)
+  const [showWeeklyPending, setShowWeeklyPending] = useState(false)
   const [openCritsSyncing, setOpenCritsSyncing] = useState(false)
   const [weeklyUpdates, setWeeklyUpdates] = useState<WeeklyUpdate[]>([])
   const [weeklyGeneral, setWeeklyGeneral] = useState<WeeklyGeneral[]>([])
@@ -2321,7 +2319,7 @@ const [showFilters, setShowFilters] = useState(false)
     )
   }
 
-  const showMaintenanceBanner = maintenance.enabled && !maintenance.isLockout && !!maintenance.bannerMessage
+  const showMaintenanceBanner = maintenance.enabled && !!maintenance.bannerMessage && (!maintenance.isLockout || isAdmin)
 
   return (
     <>
@@ -2329,8 +2327,8 @@ const [showFilters, setShowFilters] = useState(false)
       {showMaintenanceBanner && (
         <div className="maintenance-banner">
           <span className="maintenance-banner-text">
-            {maintenance.bannerMessage}
-            {countdownDisplay && <span className="maintenance-banner-countdown"> &mdash; {countdownDisplay}</span>}
+            {maintenance.isLockout ? 'Maintenance mode active — site is locked out for users' : maintenance.bannerMessage}
+            {!maintenance.isLockout && countdownDisplay && <span className="maintenance-banner-countdown"> &mdash; {countdownDisplay}</span>}
           </span>
         </div>
       )}
@@ -4343,6 +4341,8 @@ const [showFilters, setShowFilters] = useState(false)
           // Build sections from weekly update data
           const highlights = weeklyUpdates.filter(u => u.type === 'highlight')
           const lowlights = weeklyUpdates.filter(u => u.type === 'lowlight')
+          const generalHighlights = weeklyGeneral.filter(e => e.category === 'highlight')
+          const generalLowlights = weeklyGeneral.filter(e => e.category === 'lowlight')
           const fyis = weeklyGeneral.filter(e => e.category === 'fyi')
           const peopleUpdates = weeklyGeneral.filter(e => e.category === 'people')
 
@@ -4355,23 +4355,34 @@ const [showFilters, setShowFilters] = useState(false)
           }
 
           // Google Doc format text generators per section
-          const highlightsText = highlights.length > 0 ? highlights.map(u => {
-            const brand = getBrand(u)
-            const proj = currentProjects.find(p => p.id === u.project_id)
-            const links = [proj?.deckLink, proj?.prdLink, proj?.briefLink, proj?.figmaLink].filter(Boolean)
-            return `    \u2022    ${brand}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}${links.length > 0 ? `\n    \u25E6    Related files/screenshots\n    \u25AA    ${links.join('\n    \u25AA    ')}` : ''}`
-          }).join('\n') : '    \u2022    TK'
+          const highlightsText = (() => {
+            const projectLines = highlights.map(u => {
+              const brand = getBrand(u)
+              const proj = currentProjects.find(p => p.id === u.project_id)
+              const links = [proj?.deckLink, proj?.prdLink, proj?.briefLink, proj?.figmaLink].filter(Boolean)
+              return `    \u2022    ${brand}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}${links.length > 0 ? `\n    \u25E6    Related files/screenshots\n    \u25AA    ${links.join('\n    \u25AA    ')}` : ''}`
+            })
+            const generalLines = generalHighlights.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean).map(l => `    \u2022    General: ${l}`))
+            const all = [...generalLines, ...projectLines]
+            return all.length > 0 ? all.join('\n') : '    \u2022    TK'
+          })()
 
-          const lowlightsText = lowlights.length > 0 ? lowlights.map(u => {
-            const brand = getBrand(u)
-            const lines = [`    \u2022    ${brand}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
-            if (u.risk_reason) lines.push(`    \u25E6    At risk: ${u.risk_reason}`)
-            if (u.resolution) lines.push(`    \u25E6    Path to resolution: ${u.resolution}`)
-            return lines.join('\n')
-          }).join('\n') : '    \u2022    TK'
+          const lowlightsText = (() => {
+            const projectLines = lowlights.map(u => {
+              const brand = getBrand(u)
+              const lines = [`    \u2022    ${brand}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
+              if (u.risk_reason) lines.push(`    \u25E6    At risk: ${u.risk_reason}`)
+              if (u.resolution) lines.push(`    \u25E6    Path to resolution: ${u.resolution}`)
+              return lines.join('\n')
+            })
+            const generalLines = generalLowlights.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean).map(l => `    \u2022    General: ${l}`))
+            const all = [...generalLines, ...projectLines]
+            return all.length > 0 ? all.join('\n') : '    \u2022    TK'
+          })()
 
-          const fyisText = fyis.length > 0 ? fyis.map(e => `    \u2022    ${e.content}`).join('\n') : '    \u2022    TK'
-          const peopleText = peopleUpdates.length > 0 ? peopleUpdates.map(e => `    \u2022    ${e.content}`).join('\n') : '    \u2022    TK'
+          const splitLines = (e: WeeklyGeneral) => e.content.split('\n').map(l => l.trim()).filter(Boolean)
+          const fyisText = fyis.flatMap(splitLines).length > 0 ? fyis.flatMap(splitLines).map(l => `    \u2022    General: ${l}`).join('\n') : '    \u2022    TK'
+          const peopleText = peopleUpdates.flatMap(splitLines).length > 0 ? peopleUpdates.flatMap(splitLines).map(l => `    \u2022    General: ${l}`).join('\n') : '    \u2022    TK'
 
           const fullText = `Design\nHighlights\n${highlightsText}\n\nLowlights\n${lowlightsText}\n\nUpcoming FYIs\n${fyisText}\n\nPeople Updates\n${peopleText}`
 
@@ -4423,16 +4434,24 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-section-header" style={{ color: '#22c55e' }}>
                     <span className="rr-section-dot" style={{ background: '#22c55e' }} />
                     <span>Highlights</span>
-                    <span className="rr-section-count">{highlights.length}</span>
+                    <span className="rr-section-count">{highlights.length + generalHighlights.flatMap(e => e.content.split('\n').filter(l => l.trim())).length}</span>
                   </div>
                   <button className="rr-copy-section" onClick={() => sectionCopy(`Highlights\n${highlightsText}`)}>
                     <ClipboardCopy size={12} /> Copy
                   </button>
                 </div>
-                {highlights.length > 0 ? (
-                  <div className="rr-update-list">{highlights.map(u => renderUpdateEntry(u, 'highlight'))}</div>
+                {highlights.length > 0 || generalHighlights.some(e => e.content.trim()) ? (
+                  <div className="rr-update-list">
+                    {generalHighlights.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean)).map((line, i) => (
+                      <div key={`gh-${i}`} className="rr-update-card rr-update-highlight">
+                        <div className="rr-update-brand">General</div>
+                        <div className="rr-update-desc">{renderMarkdownLinks(line)}</div>
+                      </div>
+                    ))}
+                    {highlights.map(u => renderUpdateEntry(u, 'highlight'))}
+                  </div>
                 ) : (
-                  <div className="rr-empty">No highlights this week. Add updates on project cards.</div>
+                  <div className="rr-empty">No highlights this week.</div>
                 )}
               </div>
 
@@ -4442,14 +4461,22 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-section-header" style={{ color: '#ef4444' }}>
                     <span className="rr-section-dot" style={{ background: '#ef4444' }} />
                     <span>Lowlights</span>
-                    <span className="rr-section-count">{lowlights.length}</span>
+                    <span className="rr-section-count">{lowlights.length + generalLowlights.flatMap(e => e.content.split('\n').filter(l => l.trim())).length}</span>
                   </div>
                   <button className="rr-copy-section" onClick={() => sectionCopy(`Lowlights\n${lowlightsText}`)}>
                     <ClipboardCopy size={12} /> Copy
                   </button>
                 </div>
-                {lowlights.length > 0 ? (
-                  <div className="rr-update-list">{lowlights.map(u => renderUpdateEntry(u, 'lowlight'))}</div>
+                {lowlights.length > 0 || generalLowlights.some(e => e.content.trim()) ? (
+                  <div className="rr-update-list">
+                    {generalLowlights.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean)).map((line, i) => (
+                      <div key={`gl-${i}`} className="rr-update-card rr-update-lowlight">
+                        <div className="rr-update-brand">General</div>
+                        <div className="rr-update-desc">{renderMarkdownLinks(line)}</div>
+                      </div>
+                    ))}
+                    {lowlights.map(u => renderUpdateEntry(u, 'lowlight'))}
+                  </div>
                 ) : (
                   <div className="rr-empty">No lowlights this week.</div>
                 )}
@@ -4461,18 +4488,18 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-section-header" style={{ color: '#f59e0b' }}>
                     <span className="rr-section-dot" style={{ background: '#f59e0b' }} />
                     <span>Upcoming FYIs</span>
-                    <span className="rr-section-count">{fyis.length}</span>
+                    <span className="rr-section-count">{fyis.flatMap(e => e.content.split('\n').filter(l => l.trim())).length}</span>
                   </div>
                   <button className="rr-copy-section" onClick={() => sectionCopy(`Upcoming FYIs\n${fyisText}`)}>
                     <ClipboardCopy size={12} /> Copy
                   </button>
                 </div>
-                {fyis.length > 0 ? (
-                  <div className="rr-general-list">
-                    {fyis.map(e => (
-                      <div key={e.id} className="rr-general-item">
-                        <span>{e.content}</span>
-                        <span className="rr-general-author">{(e.designer_name || '').split(' ')[0]}</span>
+                {fyis.some(e => e.content.trim()) ? (
+                  <div className="rr-update-list">
+                    {fyis.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean)).map((line, i) => (
+                      <div key={`fyi-${i}`} className="rr-update-card rr-update-fyi">
+                        <div className="rr-update-brand">General</div>
+                        <div className="rr-update-desc">{renderMarkdownLinks(line)}</div>
                       </div>
                     ))}
                   </div>
@@ -4487,18 +4514,18 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-section-header" style={{ color: '#8b5cf6' }}>
                     <span className="rr-section-dot" style={{ background: '#8b5cf6' }} />
                     <span>People Updates</span>
-                    <span className="rr-section-count">{peopleUpdates.length}</span>
+                    <span className="rr-section-count">{peopleUpdates.flatMap(e => e.content.split('\n').filter(l => l.trim())).length}</span>
                   </div>
                   <button className="rr-copy-section" onClick={() => sectionCopy(`People Updates\n${peopleText}`)}>
                     <ClipboardCopy size={12} /> Copy
                   </button>
                 </div>
-                {peopleUpdates.length > 0 ? (
-                  <div className="rr-general-list">
-                    {peopleUpdates.map(e => (
-                      <div key={e.id} className="rr-general-item">
-                        <span>{e.content}</span>
-                        <span className="rr-general-author">{(e.designer_name || '').split(' ')[0]}</span>
+                {peopleUpdates.some(e => e.content.trim()) ? (
+                  <div className="rr-update-list">
+                    {peopleUpdates.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean)).map((line, i) => (
+                      <div key={`pu-${i}`} className="rr-update-card rr-update-people">
+                        <div className="rr-update-brand">General</div>
+                        <div className="rr-update-desc">{renderMarkdownLinks(line)}</div>
                       </div>
                     ))}
                   </div>
@@ -5165,6 +5192,57 @@ const [showFilters, setShowFilters] = useState(false)
                     View Report
                   </button>
                 ) : null}
+                {report.id === 'weekly-status' && currentWeek && (
+                  <div className="snapshot-accordion">
+                    <button className="snapshot-accordion-toggle" onClick={() => setShowWeeklyPending(v => !v)}>
+                      {showWeeklyPending ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      <Edit2 size={12} />
+                      <span>Current Week ({currentWeek})</span>
+                      {(() => {
+                        const filledCategories = weeklyGeneral.filter(e => ['highlight', 'lowlight', 'fyi', 'people'].includes(e.category) && e.content.trim()).length
+                        const count = filledCategories + weeklyUpdates.length
+                        return count > 0 ? <span className="rr-section-count" style={{ marginLeft: 4 }}>{count}</span> : null
+                      })()}
+                    </button>
+                    {showWeeklyPending && (
+                      <div className="weekly-pending-panel">
+                        {([
+                          { category: 'highlight' as const, label: 'Highlights', color: '#22c55e', placeholder: 'General highlights (one per line)...' },
+                          { category: 'lowlight' as const, label: 'Lowlights', color: '#ef4444', placeholder: 'General lowlights (one per line)...' },
+                          { category: 'fyi' as const, label: 'Upcoming FYIs', color: '#f59e0b', placeholder: 'Upcoming FYIs (one per line)...' },
+                          { category: 'people' as const, label: 'People Updates', color: '#8b5cf6', placeholder: 'People updates (one per line)...' },
+                        ]).map(section => {
+                          const existing = weeklyGeneral.find(e => e.category === section.category)
+                          return (
+                            <div key={section.category} className="weekly-pending-section">
+                              <div className="weekly-pending-header" style={{ color: section.color }}>
+                                <span className="rr-section-dot" style={{ background: section.color }} />
+                                <span>{section.label}</span>
+                              </div>
+                              <textarea
+                                className="weekly-pending-input"
+                                rows={3}
+                                placeholder={section.placeholder}
+                                defaultValue={existing?.content || ''}
+                                key={existing?.id || section.category}
+                                onBlur={async (e) => {
+                                  const val = e.currentTarget.value.trim()
+                                  if (!val && !existing) return
+                                  if (val === (existing?.content || '')) return
+                                  if (!val && existing) {
+                                    await deleteWeeklyGeneral(existing.id)
+                                    return
+                                  }
+                                  await saveWeeklyGeneral({ id: existing?.id, designer_id: currentUser?.id || 'admin', week: currentWeek, category: section.category, content: val })
+                                }}
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {report.id === 'weekly-status' && weeklySnapshots.length > 0 && (
                   <div className="snapshot-accordion">
                     <button className="snapshot-accordion-toggle" onClick={() => setShowSnapshotHistory(v => !v)}>
@@ -5671,8 +5749,8 @@ const [showFilters, setShowFilters] = useState(false)
                         <tr>
                           <th style={{ width: 36 }}></th>
                           <th style={{ width: 36 }}>#</th>
-                          <th>Project</th>
-                          <th>Links</th>
+                          <th style={{ width: '60%' }}>Project</th>
+                          <th style={{ width: '25%' }}>Links</th>
                           <th style={{ width: 40 }}></th>
                         </tr>
                       </thead>
@@ -5851,7 +5929,14 @@ const [showFilters, setShowFilters] = useState(false)
                             min="1"
                             max="120"
                             value={maintenanceForm.countdownMinutes}
-                            onChange={e => setMaintenanceForm(prev => ({ ...prev, countdownMinutes: parseInt(e.target.value) || 15 }))}
+                            onChange={e => {
+                              const mins = parseInt(e.target.value) || 15
+                              setMaintenanceForm(prev => ({
+                                ...prev,
+                                countdownMinutes: mins,
+                                bannerMessage: `Save your work. Wandi Hub maintenance about to begin in ${mins} minute${mins !== 1 ? 's' : ''}.`
+                              }))
+                            }}
                             placeholder=" "
                           />
                           <label>Minutes</label>

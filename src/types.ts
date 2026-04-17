@@ -157,7 +157,7 @@ export interface WeeklyGeneral {
   id: string
   designer_id: string
   week: string
-  category: 'fyi' | 'people'
+  category: 'fyi' | 'people' | 'highlight' | 'lowlight'
   content: string
   created_at?: string
   updated_at?: string

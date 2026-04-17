@@ -171,6 +171,8 @@ const generateSnapshot = async (week: string) => {
 
   const highlights = updates.filter((u: any) => u.type === 'highlight')
   const lowlights = updates.filter((u: any) => u.type === 'lowlight')
+  const generalHighlights = general.filter((e: any) => e.category === 'highlight')
+  const generalLowlights = general.filter((e: any) => e.category === 'lowlight')
   const fyis = general.filter((e: any) => e.category === 'fyi')
   const peopleUpdates = general.filter((e: any) => e.category === 'people')
 
@@ -181,19 +183,32 @@ const generateSnapshot = async (week: string) => {
     return 'General'
   }
 
-  const highlightsText = highlights.length > 0 ? highlights.map((u: any) => {
-    return `    \u2022    ${getBrand(u)}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}`
-  }).join('\n') : '    \u2022    TK'
+  const highlightsText = (() => {
+    const projectLines = highlights.map((u: any) => `    \u2022    ${getBrand(u)}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}`)
+    const splitLines = (text: string) => text.split('\n').map(l => l.trim()).filter(Boolean)
+    const generalLines = generalHighlights.flatMap((e: any) => splitLines(e.content).map(l => `    \u2022    General: ${l}`))
+    const all = [...generalLines, ...projectLines]
+    return all.length > 0 ? all.join('\n') : '    \u2022    TK'
+  })()
 
-  const lowlightsText = lowlights.length > 0 ? lowlights.map((u: any) => {
-    const lines = [`    \u2022    ${getBrand(u)}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
-    if (u.risk_reason) lines.push(`    \u25E6    At risk: ${u.risk_reason}`)
-    if (u.resolution) lines.push(`    \u25E6    Path to resolution: ${u.resolution}`)
-    return lines.join('\n')
-  }).join('\n') : '    \u2022    TK'
+  const lowlightsText = (() => {
+    const projectLines = lowlights.map((u: any) => {
+      const lines = [`    \u2022    ${getBrand(u)}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
+      if (u.risk_reason) lines.push(`    \u25E6    At risk: ${u.risk_reason}`)
+      if (u.resolution) lines.push(`    \u25E6    Path to resolution: ${u.resolution}`)
+      return lines.join('\n')
+    })
+    const splitLines = (text: string) => text.split('\n').map(l => l.trim()).filter(Boolean)
+    const generalLines = generalLowlights.flatMap((e: any) => splitLines(e.content).map(l => `    \u2022    General: ${l}`))
+    const all = [...generalLines, ...projectLines]
+    return all.length > 0 ? all.join('\n') : '    \u2022    TK'
+  })()
 
-  const fyisText = fyis.length > 0 ? fyis.map((e: any) => `    \u2022    ${e.content}`).join('\n') : '    \u2022    TK'
-  const peopleText = peopleUpdates.length > 0 ? peopleUpdates.map((e: any) => `    \u2022    ${e.content}`).join('\n') : '    \u2022    TK'
+  const splitLines = (text: string) => text.split('\n').map(l => l.trim()).filter(Boolean)
+  const fyiLines = fyis.flatMap((e: any) => splitLines(e.content))
+  const peopleLines = peopleUpdates.flatMap((e: any) => splitLines(e.content))
+  const fyisText = fyiLines.length > 0 ? fyiLines.map(l => `    \u2022    General: ${l}`).join('\n') : '    \u2022    TK'
+  const peopleText = peopleLines.length > 0 ? peopleLines.map(l => `    \u2022    General: ${l}`).join('\n') : '    \u2022    TK'
 
   const plainText = `Design\nHighlights\n${highlightsText}\n\nLowlights\n${lowlightsText}\n\nUpcoming FYIs\n${fyisText}\n\nPeople Updates\n${peopleText}`
 
@@ -201,6 +216,8 @@ const generateSnapshot = async (week: string) => {
     week,
     highlights: highlights.map((u: any) => ({ ...u })),
     lowlights: lowlights.map((u: any) => ({ ...u })),
+    generalHighlights: generalHighlights.map((e: any) => ({ ...e })),
+    generalLowlights: generalLowlights.map((e: any) => ({ ...e })),
     fyis: fyis.map((e: any) => ({ ...e })),
     peopleUpdates: peopleUpdates.map((e: any) => ({ ...e })),
     projectCount: projects.length,
