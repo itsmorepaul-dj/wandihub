@@ -166,10 +166,10 @@ const REVIEW_STATUS_MAP: Record<string, { label: string; color: string }> = {
 }
 
 function WeeklyPendingEditor({ existing, placeholder, onSave, onDelete }: {
-  existing: { id?: number; content: string } | undefined
+  existing: { id?: string; content: string } | undefined
   placeholder: string
   onSave: (content: string) => Promise<void>
-  onDelete: (id: number) => Promise<void>
+  onDelete: (id: string) => Promise<void>
 }) {
   const [value, setValue] = useState(existing?.content || '')
   const valueRef = useRef(value)
@@ -5277,7 +5277,7 @@ const [showFilters, setShowFilters] = useState(false)
                                   for (const old of allForCategory.slice(1)) await deleteWeeklyGeneral(old.id)
                                   await saveWeeklyGeneral({ id: existing?.id, designer_id: String(currentUser?.id || 'admin'), week: currentWeek, category: section.category, content })
                                 }}
-                                onDelete={async (id) => {
+                                onDelete={async () => {
                                   for (const old of allForCategory) await deleteWeeklyGeneral(old.id)
                                 }}
                               />
