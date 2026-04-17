@@ -5233,7 +5233,7 @@ const [showFilters, setShowFilters] = useState(false)
                                     await deleteWeeklyGeneral(existing.id)
                                     return
                                   }
-                                  await saveWeeklyGeneral({ id: existing?.id, designer_id: currentUser?.id || 'admin', week: currentWeek, category: section.category, content: val })
+                                  await saveWeeklyGeneral({ id: existing?.id, designer_id: String(currentUser?.id || 'admin'), week: currentWeek, category: section.category, content: val })
                                 }}
                               />
                             </div>
