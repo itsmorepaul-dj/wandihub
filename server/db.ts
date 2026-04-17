@@ -350,8 +350,10 @@ export const initSchema = async () => {
   await run(`CREATE TABLE IF NOT EXISTS review_items (
     id TEXT PRIMARY KEY, review_id TEXT NOT NULL, project_id TEXT NOT NULL,
     rank INTEGER NOT NULL DEFAULT 0, notes TEXT DEFAULT '',
-    notes_updated_by TEXT DEFAULT '', notes_updated_at TEXT DEFAULT ''
+    notes_updated_by TEXT DEFAULT '', notes_updated_at TEXT DEFAULT '',
+    description TEXT DEFAULT ''
   )`).catch(e => console.error('review_items init error:', e.message))
+  await run(`ALTER TABLE review_items ADD COLUMN description TEXT DEFAULT ''`).catch(() => {})
 
   // Seed default business lines if empty
   const existing = await get('SELECT COUNT(*) as count FROM business_lines')

@@ -155,14 +155,16 @@ const REVIEW_STATUS_MAP: Record<string, { label: string; color: string }> = {
   pending: { label: 'Pending', color: '#94a3b8' },
 }
 
-function ReviewItemRow({ item, index, project, onRemove }: {
+function ReviewItemRow({ item, index, project, onRemove, authFetch }: {
   item: any
   index: number
   project: any
   onRemove: () => void
+  authFetch: (url: string, opts?: RequestInit) => Promise<Response>
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
+  const [desc, setDesc] = useState(item.description || '')
 
   const designers = project?.designers?.map((d: string) => d.split(' ')[0]).join(', ') || ''
   const statusInfo = REVIEW_STATUS_MAP[project?.status] || { label: project?.status || '—', color: '#6b7280' }
@@ -196,6 +198,22 @@ function ReviewItemRow({ item, index, project, onRemove }: {
             {designers && <span className="review-item-designers">{designers}</span>}
             {businessLines.length > 0 && <span className="review-item-bl">{businessLines.join(', ')}</span>}
           </span>
+          <textarea
+            className="review-item-description"
+            value={desc}
+            onChange={e => setDesc(e.target.value)}
+            onBlur={async () => {
+              if (desc !== (item.description || '')) {
+                await authFetch(`/api/review-items/${item.id}/description`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ description: desc })
+                })
+              }
+            }}
+            placeholder="Add a description..."
+            rows={3}
+          />
         </div>
       </td>
       <td className="review-item-links">
@@ -5666,6 +5684,7 @@ const [showFilters, setShowFilters] = useState(false)
                               item={item}
                               index={idx}
                               project={proj || null}
+                              authFetch={authFetch}
                               onRemove={async () => {
                                 await authFetch(`/api/review-items/${item.id}`, { method: 'DELETE' })
                                 loadReviewDetail(editingReview.id)

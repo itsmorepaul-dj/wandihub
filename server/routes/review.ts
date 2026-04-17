@@ -117,6 +117,14 @@ router.delete('/api/review-items/:id', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
+router.put('/api/review-items/:id/description', async (req, res) => {
+  try {
+    const { description } = req.body
+    await run('UPDATE review_items SET description = ? WHERE id = ?', [description || '', req.params.id])
+    res.json({ ok: true })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
 router.put('/api/review-items/:id/notes', async (req, res) => {
   try {
     const { notes, expected_updated_at } = req.body
@@ -502,6 +510,7 @@ router.get('/review/:id', async (req, res) => {
             </div>
           </div>
         </div>
+        ${item.description ? `<div class="card-description">${escHtml(item.description)}</div>` : ''}
         ${gantt}
         ${linksSection}
         ${notesSection}
@@ -1209,6 +1218,7 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     .card-title-area { flex: 1; min-width: 0; }
     .card-title { font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
     .card-meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; flex-wrap: wrap; }
+    .card-description { padding: 0.4rem 1rem 0.75rem; font-size: 0.8rem; color: var(--rv-text-muted); line-height: 1.45; max-width: 70ch; }
     .status-badge {
       display: inline-block; padding: 0.1rem 0.5rem; border-radius: 99px;
       font-size: 0.65rem; font-weight: 500; color: #fff; letter-spacing: 0.01em;

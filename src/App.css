@@ -8417,6 +8417,34 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.review-item-description {
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+  resize: vertical;
+  field-sizing: content;
+  min-height: calc(0.75rem * 1.45 * 3 + 0.5rem);
+  transition: border-color 0.15s, background 0.15s;
+}
+.review-item-description:hover {
+  border-color: var(--color-border);
+}
+.review-item-description:focus {
+  border-color: var(--color-accent, #3b82f6);
+  background: var(--color-bg);
+}
+.review-item-description::placeholder {
+  color: var(--color-text-dim);
+}
+
 .review-status-pill {
   display: inline-flex;
   align-items: center;
