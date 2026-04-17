@@ -18,6 +18,8 @@ import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
 import WeeklyUpdateForm from './WeeklyUpdateForm'
+import RichTextEditor from './components/RichTextEditor'
+import { copyRichText } from './utils/richtext'
 import ImageLightbox from './ImageLightbox'
 import { defaultHolidays, getTodayStr, getDjFiscalLabel, DAY_MS, parseLocalDate, formatShortDate, formatFullDate, calcRangeHours, getClosestTimeOff, formatDateRange, formatMonthDay, formatMonthDayFromDate, getTodayFormatted, formatVersionDisplay } from './utils'
 import { authFetch, setClientVersion, getClientVersion, defaultBrandOptions, loadDataFromAPI } from './api'
@@ -27,32 +29,42 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Rich text toolbar — bold, bullets with sub-bullet indentation, and links in all text fields. Report copy now pastes into Google Docs with formatting intact.',
   'Archive from board — archive projects directly from the status chip on project cards, no need to go through Settings',
   'Weekly general updates — add general highlights, lowlights, FYIs, and people updates to the weekly status report from the Current Week panel in Reports',
-  'Review item descriptions — add an optional description per project in a review, visible on the public review page below the project header',
 ]
 
 
-// Render [name](url) markdown links as clickable <a> tags in text
 function renderMarkdownLinks(text: string): React.ReactNode {
-  const renderLine = (line: string, lineIdx: number) => {
+  const renderInline = (line: string, lineIdx: number) => {
     const parts: React.ReactNode[] = []
     let last = 0
-    const linkRe = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g
+    const inlineRe = /\*\*(.+?)\*\*|\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g
     let m: RegExpExecArray | null
-    while ((m = linkRe.exec(line)) !== null) {
+    while ((m = inlineRe.exec(line)) !== null) {
       if (m.index > last) parts.push(line.slice(last, m.index))
-      parts.push(
-        <a key={`${lineIdx}-${m.index}`} href={m[2]} target="_blank" rel="noopener noreferrer" className="weekly-inline-link"
-          onClick={e => e.stopPropagation()}>{m[1]}</a>
-      )
+      if (m[1] !== undefined) {
+        parts.push(<strong key={`${lineIdx}-b-${m.index}`}>{m[1]}</strong>)
+      } else {
+        parts.push(
+          <a key={`${lineIdx}-${m.index}`} href={m[3]} target="_blank" rel="noopener noreferrer" className="weekly-inline-link"
+            onClick={e => e.stopPropagation()}>{m[2]}</a>
+        )
+      }
       last = m.index + m[0].length
     }
     if (last < line.length) parts.push(line.slice(last))
     return parts.length > 0 ? parts : [line]
   }
   const lines = text.split('\n')
-  return <>{lines.map((line, i) => <div key={i}>{line ? renderLine(line, i) : <br />}</div>)}</>
+  return <>{lines.map((line, i) => {
+    const bulletMatch = line.match(/^(\s*)- (.*)/)
+    if (bulletMatch) {
+      const indent = Math.floor(bulletMatch[1].length / 2)
+      return <div key={i} className="rte-bullet" data-indent={Math.min(indent, 3)}>{renderInline(bulletMatch[2], i)}</div>
+    }
+    return <div key={i}>{line ? renderInline(line, i) : <br />}</div>
+  })}</>
 }
 
 // Parse Gemini note content_preview to extract structured sections
@@ -153,6 +165,35 @@ const REVIEW_STATUS_MAP: Record<string, { label: string; color: string }> = {
   pending: { label: 'Pending', color: '#94a3b8' },
 }
 
+function WeeklyPendingEditor({ existing, placeholder, onSave, onDelete }: {
+  existing: { id?: number; content: string } | undefined
+  placeholder: string
+  onSave: (content: string) => Promise<void>
+  onDelete: (id: number) => Promise<void>
+}) {
+  const [value, setValue] = useState(existing?.content || '')
+  const valueRef = useRef(value)
+  valueRef.current = value
+  useEffect(() => { setValue(existing?.content || '') }, [existing?.id])
+  return (
+    <RichTextEditor
+      className="weekly-pending-rte"
+      value={value}
+      onChange={setValue}
+      onBlur={async () => {
+        const val = valueRef.current.trim()
+        if (!val && !existing) return
+        if (val === (existing?.content || '')) return
+        if (!val && existing?.id) { await onDelete(existing.id); return }
+        await onSave(val)
+      }}
+      placeholder={placeholder}
+      features={['bold', 'bullets', 'links']}
+      minHeight="calc(0.75rem * 1.45 * 3 + 0.6rem)"
+    />
+  )
+}
+
 function ReviewItemRow({ item, index, project, onRemove, authFetch }: {
   item: any
   index: number
@@ -196,10 +237,10 @@ function ReviewItemRow({ item, index, project, onRemove, authFetch }: {
             {designers && <span className="review-item-designers">{designers}</span>}
             {businessLines.length > 0 && <span className="review-item-bl">{businessLines.join(', ')}</span>}
           </span>
-          <textarea
-            className="review-item-description"
+          <RichTextEditor
+            className="review-item-rte"
             value={desc}
-            onChange={e => setDesc(e.target.value)}
+            onChange={setDesc}
             onBlur={async () => {
               if (desc !== (item.description || '')) {
                 await authFetch(`/api/review-items/${item.id}/description`, {
@@ -210,7 +251,8 @@ function ReviewItemRow({ item, index, project, onRemove, authFetch }: {
               }
             }}
             placeholder="Add a description..."
-            rows={3}
+            features={['bold', 'bullets', 'links']}
+            minHeight="calc(0.75rem * 1.45 * 3 + 0.5rem)"
           />
         </div>
       </td>
@@ -3040,10 +3082,10 @@ const [showFilters, setShowFilters] = useState(false)
                                 } else if (data.existingLowlight) { await deleteWeeklyUpdate(data.existingLowlight.id) }
                                 const eFYIs = weeklyGeneral.filter(e => e.category === 'fyi' && e.designer_id === designerId)
                                 for (const old of eFYIs) await deleteWeeklyGeneral(old.id)
-                                for (const line of data.fyi.split('\n').map(l => l.trim()).filter(Boolean)) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'fyi', content: line }) }
+                                if (data.fyi.trim()) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'fyi', content: data.fyi.trim() }) }
                                 const ePeople = weeklyGeneral.filter(e => e.category === 'people' && e.designer_id === designerId)
                                 for (const old of ePeople) await deleteWeeklyGeneral(old.id)
-                                for (const line of data.people.split('\n').map(l => l.trim()).filter(Boolean)) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'people', content: line }) }
+                                if (data.people.trim()) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'people', content: data.people.trim() }) }
                               }}
                               onAddProjectLink={async (name, url) => {
                                 const existing = project.customLinks || []
@@ -4354,40 +4396,45 @@ const [showFilters, setShowFilters] = useState(false)
             return proj?.businessLines?.[0] || 'General'
           }
 
-          // Google Doc format text generators per section
           const highlightsText = (() => {
             const projectLines = highlights.map(u => {
               const brand = getBrand(u)
               const proj = currentProjects.find(p => p.id === u.project_id)
-              const links = [proj?.deckLink, proj?.prdLink, proj?.briefLink, proj?.figmaLink].filter(Boolean)
-              return `    \u2022    ${brand}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}${links.length > 0 ? `\n    \u25E6    Related files/screenshots\n    \u25AA    ${links.join('\n    \u25AA    ')}` : ''}`
+              const links = [
+                proj?.deckLink && `[${proj.deckName || 'Deck'}](${proj.deckLink})`,
+                proj?.prdLink && `[${proj.prdName || 'PRD'}](${proj.prdLink})`,
+                proj?.briefLink && `[${proj.briefName || 'Brief'}](${proj.briefLink})`,
+                proj?.figmaLink && `[Figma](${proj.figmaLink})`,
+              ].filter(Boolean) as string[]
+              const lines = [`- **${brand}: ${u.project_name || 'Unknown'}**`, `  - ${u.description}`]
+              if (links.length > 0) lines.push(`  - Related: ${links.join(', ')}`)
+              return lines.join('\n')
             })
-            const generalLines = generalHighlights.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean).map(l => `    \u2022    General: ${l}`))
+            const generalLines = generalHighlights.filter(e => e.content.trim()).map(e => `- General: ${e.content.trim()}`)
             const all = [...generalLines, ...projectLines]
-            return all.length > 0 ? all.join('\n') : '    \u2022    TK'
+            return all.length > 0 ? all.join('\n') : '- TK'
           })()
 
           const lowlightsText = (() => {
             const projectLines = lowlights.map(u => {
               const brand = getBrand(u)
-              const lines = [`    \u2022    ${brand}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
-              if (u.risk_reason) lines.push(`    \u25E6    At risk: ${u.risk_reason}`)
-              if (u.resolution) lines.push(`    \u25E6    Path to resolution: ${u.resolution}`)
+              const lines = [`- **${brand}: ${u.project_name || 'Unknown'}**`, `  - ${u.description}`]
+              if (u.risk_reason) lines.push(`  - At risk: ${u.risk_reason}`)
+              if (u.resolution) lines.push(`  - Path to resolution: ${u.resolution}`)
               return lines.join('\n')
             })
-            const generalLines = generalLowlights.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean).map(l => `    \u2022    General: ${l}`))
+            const generalLines = generalLowlights.filter(e => e.content.trim()).map(e => `- General: ${e.content.trim()}`)
             const all = [...generalLines, ...projectLines]
-            return all.length > 0 ? all.join('\n') : '    \u2022    TK'
+            return all.length > 0 ? all.join('\n') : '- TK'
           })()
 
-          const splitLines = (e: WeeklyGeneral) => e.content.split('\n').map(l => l.trim()).filter(Boolean)
-          const fyisText = fyis.flatMap(splitLines).length > 0 ? fyis.flatMap(splitLines).map(l => `    \u2022    General: ${l}`).join('\n') : '    \u2022    TK'
-          const peopleText = peopleUpdates.flatMap(splitLines).length > 0 ? peopleUpdates.flatMap(splitLines).map(l => `    \u2022    General: ${l}`).join('\n') : '    \u2022    TK'
+          const fyisText = fyis.length > 0 ? fyis.map(e => `- General: ${e.content.trim()}`).join('\n') : '- TK'
+          const peopleText = peopleUpdates.length > 0 ? peopleUpdates.map(e => `- General: ${e.content.trim()}`).join('\n') : '- TK'
 
-          const fullText = `Design\nHighlights\n${highlightsText}\n\nLowlights\n${lowlightsText}\n\nUpcoming FYIs\n${fyisText}\n\nPeople Updates\n${peopleText}`
+          const fullText = `**Design**\n**Highlights**\n${highlightsText}\n\n**Lowlights**\n${lowlightsText}\n\n**Upcoming FYIs**\n${fyisText}\n\n**People Updates**\n${peopleText}`
 
           const sectionCopy = (text: string) => {
-            navigator.clipboard.writeText(text).then(() => {
+            copyRichText(text).then(() => {
               setCopiedReport(Date.now())
               setTimeout(() => setCopiedReport(null), 2000)
             })
@@ -4434,7 +4481,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-section-header" style={{ color: '#22c55e' }}>
                     <span className="rr-section-dot" style={{ background: '#22c55e' }} />
                     <span>Highlights</span>
-                    <span className="rr-section-count">{highlights.length + generalHighlights.flatMap(e => e.content.split('\n').filter(l => l.trim())).length}</span>
+                    <span className="rr-section-count">{highlights.length + generalHighlights.filter(e => e.content.trim()).length}</span>
                   </div>
                   <button className="rr-copy-section" onClick={() => sectionCopy(`Highlights\n${highlightsText}`)}>
                     <ClipboardCopy size={12} /> Copy
@@ -4442,10 +4489,10 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
                 {highlights.length > 0 || generalHighlights.some(e => e.content.trim()) ? (
                   <div className="rr-update-list">
-                    {generalHighlights.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean)).map((line, i) => (
-                      <div key={`gh-${i}`} className="rr-update-card rr-update-highlight">
+                    {generalHighlights.filter(e => e.content.trim()).map(e => (
+                      <div key={e.id} className="rr-update-card rr-update-highlight">
                         <div className="rr-update-brand">General</div>
-                        <div className="rr-update-desc">{renderMarkdownLinks(line)}</div>
+                        <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
                       </div>
                     ))}
                     {highlights.map(u => renderUpdateEntry(u, 'highlight'))}
@@ -4461,7 +4508,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-section-header" style={{ color: '#ef4444' }}>
                     <span className="rr-section-dot" style={{ background: '#ef4444' }} />
                     <span>Lowlights</span>
-                    <span className="rr-section-count">{lowlights.length + generalLowlights.flatMap(e => e.content.split('\n').filter(l => l.trim())).length}</span>
+                    <span className="rr-section-count">{lowlights.length + generalLowlights.filter(e => e.content.trim()).length}</span>
                   </div>
                   <button className="rr-copy-section" onClick={() => sectionCopy(`Lowlights\n${lowlightsText}`)}>
                     <ClipboardCopy size={12} /> Copy
@@ -4469,10 +4516,10 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
                 {lowlights.length > 0 || generalLowlights.some(e => e.content.trim()) ? (
                   <div className="rr-update-list">
-                    {generalLowlights.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean)).map((line, i) => (
-                      <div key={`gl-${i}`} className="rr-update-card rr-update-lowlight">
+                    {generalLowlights.filter(e => e.content.trim()).map(e => (
+                      <div key={e.id} className="rr-update-card rr-update-lowlight">
                         <div className="rr-update-brand">General</div>
-                        <div className="rr-update-desc">{renderMarkdownLinks(line)}</div>
+                        <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
                       </div>
                     ))}
                     {lowlights.map(u => renderUpdateEntry(u, 'lowlight'))}
@@ -4488,7 +4535,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-section-header" style={{ color: '#f59e0b' }}>
                     <span className="rr-section-dot" style={{ background: '#f59e0b' }} />
                     <span>Upcoming FYIs</span>
-                    <span className="rr-section-count">{fyis.flatMap(e => e.content.split('\n').filter(l => l.trim())).length}</span>
+                    <span className="rr-section-count">{fyis.filter(e => e.content.trim()).length}</span>
                   </div>
                   <button className="rr-copy-section" onClick={() => sectionCopy(`Upcoming FYIs\n${fyisText}`)}>
                     <ClipboardCopy size={12} /> Copy
@@ -4496,10 +4543,10 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
                 {fyis.some(e => e.content.trim()) ? (
                   <div className="rr-update-list">
-                    {fyis.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean)).map((line, i) => (
-                      <div key={`fyi-${i}`} className="rr-update-card rr-update-fyi">
+                    {fyis.filter(e => e.content.trim()).map(e => (
+                      <div key={e.id} className="rr-update-card rr-update-fyi">
                         <div className="rr-update-brand">General</div>
-                        <div className="rr-update-desc">{renderMarkdownLinks(line)}</div>
+                        <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
                       </div>
                     ))}
                   </div>
@@ -4514,7 +4561,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <div className="rr-section-header" style={{ color: '#8b5cf6' }}>
                     <span className="rr-section-dot" style={{ background: '#8b5cf6' }} />
                     <span>People Updates</span>
-                    <span className="rr-section-count">{peopleUpdates.flatMap(e => e.content.split('\n').filter(l => l.trim())).length}</span>
+                    <span className="rr-section-count">{peopleUpdates.filter(e => e.content.trim()).length}</span>
                   </div>
                   <button className="rr-copy-section" onClick={() => sectionCopy(`People Updates\n${peopleText}`)}>
                     <ClipboardCopy size={12} /> Copy
@@ -4522,10 +4569,10 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
                 {peopleUpdates.some(e => e.content.trim()) ? (
                   <div className="rr-update-list">
-                    {peopleUpdates.flatMap(e => e.content.split('\n').map(l => l.trim()).filter(Boolean)).map((line, i) => (
-                      <div key={`pu-${i}`} className="rr-update-card rr-update-people">
+                    {peopleUpdates.filter(e => e.content.trim()).map(e => (
+                      <div key={e.id} className="rr-update-card rr-update-people">
                         <div className="rr-update-brand">General</div>
-                        <div className="rr-update-desc">{renderMarkdownLinks(line)}</div>
+                        <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
                       </div>
                     ))}
                   </div>
@@ -4818,7 +4865,7 @@ const [showFilters, setShowFilters] = useState(false)
           }
 
           const sectionCopy = (text: string) => {
-            navigator.clipboard.writeText(text).then(() => {
+            copyRichText(text).then(() => {
               setCopiedReport(Date.now())
               setTimeout(() => setCopiedReport(null), 2000)
             })
@@ -5212,28 +5259,26 @@ const [showFilters, setShowFilters] = useState(false)
                           { category: 'fyi' as const, label: 'Upcoming FYIs', color: '#f59e0b', placeholder: 'Upcoming FYIs (one per line)...' },
                           { category: 'people' as const, label: 'People Updates', color: '#8b5cf6', placeholder: 'People updates (one per line)...' },
                         ]).map(section => {
-                          const existing = weeklyGeneral.find(e => e.category === section.category)
+                          const allForCategory = weeklyGeneral.filter(e => e.category === section.category)
+                          const existing = allForCategory[0]
+                          const combinedContent = allForCategory.map(e => e.content).join('\n')
+                          const merged = existing ? { ...existing, content: combinedContent } : undefined
                           return (
                             <div key={section.category} className="weekly-pending-section">
                               <div className="weekly-pending-header" style={{ color: section.color }}>
                                 <span className="rr-section-dot" style={{ background: section.color }} />
                                 <span>{section.label}</span>
                               </div>
-                              <textarea
-                                className="weekly-pending-input"
-                                rows={3}
+                              <WeeklyPendingEditor
+                                key={merged?.id || section.category}
+                                existing={merged}
                                 placeholder={section.placeholder}
-                                defaultValue={existing?.content || ''}
-                                key={existing?.id || section.category}
-                                onBlur={async (e) => {
-                                  const val = e.currentTarget.value.trim()
-                                  if (!val && !existing) return
-                                  if (val === (existing?.content || '')) return
-                                  if (!val && existing) {
-                                    await deleteWeeklyGeneral(existing.id)
-                                    return
-                                  }
-                                  await saveWeeklyGeneral({ id: existing?.id, designer_id: String(currentUser?.id || 'admin'), week: currentWeek, category: section.category, content: val })
+                                onSave={async (content) => {
+                                  for (const old of allForCategory.slice(1)) await deleteWeeklyGeneral(old.id)
+                                  await saveWeeklyGeneral({ id: existing?.id, designer_id: String(currentUser?.id || 'admin'), week: currentWeek, category: section.category, content })
+                                }}
+                                onDelete={async (id) => {
+                                  for (const old of allForCategory) await deleteWeeklyGeneral(old.id)
                                 }}
                               />
                             </div>
@@ -5663,10 +5708,10 @@ const [showFilters, setShowFilters] = useState(false)
                 </div>
 
                 {/* Row 2b: Description */}
-                <textarea
-                  className="review-description-input"
+                <RichTextEditor
+                  className="review-description-rte"
                   value={editingReview.description || ''}
-                  onChange={e => setEditingReview({ ...editingReview, description: e.target.value })}
+                  onChange={(md) => setEditingReview({ ...editingReview, description: md })}
                   onBlur={async () => {
                     await authFetch(`/api/reviews/${editingReview.id}`, {
                       method: 'PUT',
@@ -5675,7 +5720,8 @@ const [showFilters, setShowFilters] = useState(false)
                     })
                   }}
                   placeholder="Add a review description or summary..."
-                  rows={2}
+                  features={['bold', 'bullets', 'links']}
+                  minHeight="40px"
                 />
 
                 {/* Row 3: Meta + actions inline */}
@@ -6476,15 +6522,15 @@ const [showFilters, setShowFilters] = useState(false)
                     <label htmlFor="project-url">Jira Project Link</label>
                   </div>
                 </div>
-                <div className={`float-field${projectFormData.description ? ' has-value' : ''}`} style={{ marginTop: '0.5rem' }}>
-                  <textarea
-                    id="project-description"
+                <div className="rte-float-field" style={{ marginTop: '1.25rem' }}>
+                  <label className="rte-float-label">Description (optional)</label>
+                  <RichTextEditor
                     value={projectFormData.description}
-                    onChange={e => setProjectFormData({ ...projectFormData, description: e.target.value })}
-                    placeholder=" "
-                    rows={2}
+                    onChange={(md) => setProjectFormData({ ...projectFormData, description: md })}
+                    placeholder="Project description..."
+                    features={['bold', 'bullets', 'links']}
+                    minHeight="48px"
                   />
-                  <label htmlFor="project-description">Description (optional)</label>
                 </div>
                 <div className="form-group" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
                   <div className="form-section-title" style={{ marginBottom: '0.5rem' }}>Business Lines</div>
@@ -7150,7 +7196,7 @@ const [showFilters, setShowFilters] = useState(false)
                 <button
                   className="report-modal-copy-btn"
                   onClick={() => {
-                    navigator.clipboard.writeText(reportModal.content).then(() => {
+                    copyRichText(reportModal.content).then(() => {
                       setCopiedReport(Date.now())
                       setTimeout(() => setCopiedReport(null), 2000)
                     })
