@@ -1,16 +1,42 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import { run, get, all } from './db.js';
 
 // In-memory session store
 export const sessions: Map<string, { userId: number; email: string; role: string }> = new Map();
 
-export const generateSessionId = () => {
-  return Math.random().toString(36).substring(2) + Date.now().toString(36);
-};
+export const SESSION_COOKIE = 'dcc_sid';
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+export const generateSessionId = () => crypto.randomBytes(32).toString('hex');
+
+// Read session id from HttpOnly cookie first, then fall back to x-session-id header
+// (the SPA still uses the header; the cookie is authoritative for browser navigation).
+export const getSessionIdFromRequest = (req: express.Request): string | null => {
+  const fromCookie = (req as any).cookies?.[SESSION_COOKIE]
+  if (fromCookie && typeof fromCookie === 'string') return fromCookie
+  const fromHeader = req.headers['x-session-id']
+  if (typeof fromHeader === 'string' && fromHeader) return fromHeader
+  return null
+}
+
+export const setSessionCookie = (res: express.Response, sessionId: string) => {
+  res.cookie(SESSION_COOKIE, sessionId, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: SESSION_TTL_MS,
+    path: '/',
+  })
+}
+
+export const clearSessionCookie = (res: express.Response) => {
+  res.clearCookie(SESSION_COOKIE, { path: '/' })
+}
 
 export const getUserEmail = (req: express.Request): string | null => {
-  const sessionId = req.headers['x-session-id'] as string
+  const sessionId = getSessionIdFromRequest(req)
   if (sessionId && sessions.has(sessionId)) {
     return sessions.get(sessionId)!.email
   }
@@ -19,7 +45,7 @@ export const getUserEmail = (req: express.Request): string | null => {
 
 // Auth middleware
 export const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const sessionId = req.headers['x-session-id'] as string;
+  const sessionId = getSessionIdFromRequest(req);
   if (!sessionId || !sessions.has(sessionId)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -29,7 +55,7 @@ export const requireAuth = (req: express.Request, res: express.Response, next: e
 
 // Auth middleware - admin only
 export const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const sessionId = req.headers['x-session-id'] as string;
+  const sessionId = getSessionIdFromRequest(req);
   if (!sessionId || !sessions.has(sessionId)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -105,6 +131,7 @@ authRouter.post('/login', async (req, res) => {
 
     const sessionId = generateSessionId();
     sessions.set(sessionId, { userId: user.id, email: user.email, role: user.role });
+    setSessionCookie(res, sessionId);
 
     res.json({
       sessionId,
@@ -117,10 +144,11 @@ authRouter.post('/login', async (req, res) => {
 });
 
 authRouter.post('/logout', (req, res) => {
-  const sessionId = req.headers['x-session-id'] as string;
+  const sessionId = getSessionIdFromRequest(req);
   if (sessionId) {
     sessions.delete(sessionId);
   }
+  clearSessionCookie(res);
   res.json({ success: true });
 });
 

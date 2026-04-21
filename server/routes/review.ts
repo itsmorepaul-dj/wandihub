@@ -1,7 +1,6 @@
 import express from 'express';
 import { run, get, all } from '../db.js';
-import { getUserEmail } from '../auth.js';
-import { sessions } from '../auth.js';
+import { getUserEmail, sessions, getSessionIdFromRequest, setSessionCookie } from '../auth.js';
 
 const router = express.Router();
 
@@ -407,8 +406,11 @@ router.get('/review', async (req, res) => {
     if (!latest) {
       return res.status(404).send(renderPage('No Reviews', '<div class="empty-state">No reviews have been published yet.</div>', []))
     }
-    const sidParam = req.query.sid ? `?sid=${encodeURIComponent(req.query.sid as string)}` : ''
-    res.redirect(`/review/${latest.id}${sidParam}`)
+    // Legacy ?sid=… support: promote the query param into the HttpOnly cookie and scrub the URL
+    if (req.query.sid && typeof req.query.sid === 'string' && sessions.has(req.query.sid)) {
+      setSessionCookie(res, req.query.sid)
+    }
+    res.redirect(`/review/${latest.id}`)
   } catch (e: any) {
     res.status(500).send(renderPage('Error', `<div class="empty-state">Something went wrong: ${escHtml(e.message)}</div>`, []))
   }
@@ -416,6 +418,12 @@ router.get('/review', async (req, res) => {
 
 router.get('/review/:id', async (req, res) => {
   try {
+    // Legacy ?sid=… support: promote into HttpOnly cookie and redirect to the clean URL
+    // so the address bar no longer exposes session material.
+    if (req.query.sid && typeof req.query.sid === 'string') {
+      if (sessions.has(req.query.sid)) setSessionCookie(res, req.query.sid)
+      return res.redirect(`/review/${req.params.id}`)
+    }
     const review = await get('SELECT * FROM reviews WHERE id = ?', [req.params.id]) as any
     if (!review) {
       return res.status(404).send(renderPage('Review Not Found', '<div class="empty-state">This review does not exist or has been deleted.</div>', []))
@@ -452,7 +460,6 @@ router.get('/review/:id', async (req, res) => {
     }
 
     // Load review diamond markers for each item: all reviews that include this project
-    const sidQuery = req.query.sid ? `?sid=${encodeURIComponent(req.query.sid as string)}` : ''
     for (const item of parsed) {
       const rows = await all(
         `SELECT r.id, r.title, r.week, r.created_at
@@ -464,7 +471,7 @@ router.get('/review/:id', async (req, res) => {
       for (const r of rows) {
         const t = reviewWeekToDate(r.week, r.created_at)
         if (t == null) continue
-        markers.push({ date: t, url: `/review/${r.id}${sidQuery}`, label: 'Design Review' })
+        markers.push({ date: t, url: `/review/${r.id}`, label: 'Design Review' })
       }
       item.reviewMarkers = markers
     }
@@ -472,7 +479,7 @@ router.get('/review/:id', async (req, res) => {
     const allReviews = await all('SELECT id, title, week, created_at FROM reviews ORDER BY created_at DESC') as any[]
     const teamMembers = await all('SELECT name, slack FROM team') as { name: string; slack: string }[]
     const slackByName = new Map(teamMembers.map(t => [t.name, t.slack]))
-    const sessionId = req.query.sid as string || ''
+    const sessionId = getSessionIdFromRequest(req) || ''
     const session = sessionId ? sessions.get(sessionId) : null
     const isAuthed = !!session
 
@@ -750,7 +757,7 @@ router.get('/review/:id', async (req, res) => {
       }
 
       // Auto-save with debounce + optimistic locking
-      var sessionId = '${escHtml(sessionId)}';
+      // Session lives in an HttpOnly cookie — fetches use same-origin default (cookie sent automatically)
       document.querySelectorAll('.notes-editor').forEach(function(editor) {
         var timer;
         editor.addEventListener('input', function() {
@@ -769,7 +776,7 @@ router.get('/review/:id', async (req, res) => {
             var md = htmlToMd(editor);
             fetch('/api/review-items/' + editor.dataset.itemId + '/notes', {
               method: 'PUT',
-              headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ notes: md, expected_updated_at: editor.dataset.updatedAt || '' })
             }).then(function(r) {
               if (r.status === 409) {
@@ -925,8 +932,7 @@ router.get('/review/:id', async (req, res) => {
           headers: {
             'Content-Type': file.type || 'image/png',
             'X-Project-Id': itemId,
-            'X-Original-Name': originalName || 'image.png',
-            'x-session-id': sessionId
+            'X-Original-Name': originalName || 'image.png'
           },
           body: file
         }).then(function(r) { return r.json(); })
@@ -1037,8 +1043,7 @@ router.get('/review/:id', async (req, res) => {
         var imageId = delBtn.dataset.imageId;
         if (!imageId) return;
         fetch('/api/images/' + imageId, {
-          method: 'DELETE',
-          headers: { 'x-session-id': sessionId }
+          method: 'DELETE'
         }).then(function(r) {
           if (!r.ok) return;
           var item = delBtn.closest('.review-image-item');
@@ -1140,7 +1145,7 @@ router.get('/review/:id', async (req, res) => {
         if (!projectId) return;
         fetch('/api/images/reorder', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ project_id: projectId, image_ids: imageIds })
         }).catch(function(err) { console.error('Image reorder failed:', err); });
         // Rebuild inline thumbnail strip on the card
@@ -1177,7 +1182,7 @@ router.get('/review/:id', async (req, res) => {
         input.dataset.originalCaption = newCaption;
         fetch('/api/images/' + imageId, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ caption: newCaption })
         }).then(function(r) { return r.json(); }).then(function(img) {
           // Update lightbox data
@@ -1204,8 +1209,7 @@ function getISOWeek(d: Date): number {
   return Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
 }
 
-function renderPage(title: string, body: string, reviews: any[], activeId?: string, sessionId?: string): string {
-  const sidParam = sessionId ? `?sid=${encodeURIComponent(sessionId)}` : ''
+function renderPage(title: string, body: string, reviews: any[], activeId?: string, _sessionId?: string): string {
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
   // Group reviews by year → month → week
@@ -1247,7 +1251,7 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       navItems += `<div class="nav-month-items" style="display:${isOpen ? 'block' : 'none'}">`
       for (const { week, review: r } of entries) {
         const isActive = r.id === activeId
-        navItems += `<a href="/review/${r.id}${sidParam}" class="nav-item${isActive ? ' active' : ''}">Week ${week}</a>`
+        navItems += `<a href="/review/${r.id}" class="nav-item${isActive ? ' active' : ''}">Week ${week}</a>`
       }
       navItems += `</div>`
     }

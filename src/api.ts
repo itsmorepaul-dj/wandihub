@@ -17,7 +17,9 @@ export const authFetch = async (url: string, options: RequestInit = {}) => {
   if (options.body && typeof options.body === 'string' && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
-  const res = await fetch(url, { ...options, headers })
+  // credentials: 'same-origin' is the default for same-origin fetches, but be explicit
+  // so the HttpOnly session cookie set by /api/auth/login is always sent alongside the header.
+  const res = await fetch(url, { credentials: 'same-origin', ...options, headers })
   if (res.status === 401 && !url.includes('/api/auth/')) {
     localStorage.removeItem('dcc-session-id')
     window.location.reload()

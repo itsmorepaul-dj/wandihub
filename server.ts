@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 
 import { initSchema, validateSchemaOnStartup, SEED_SECRET } from './server/db.js';
@@ -21,7 +22,8 @@ import reviewRouter, { startReviewCron } from './server/routes/review.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser());
 app.use(express.raw({ type: 'image/*', limit: '10mb' }));
 app.use(express.json({ limit: '10mb' }));
 

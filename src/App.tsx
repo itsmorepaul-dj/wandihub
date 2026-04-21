@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Review site is more secure — shareable review links no longer carry login info in the URL, so copying and sharing a link won\'t expose your session.',
   'Gantt review diamonds — Project gantts now include a "Design Review" track row with a gold diamond for each review that includes the project, positioned by the review\'s week and linking to the public review page.',
   'Public review site — project cards reprioritized: description and blue underlined links lead, gantt collapsed into an "Open Project Schedule" accordion matching "Open Notes". Red circle card numbers, clickable markdown links, and drag-to-reorder for images in the notes panel.',
   'Filter-aware summary — Projects summary stats and risk warnings now scope to the active sort/filter, and sit below the controls. Archive button height matched to sort buttons.',
@@ -5859,7 +5860,7 @@ const [showFilters, setShowFilters] = useState(false)
                   />
                   <div className="review-nav-actions">
                     <button className="secondary-btn" style={{ whiteSpace: 'nowrap', flexShrink: 0 }} onClick={() => {
-                      const sid = getSessionId(); window.open(`${window.location.origin}/review/${editingReview.id}${sid ? '?sid=' + sid : ''}`, '_blank')
+                      window.open(`${window.location.origin}/review/${editingReview.id}`, '_blank')
                     }}><Globe size={13} /> Public Review Site</button>
                     <button className="primary-btn" style={{ whiteSpace: 'nowrap', flexShrink: 0 }} onClick={() => {
                       const now = new Date()
