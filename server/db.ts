@@ -334,10 +334,18 @@ export const initSchema = async () => {
     filename TEXT NOT NULL, original_name TEXT DEFAULT '',
     mime_type TEXT DEFAULT 'image/png', size_bytes INTEGER DEFAULT 0,
     caption TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
   )`).catch(e => console.error('project_images init error:', e.message))
   // Migration: add caption column if missing
   await run(`ALTER TABLE project_images ADD COLUMN caption TEXT DEFAULT ''`).catch(() => {})
+  // Migration: add sort_order column if missing, then seed existing rows by created_at
+  await run(`ALTER TABLE project_images ADD COLUMN sort_order INTEGER DEFAULT 0`).then(async () => {
+    await run(`UPDATE project_images SET sort_order = (
+      SELECT COUNT(*) FROM project_images p2
+      WHERE p2.project_id = project_images.project_id AND p2.created_at <= project_images.created_at
+    ) WHERE sort_order = 0`).catch(() => {})
+  }).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS reviews (
     id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'Design Review',

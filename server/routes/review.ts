@@ -367,11 +367,16 @@ router.get('/review/:id', async (req, res) => {
       designers: item.designers ? JSON.parse(item.designers) : [],
     }))
 
-    // Load images for each review item
+    // Load images for each review item.
+    // Historical uploads via the review editor were stored under project_id=review_item.id,
+    // while the project edit modal stores them under the real project.id.
+    // Union both so all images show until a migration is run.
     for (const item of parsed) {
       item.images = await all(
-        'SELECT * FROM project_images WHERE project_id = ? ORDER BY created_at ASC',
-        [item.id]
+        `SELECT * FROM project_images
+         WHERE project_id = ? OR project_id = ?
+         ORDER BY sort_order ASC, created_at ASC`,
+        [item.project_id, item.id]
       ) as any[]
     }
 
@@ -419,11 +424,12 @@ router.get('/review/:id', async (req, res) => {
       // Editable image grid for inside the accordion (auth only)
       const editableImageGridHtml = (images: any[]) => {
         const thumbs = images.map((img: any, idx: number) => `
-          <div class="review-image-item" data-image-id="${escHtml(img.id)}">
+          <div class="review-image-item" draggable="true" data-image-id="${escHtml(img.id)}">
             <div class="review-image-thumb">
+              <span class="review-image-drag" title="Drag to reorder"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg></span>
               <img src="/api/images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
                 data-lightbox-trigger data-item-id="${escHtml(item.id)}" data-image-index="${idx}" />
-              <button class="review-image-delete" data-image-id="${escHtml(img.id)}" title="Delete image">&times;</button>
+              <button class="review-image-delete" data-image-id="${escHtml(img.id)}" title="Delete image"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button>
             </div>
             <input class="review-image-caption" placeholder="Add caption..." value="${escHtml(img.caption || '')}" data-image-id="${escHtml(img.id)}" data-original-caption="${escHtml(img.caption || '')}" />
           </div>`).join('')
@@ -510,9 +516,9 @@ router.get('/review/:id', async (req, res) => {
             </div>
           </div>
         </div>
-        ${item.description ? `<div class="card-description">${escHtml(item.description)}</div>` : ''}
-        ${gantt}
+        ${item.description ? `<div class="card-description">${markdownToHtml(item.description)}</div>` : ''}
         ${linksSection}
+        ${gantt ? `<details class="card-gantt-accordion"><summary class="notes-accordion has-notes"><svg class="notes-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Open Project Schedule</summary>${gantt}</details>` : ''}
         ${notesSection}
         ${inlineImagesHtml}
         ${!hasImages && !isAuthed ? '' : imagesDataTag}
@@ -526,7 +532,7 @@ router.get('/review/:id', async (req, res) => {
     const title = escHtml(review.title || 'Design Review')
     const week = review.week ? ` — ${escHtml(review.week)}` : ''
     const createdAt = review.created_at ? new Date(review.created_at + 'Z').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''
-    const descriptionHtml = review.description ? `<div class="page-description">${escHtml(review.description).replace(/\n/g, '<br>')}</div>` : ''
+    const descriptionHtml = review.description ? `<div class="page-description">${markdownToHtml(review.description)}</div>` : ''
 
     const header = `<div class="page-header">
       <h1>${title}${week}</h1>
@@ -535,8 +541,8 @@ router.get('/review/:id', async (req, res) => {
     </div>`
 
     const notesScript = `<script>
-      // Accordion toggle
-      document.querySelectorAll('.notes-accordion').forEach(function(btn) {
+      // Accordion toggle (notes) — scoped to <button> so <details><summary> accordions handle themselves natively
+      document.querySelectorAll('button.notes-accordion').forEach(function(btn) {
         btn.addEventListener('click', function() {
           var panel = btn.nextElementSibling;
           var isOpen = panel.style.display !== 'none';
@@ -850,11 +856,15 @@ router.get('/review/:id', async (req, res) => {
           // Append thumbnail
           var div = document.createElement('div');
           div.className = 'review-image-item';
+          div.draggable = true;
           div.dataset.imageId = img.id;
           var idx = grid.children.length;
+          var gripSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>';
+          var trashSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>';
           div.innerHTML = '<div class="review-image-thumb">' +
+            '<span class="review-image-drag" title="Drag to reorder">' + gripSvg + '</span>' +
             '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />' +
-            '<button class="review-image-delete" data-image-id="' + img.id + '" title="Delete image">&times;</button>' +
+            '<button class="review-image-delete" data-image-id="' + img.id + '" title="Delete image">' + trashSvg + '</button>' +
             '</div>' +
             '<input class="review-image-caption" placeholder="Add caption..." value="" data-image-id="' + img.id + '" data-original-caption="" />';
           grid.appendChild(div);
@@ -987,6 +997,84 @@ router.get('/review/:id', async (req, res) => {
             }
           }
         }).catch(function(err) { console.error('Delete failed:', err); });
+      });
+
+      // Image drag-and-drop reorder (native HTML5)
+      var rvDragState = { el: null, grid: null };
+      document.addEventListener('dragstart', function(e) {
+        var item = e.target.closest && e.target.closest('.review-image-item');
+        if (!item) return;
+        rvDragState.el = item;
+        rvDragState.grid = item.parentElement;
+        item.classList.add('review-image-dragging');
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          try { e.dataTransfer.setData('text/plain', item.dataset.imageId || ''); } catch(_) {}
+        }
+      });
+      document.addEventListener('dragend', function(e) {
+        if (rvDragState.el) rvDragState.el.classList.remove('review-image-dragging');
+        document.querySelectorAll('.review-image-drop-target').forEach(function(n) { n.classList.remove('review-image-drop-target'); });
+        rvDragState.el = null; rvDragState.grid = null;
+      });
+      document.addEventListener('dragover', function(e) {
+        if (!rvDragState.el) return;
+        var target = e.target.closest && e.target.closest('.review-image-item');
+        if (!target || target === rvDragState.el) return;
+        if (target.parentElement !== rvDragState.grid) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        var rect = target.getBoundingClientRect();
+        var before = (e.clientX - rect.left) < rect.width / 2;
+        if (before) rvDragState.grid.insertBefore(rvDragState.el, target);
+        else rvDragState.grid.insertBefore(rvDragState.el, target.nextSibling);
+      });
+      document.addEventListener('drop', function(e) {
+        if (!rvDragState.grid) return;
+        e.preventDefault();
+        var grid = rvDragState.grid;
+        var drop = grid.closest('.review-image-drop');
+        var itemId = drop && drop.dataset.itemId;
+        var imageIds = Array.prototype.map.call(grid.querySelectorAll('.review-image-item'), function(n) { return n.dataset.imageId; });
+        // Re-index lightbox triggers
+        var triggers = grid.querySelectorAll('[data-lightbox-trigger]');
+        for (var i = 0; i < triggers.length; i++) triggers[i].dataset.imageIndex = i;
+        // Update in-memory images order for lightbox
+        if (itemId && reviewItemImages[itemId]) {
+          var byId = {};
+          reviewItemImages[itemId].forEach(function(img) { byId[img.id] = img; });
+          reviewItemImages[itemId] = imageIds.map(function(id) { return byId[id]; }).filter(Boolean);
+        }
+        // Find project_id from the existing images for this item (all in the project_images row share it)
+        var firstImg = reviewItemImages[itemId] && reviewItemImages[itemId][0];
+        var projectId = firstImg && firstImg.project_id;
+        if (!projectId) return;
+        fetch('/api/images/reorder', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+          body: JSON.stringify({ project_id: projectId, image_ids: imageIds })
+        }).catch(function(err) { console.error('Image reorder failed:', err); });
+        // Rebuild inline thumbnail strip on the card
+        var projectCard = drop && drop.closest('.project-card');
+        if (projectCard && itemId) {
+          var inlineRow = projectCard.querySelector('.review-inline-images-row');
+          if (inlineRow) {
+            inlineRow.innerHTML = '';
+            (reviewItemImages[itemId] || []).slice(0, 4).forEach(function(img, idx) {
+              var t = document.createElement('div');
+              t.className = 'review-inline-thumb';
+              t.innerHTML = '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />';
+              inlineRow.appendChild(t);
+            });
+            var total = (reviewItemImages[itemId] || []).length;
+            if (total > 4) {
+              var m = document.createElement('span');
+              m.className = 'review-inline-more';
+              m.textContent = '+' + (total - 4) + ' more';
+              inlineRow.appendChild(m);
+            }
+          }
+        }
       });
 
       // Caption update on blur (event delegation)
@@ -1210,15 +1298,15 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       padding: 1rem 1.25rem; border-bottom: 1px solid var(--rv-border-subtle);
     }
     .card-number {
-      font-size: 0.7rem; font-weight: 600; color: var(--rv-text-dim);
-      background: var(--rv-bg-tertiary); border-radius: 4px;
+      font-size: 0.72rem; font-weight: 700; color: #fff;
+      background: #dc2626; border-radius: 50%;
       width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
       flex-shrink: 0; margin-top: 0.1rem; font-variant-numeric: tabular-nums;
     }
     .card-title-area { flex: 1; min-width: 0; }
     .card-title { font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
     .card-meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; flex-wrap: wrap; }
-    .card-description { padding: 0.4rem 1rem 0.75rem; font-size: 0.8rem; color: var(--rv-text-muted); line-height: 1.45; max-width: 70ch; }
+    .card-description { padding: 0.4rem 1.25rem 0.75rem; font-size: 0.8rem; color: var(--rv-text-muted); line-height: 1.45; max-width: 70ch; }
     .status-badge {
       display: inline-block; padding: 0.1rem 0.5rem; border-radius: 99px;
       font-size: 0.65rem; font-weight: 500; color: #fff; letter-spacing: 0.01em;
@@ -1328,17 +1416,26 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     }
     .gantt-empty { padding: 0.5rem 1.25rem; font-size: 0.75rem; color: var(--rv-text-dim); }
 
+    /* Gantt accordion wrapper — reuses .notes-accordion button styles via shared class */
+    .card-gantt-accordion { border-top: 1px solid var(--rv-border-subtle); }
+    .card-gantt-accordion > summary { list-style: none; user-select: none; }
+    .card-gantt-accordion > summary::-webkit-details-marker { display: none; }
+    .card-gantt-accordion[open] > summary .notes-chevron { transform: rotate(90deg); }
+    .card-gantt-accordion > .project-gantt { border-top: 1px solid var(--rv-border-subtle); }
+
     /* Links section */
     .card-links {
       display: flex; flex-wrap: wrap; gap: 0.15rem 0; padding: 0.6rem 1.25rem;
       border-top: 1px solid var(--rv-border-subtle); align-items: center;
     }
     .card-links a {
-      display: inline-flex; align-items: center; gap: 0.14rem; font-size: 0.7rem;
-      color: var(--rv-text-muted); text-decoration: none; transition: color 0.15s;
+      display: inline-flex; align-items: center; gap: 0.14rem; font-size: 0.75rem;
+      color: #2563eb; text-decoration: underline; text-underline-offset: 2px;
+      transition: color 0.15s;
     }
-    .card-links a:hover { color: var(--rv-accent); }
-    .card-links a:hover span { text-decoration: underline; }
+    .card-links a:hover { color: #1d4ed8; }
+    [data-theme="dark"] .card-links a { color: #60a5fa; }
+    [data-theme="dark"] .card-links a:hover { color: #93c5fd; }
     .card-link-sep { color: var(--rv-text-dim); font-size: 0.6rem; margin: 0 0.4rem; }
 
     /* Notes accordion */
@@ -1511,14 +1608,26 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     }
     .review-image-delete {
       position: absolute; top: 3px; right: 3px;
-      width: 20px; height: 20px; border-radius: 50%;
+      width: 22px; height: 22px; border-radius: 50%;
       background: rgba(0,0,0,0.6); color: #fff; border: none;
-      font-size: 14px; line-height: 1; cursor: pointer;
+      cursor: pointer; padding: 0;
       display: none; align-items: center; justify-content: center;
       transition: background 0.15s;
     }
     .review-image-delete:hover { background: var(--rv-danger); }
     .review-image-item:hover .review-image-delete { display: flex; }
+    .review-image-drag {
+      position: absolute; top: 3px; left: 3px;
+      width: 22px; height: 22px; border-radius: 4px;
+      background: rgba(0,0,0,0.6); color: #fff;
+      cursor: grab; padding: 0; z-index: 2;
+      display: none; align-items: center; justify-content: center;
+      user-select: none;
+    }
+    .review-image-drag:active { cursor: grabbing; }
+    .review-image-item:hover .review-image-drag { display: flex; }
+    .review-image-item.review-image-dragging { opacity: 0.4; }
+    .review-image-item { cursor: default; }
     .review-image-caption {
       width: 100%; font-size: 0.68rem; font-family: inherit;
       color: var(--rv-text-secondary); background: transparent;

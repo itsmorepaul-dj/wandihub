@@ -2555,6 +2555,31 @@
 .project-image-delete:hover {
   background: #ef4444;
 }
+.project-image-drag {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+  padding: 0;
+}
+.project-image-drag:active {
+  cursor: grabbing;
+}
+.project-image-thumb:hover .project-image-drag {
+  opacity: 1;
+}
 .project-image-item {
   display: flex;
   flex-direction: column;
@@ -3856,12 +3881,12 @@ input:checked + .slider:before {
   gap: 0.35rem;
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.75rem;
   font-weight: 500;
-  padding: 6px 12px;
+  padding: 0.3rem 0.75rem;
   transition: all 0.15s;
 }
 .archive-view-btn:hover {

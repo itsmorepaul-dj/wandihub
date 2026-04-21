@@ -29,10 +29,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Per-entry copy — copy individual entries in the weekly status report view with a clipboard icon on hover. Bullet toggle converts existing lines.',
-  'Rich text toolbar — bold, bullets with sub-bullet indentation, and links in all text fields. Report copy now pastes into Google Docs with formatting intact.',
-  'Archive from board — archive projects directly from the status chip on project cards, no need to go through Settings',
-  'Weekly general updates — add general highlights, lowlights, FYIs, and people updates to the weekly status report from the Current Week panel in Reports',
+  'Public review site — reprioritized the project card for review: description and links lead, with the project schedule (gantt) collapsed into an "Open Project Schedule" accordion that matches the "Open Notes" treatment. Card numbers rendered as red circles with white text. Attached project links use a conventional blue color with underline so they read as clickable. Markdown links in descriptions and the review page header now render as clickable anchors instead of raw `[text](url)`. Uploaded images can be reordered via drag handle on each thumbnail in the notes panel, and the delete button now uses the same trash icon as the project edit modal.',
+  'Filter-aware summary — the Projects summary stats and risk warnings now reflect the active sort/filter, so filtering by designer or business line scopes the counts to the visible subset. Moved below the sort/filter controls to reinforce that it reflects those settings. Archive button matched to the sort button height.',
 ]
 
 
@@ -271,6 +269,35 @@ function ReviewItemRow({ item, index, project, onRemove, authFetch }: {
         </button>
       </td>
     </tr>
+  )
+}
+
+function SortableImageItem({ img, index, images, onOpenLightbox, onDelete, onCaptionBlur }: {
+  img: ProjectImage
+  index: number
+  images: ProjectImage[]
+  onOpenLightbox: (images: ProjectImage[], index: number) => void
+  onDelete: (id: string) => void
+  onCaptionBlur: (id: string, caption: string) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: img.id })
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
+  return (
+    <div ref={setNodeRef} style={style} className="project-image-item">
+      <div className="project-image-thumb">
+        <button type="button" className="project-image-drag" {...attributes} {...listeners} title="Drag to reorder" onClick={e => e.stopPropagation()}>
+          <GripVertical size={12} />
+        </button>
+        <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
+          onClick={() => onOpenLightbox(images, index)} />
+        <button className="project-image-delete" onClick={() => onDelete(img.id)} title="Delete image">
+          <Trash2 size={12} />
+        </button>
+      </div>
+      <input className="project-image-caption" placeholder="Add caption..."
+        defaultValue={img.caption || ''}
+        onBlur={e => { if (e.target.value !== (img.caption || '')) onCaptionBlur(img.id, e.target.value) }} />
+    </div>
   )
 }
 
@@ -1526,8 +1553,8 @@ const [showFilters, setShowFilters] = useState(false)
         return
       }
       const saved = await res.json() as ProjectImage
-      setProjectImages(prev => [saved, ...prev])
-      setAllProjectImages(prev => [saved, ...prev])
+      setProjectImages(prev => [...prev, saved])
+      setAllProjectImages(prev => [...prev, saved])
     } catch (err) { console.error('Image upload error:', err) }
     setUploadingImage(false)
   }
@@ -1551,6 +1578,21 @@ const [showFilters, setShowFilters] = useState(false)
       setProjectImages(prev => prev.map(img => img.id === imageId ? saved : img))
       setAllProjectImages(prev => prev.map(img => img.id === imageId ? saved : img))
     } catch (err) { console.error('Caption update error:', err) }
+  }
+
+  const reorderProjectImages = async (projectId: string, reordered: ProjectImage[]) => {
+    setProjectImages(reordered)
+    setAllProjectImages(prev => {
+      const other = prev.filter(img => img.project_id !== projectId)
+      return [...other, ...reordered]
+    })
+    try {
+      await authFetch(`/api/images/reorder`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, image_ids: reordered.map(i => i.id) }),
+      })
+    } catch (err) { console.error('Image reorder error:', err) }
   }
 
   const handleDeleteProject = async (id: string) => {
@@ -2550,127 +2592,6 @@ const [showFilters, setShowFilters] = useState(false)
         <div ref={contentRef} className={`content ${activeTab === 'calendar' ? 'content-calendar' : ''}`}>
           {activeTab === 'projects' && (
             <div className="projects-grid">
-              {!showArchive && (() => {
-                const now = new Date()
-                const in4Weeks = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000)
-                const activeProjects = currentProjects.filter(p => p.status === 'active' || p.status === 'review')
-                const activeAssignments = capacityData?.assignments.filter((a: CapacityAssignment) => {
-                  const proj = currentProjects.find(p => p.name === a.project_name)
-                  return proj && (proj.status === 'active' || proj.status === 'review')
-                }) || []
-                const warnings: { icon: React.ReactNode; text: string; severity: 'danger' | 'warn' | 'info'; detail?: { title: string; items: { name: string; detail: string; projectName?: string }[] } }[] = []
-
-                const overdue = activeProjects.filter(p => {
-                  if (!p.endDate) return false
-                  const end = parseLocalDate(p.endDate)
-                  return end && end < now
-                })
-                if (overdue.length > 0) warnings.push({
-                  icon: <AlertTriangle size={12} />, text: `${overdue.length} past end date`, severity: 'danger',
-                  detail: { title: 'Projects Past End Date', items: overdue.map(p => {
-                    const end = parseLocalDate(p.endDate!)!
-                    const days = Math.round((now.getTime() - end.getTime()) / (24 * 60 * 60 * 1000))
-                    return { name: p.name, detail: `${days}d overdue · ended ${formatShortDate(p.endDate!)}`, projectName: p.name }
-                  })}
-                })
-
-                const multiDesigner = activeProjects.filter(p => {
-                  const designers = activeAssignments.filter((a: CapacityAssignment) => a.project_name === p.name)
-                  return designers.length > 1
-                })
-                if (multiDesigner.length > 0) warnings.push({
-                  icon: <Users size={12} />, text: `${multiDesigner.length} multi-designer`, severity: 'info',
-                  detail: { title: 'Multi-Designer Projects', items: multiDesigner.map(p => {
-                    const designers = activeAssignments.filter((a: CapacityAssignment) => a.project_name === p.name)
-                    const names = designers.map((a: CapacityAssignment) => {
-                      const tm = team.find(t => t.id === a.designer_id)
-                      return tm?.name.split(' ')[0] || a.designer_name || '?'
-                    }).join(', ')
-                    return { name: p.name, detail: names, projectName: p.name }
-                  })}
-                })
-
-                const noEstimate = activeProjects.filter(p => !p.estimatedHours)
-                if (noEstimate.length > 0) warnings.push({
-                  icon: <FileBarChart size={12} />, text: `${noEstimate.length} missing estimates`, severity: 'warn',
-                  detail: { title: 'Projects Missing Estimates', items: noEstimate.map(p => {
-                    const designerCount = (p.designers || []).length
-                    return { name: p.name, detail: `${designerCount} designer${designerCount !== 1 ? 's' : ''}, no hours estimated`, projectName: p.name }
-                  })}
-                })
-
-                const endingSoon = activeProjects.filter(p => {
-                  if (!p.endDate) return false
-                  const end = parseLocalDate(p.endDate)
-                  return end && end > now && end <= in4Weeks
-                })
-                if (endingSoon.length > 0) warnings.push({
-                  icon: <Flag size={12} />, text: `${endingSoon.length} ending soon`, severity: 'info',
-                  detail: { title: 'Projects Ending Soon', items: endingSoon.map(p => {
-                    const end = parseLocalDate(p.endDate!)!
-                    const days = Math.round((end.getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
-                    return { name: p.name, detail: `${days}d left · ends ${formatShortDate(p.endDate!)}`, projectName: p.name }
-                  })}
-                })
-
-                const ptoConflictDetails: { name: string; detail: string; projectName?: string }[] = []
-                activeProjects.forEach(p => {
-                  const projDesignerIds = activeAssignments.filter((a: CapacityAssignment) => a.project_name === p.name).map((a: CapacityAssignment) => a.designer_id)
-                  if (projDesignerIds.length < 2) return
-                  const ptoRanges = projDesignerIds.map(did => {
-                    const tm = team.find(t => t.id === did)
-                    if (!tm?.timeOff) return []
-                    return tm.timeOff.filter(to => { const end = parseLocalDate(to.endDate); return end && end >= now }).map(to => ({ did, name: tm.name, start: parseLocalDate(to.startDate)!, end: parseLocalDate(to.endDate)! }))
-                  }).flat()
-                  const conflicts: string[] = []
-                  for (let i = 0; i < ptoRanges.length; i++) {
-                    for (let j = i + 1; j < ptoRanges.length; j++) {
-                      if (ptoRanges[i].did !== ptoRanges[j].did && ptoRanges[i].start <= ptoRanges[j].end && ptoRanges[j].start <= ptoRanges[i].end) {
-                        conflicts.push(`${ptoRanges[i].name.split(' ')[0]} & ${ptoRanges[j].name.split(' ')[0]}`)
-                      }
-                    }
-                  }
-                  if (conflicts.length > 0) ptoConflictDetails.push({ name: p.name, detail: conflicts.join('; '), projectName: p.name })
-                })
-                if (ptoConflictDetails.length > 0) warnings.push({
-                  icon: <Calendar size={12} />, text: `${ptoConflictDetails.length} PTO overlap`, severity: 'warn',
-                  detail: { title: 'Overlapping PTO on Projects', items: ptoConflictDetails }
-                })
-
-                if (missingUpdates.length > 0) warnings.push({
-                  icon: <ClipboardCopy size={12} />, text: `${missingUpdates.length} missing weekly updates`, severity: 'warn',
-                  detail: { title: 'Projects Missing Weekly Updates', items: missingUpdates.map(p => {
-                    return { name: p.name, detail: `No update for ${currentWeek}`, projectName: p.name }
-                  })}
-                })
-
-                return (
-                  <div className="projects-summary">
-                    <div className="summary-stats">
-                      {([['active', 'Active', '#3b82f6'], ['review', 'In Review', '#f59e0b'], ['done', 'Done', '#22c55e'], ['blocked', 'Blocked', '#ef4444'], ['pending', 'Pending', '#94a3b8']] as const).map(([status, label, color]) => {
-                        const count = currentProjects.filter(p => p.status === status).length
-                        return (
-                          <div key={status} className="summary-stat" style={count > 0 ? { color } : undefined}>
-                            <span className="summary-stat-value">{count}</span>
-                            <span className="summary-stat-label">{label}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    {warnings.length > 0 && (
-                      <div className="summary-risks">
-                        {warnings.map((w, i) => (
-                          <div key={i} className={`risk-item risk-${w.severity}${w.detail ? ' risk-clickable' : ''}`} onClick={() => w.detail && setRiskDetail(w.detail)}>
-                            <span className="risk-icon">{w.icon}</span>
-                            <span className="risk-text">{w.text}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-
               <div className="projects-sort-row">
                 {!showArchive && <label className="arrange-priority-toggle">
                   <div className={`toggle-switch ${projectViewMode === 'priority' ? 'active' : ''}`} onClick={() => setProjectViewMode(projectViewMode === 'priority' ? 'list' : 'priority')}>
@@ -2894,6 +2815,130 @@ const [showFilters, setShowFilters] = useState(false)
                   </button>
                 </div>
               )}
+
+              {!showArchive && projectViewMode === 'list' && (() => {
+                const now = new Date()
+                const in4Weeks = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000)
+                const summaryProjects = filteredProjects
+                const activeProjects = summaryProjects.filter(p => p.status === 'active' || p.status === 'review')
+                const activeAssignments = capacityData?.assignments.filter((a: CapacityAssignment) => {
+                  const proj = summaryProjects.find(p => p.name === a.project_name)
+                  return proj && (proj.status === 'active' || proj.status === 'review')
+                }) || []
+                const warnings: { icon: React.ReactNode; text: string; severity: 'danger' | 'warn' | 'info'; detail?: { title: string; items: { name: string; detail: string; projectName?: string }[] } }[] = []
+
+                const overdue = activeProjects.filter(p => {
+                  if (!p.endDate) return false
+                  const end = parseLocalDate(p.endDate)
+                  return end && end < now
+                })
+                if (overdue.length > 0) warnings.push({
+                  icon: <AlertTriangle size={12} />, text: `${overdue.length} past end date`, severity: 'danger',
+                  detail: { title: 'Projects Past End Date', items: overdue.map(p => {
+                    const end = parseLocalDate(p.endDate!)!
+                    const days = Math.round((now.getTime() - end.getTime()) / (24 * 60 * 60 * 1000))
+                    return { name: p.name, detail: `${days}d overdue · ended ${formatShortDate(p.endDate!)}`, projectName: p.name }
+                  })}
+                })
+
+                const multiDesigner = activeProjects.filter(p => {
+                  const designers = activeAssignments.filter((a: CapacityAssignment) => a.project_name === p.name)
+                  return designers.length > 1
+                })
+                if (multiDesigner.length > 0) warnings.push({
+                  icon: <Users size={12} />, text: `${multiDesigner.length} multi-designer`, severity: 'info',
+                  detail: { title: 'Multi-Designer Projects', items: multiDesigner.map(p => {
+                    const designers = activeAssignments.filter((a: CapacityAssignment) => a.project_name === p.name)
+                    const names = designers.map((a: CapacityAssignment) => {
+                      const tm = team.find(t => t.id === a.designer_id)
+                      return tm?.name.split(' ')[0] || a.designer_name || '?'
+                    }).join(', ')
+                    return { name: p.name, detail: names, projectName: p.name }
+                  })}
+                })
+
+                const noEstimate = activeProjects.filter(p => !p.estimatedHours)
+                if (noEstimate.length > 0) warnings.push({
+                  icon: <FileBarChart size={12} />, text: `${noEstimate.length} missing estimates`, severity: 'warn',
+                  detail: { title: 'Projects Missing Estimates', items: noEstimate.map(p => {
+                    const designerCount = (p.designers || []).length
+                    return { name: p.name, detail: `${designerCount} designer${designerCount !== 1 ? 's' : ''}, no hours estimated`, projectName: p.name }
+                  })}
+                })
+
+                const endingSoon = activeProjects.filter(p => {
+                  if (!p.endDate) return false
+                  const end = parseLocalDate(p.endDate)
+                  return end && end > now && end <= in4Weeks
+                })
+                if (endingSoon.length > 0) warnings.push({
+                  icon: <Flag size={12} />, text: `${endingSoon.length} ending soon`, severity: 'info',
+                  detail: { title: 'Projects Ending Soon', items: endingSoon.map(p => {
+                    const end = parseLocalDate(p.endDate!)!
+                    const days = Math.round((end.getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
+                    return { name: p.name, detail: `${days}d left · ends ${formatShortDate(p.endDate!)}`, projectName: p.name }
+                  })}
+                })
+
+                const ptoConflictDetails: { name: string; detail: string; projectName?: string }[] = []
+                activeProjects.forEach(p => {
+                  const projDesignerIds = activeAssignments.filter((a: CapacityAssignment) => a.project_name === p.name).map((a: CapacityAssignment) => a.designer_id)
+                  if (projDesignerIds.length < 2) return
+                  const ptoRanges = projDesignerIds.map(did => {
+                    const tm = team.find(t => t.id === did)
+                    if (!tm?.timeOff) return []
+                    return tm.timeOff.filter(to => { const end = parseLocalDate(to.endDate); return end && end >= now }).map(to => ({ did, name: tm.name, start: parseLocalDate(to.startDate)!, end: parseLocalDate(to.endDate)! }))
+                  }).flat()
+                  const conflicts: string[] = []
+                  for (let i = 0; i < ptoRanges.length; i++) {
+                    for (let j = i + 1; j < ptoRanges.length; j++) {
+                      if (ptoRanges[i].did !== ptoRanges[j].did && ptoRanges[i].start <= ptoRanges[j].end && ptoRanges[j].start <= ptoRanges[i].end) {
+                        conflicts.push(`${ptoRanges[i].name.split(' ')[0]} & ${ptoRanges[j].name.split(' ')[0]}`)
+                      }
+                    }
+                  }
+                  if (conflicts.length > 0) ptoConflictDetails.push({ name: p.name, detail: conflicts.join('; '), projectName: p.name })
+                })
+                if (ptoConflictDetails.length > 0) warnings.push({
+                  icon: <Calendar size={12} />, text: `${ptoConflictDetails.length} PTO overlap`, severity: 'warn',
+                  detail: { title: 'Overlapping PTO on Projects', items: ptoConflictDetails }
+                })
+
+                const visibleProjectIds = new Set(summaryProjects.map(p => p.id))
+                const scopedMissingUpdates = missingUpdates.filter(m => visibleProjectIds.has(m.id))
+                if (scopedMissingUpdates.length > 0) warnings.push({
+                  icon: <ClipboardCopy size={12} />, text: `${scopedMissingUpdates.length} missing weekly updates`, severity: 'warn',
+                  detail: { title: 'Projects Missing Weekly Updates', items: scopedMissingUpdates.map(p => {
+                    return { name: p.name, detail: `No update for ${currentWeek}`, projectName: p.name }
+                  })}
+                })
+
+                return (
+                  <div className="projects-summary">
+                    <div className="summary-stats">
+                      {([['active', 'Active', '#3b82f6'], ['review', 'In Review', '#f59e0b'], ['done', 'Done', '#22c55e'], ['blocked', 'Blocked', '#ef4444'], ['pending', 'Pending', '#94a3b8']] as const).map(([status, label, color]) => {
+                        const count = summaryProjects.filter(p => p.status === status).length
+                        return (
+                          <div key={status} className="summary-stat" style={count > 0 ? { color } : undefined}>
+                            <span className="summary-stat-value">{count}</span>
+                            <span className="summary-stat-label">{label}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {warnings.length > 0 && (
+                      <div className="summary-risks">
+                        {warnings.map((w, i) => (
+                          <div key={i} className={`risk-item risk-${w.severity}${w.detail ? ' risk-clickable' : ''}`} onClick={() => w.detail && setRiskDetail(w.detail)}>
+                            <span className="risk-icon">{w.icon}</span>
+                            <span className="risk-text">{w.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {!showArchive && projectViewMode === 'list' && <div className="projects-list">
                 {(() => {
@@ -6871,22 +6916,35 @@ const [showFilters, setShowFilters] = useState(false)
                       <div className="project-image-placeholder">Paste or drag an image here</div>
                     )}
                     {projectImages.length > 0 && (
-                      <div className="project-image-grid">
-                        {projectImages.map((img, idx) => (
-                          <div key={img.id} className="project-image-item">
-                            <div className="project-image-thumb">
-                              <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
-                                onClick={() => setLightbox({ images: projectImages, index: idx })} />
-                              <button className="project-image-delete" onClick={() => deleteProjectImage(img.id)} title="Delete image">
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                            <input className="project-image-caption" placeholder="Add caption..."
-                              defaultValue={img.caption || ''}
-                              onBlur={e => { if (e.target.value !== (img.caption || '')) updateImageCaption(img.id, e.target.value) }} />
+                      <DndContext
+                        sensors={prioritySensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={(e: DragEndEvent) => {
+                          const { active, over } = e
+                          if (!over || active.id === over.id) return
+                          const oldIndex = projectImages.findIndex(i => i.id === active.id)
+                          const newIndex = projectImages.findIndex(i => i.id === over.id)
+                          if (oldIndex === -1 || newIndex === -1) return
+                          const reordered = arrayMove(projectImages, oldIndex, newIndex)
+                          reorderProjectImages(editingProject.id, reordered)
+                        }}
+                      >
+                        <SortableContext items={projectImages.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                          <div className="project-image-grid">
+                            {projectImages.map((img, idx) => (
+                              <SortableImageItem
+                                key={img.id}
+                                img={img}
+                                index={idx}
+                                images={projectImages}
+                                onOpenLightbox={(imgs, i) => setLightbox({ images: imgs, index: i })}
+                                onDelete={deleteProjectImage}
+                                onCaptionBlur={updateImageCaption}
+                              />
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        </SortableContext>
+                      </DndContext>
                     )}
                   </div>
                 </div>

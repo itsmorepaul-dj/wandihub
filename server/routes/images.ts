@@ -14,14 +14,28 @@ router.get('/images', async (req, res) => {
     const projectId = req.query.project_id as string;
     if (projectId) {
       const images = await all(
-        'SELECT * FROM project_images WHERE project_id = ? ORDER BY created_at DESC',
+        'SELECT * FROM project_images WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC',
         [projectId]
       );
       return res.json(images);
     }
     // Return all images (for loading counts/thumbnails on project cards)
-    const images = await all('SELECT * FROM project_images ORDER BY created_at DESC');
+    const images = await all('SELECT * FROM project_images ORDER BY project_id, sort_order ASC, created_at ASC');
     res.json(images);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Reorder images for a project
+router.put('/images/reorder', async (req, res) => {
+  try {
+    const { project_id, image_ids } = req.body as { project_id?: string; image_ids?: string[] };
+    if (!project_id || !Array.isArray(image_ids)) {
+      return res.status(400).json({ error: 'project_id and image_ids[] required' });
+    }
+    for (let i = 0; i < image_ids.length; i++) {
+      await run('UPDATE project_images SET sort_order = ? WHERE id = ? AND project_id = ?', [i, image_ids[i], project_id]);
+    }
+    res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -61,10 +75,13 @@ router.post('/images', async (req, res) => {
 
     fs.writeFileSync(path.join(IMAGES_DIR, filename), buffer);
 
+    const maxRow = await get('SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM project_images WHERE project_id = ?', [projectId]);
+    const nextOrder = (maxRow?.max_order ?? -1) + 1;
+
     await run(
-      `INSERT INTO project_images (id, project_id, filename, original_name, mime_type, size_bytes)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, projectId, filename, req.headers['x-original-name'] || filename, contentType, buffer.length]
+      `INSERT INTO project_images (id, project_id, filename, original_name, mime_type, size_bytes, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, projectId, filename, req.headers['x-original-name'] || filename, contentType, buffer.length, nextOrder]
     );
 
     const saved = await get('SELECT * FROM project_images WHERE id = ?', [id]);
