@@ -29,8 +29,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Public review site — reprioritized the project card for review: description and links lead, with the project schedule (gantt) collapsed into an "Open Project Schedule" accordion that matches the "Open Notes" treatment. Card numbers rendered as red circles with white text. Attached project links use a conventional blue color with underline so they read as clickable. Markdown links in descriptions and the review page header now render as clickable anchors instead of raw `[text](url)`. Uploaded images can be reordered via drag handle on each thumbnail in the notes panel, and the delete button now uses the same trash icon as the project edit modal.',
-  'Filter-aware summary — the Projects summary stats and risk warnings now reflect the active sort/filter, so filtering by designer or business line scopes the counts to the visible subset. Moved below the sort/filter controls to reinforce that it reflects those settings. Archive button matched to the sort button height.',
+  'Gantt review diamonds — Every project gantt now shows a blue diamond for each review that includes it, positioned by the review\'s week and linking straight to the public review page.',
+  'Public review site — project cards reprioritized: description and blue underlined links lead, gantt collapsed into an "Open Project Schedule" accordion matching "Open Notes". Red circle card numbers, clickable markdown links, and drag-to-reorder for images in the notes panel.',
+  'Filter-aware summary — Projects summary stats and risk warnings now scope to the active sort/filter, and sit below the controls. Archive button height matched to sort buttons.',
 ]
 
 
@@ -360,6 +361,7 @@ function App() {
 
   // Reviews state
   const [reviews, setReviews] = useState<{ id: string; title: string; week: string | null; created_by: string | null; created_at: string; updated_at: string; itemCount: number }[]>([])
+  const [reviewMarkers, setReviewMarkers] = useState<{ project_id: string; review_id: string; title: string; week: string | null; created_at: string }[]>([])
   const [editingReview, setEditingReview] = useState<any>(null)
   const [showCreateReviewModal, setShowCreateReviewModal] = useState(false)
   const [createReviewForm, setCreateReviewForm] = useState({ title: '', selectedProjectIds: [] as string[] })
@@ -927,6 +929,8 @@ const [showFilters, setShowFilters] = useState(false)
         setBusinessLines(blData)
         // Load all project images
         authFetch('/api/images').then(r => r.json()).then(setAllProjectImages).catch(() => {})
+        // Load review diamond markers for gantt charts
+        authFetch('/api/review-markers').then(r => r.json()).then(setReviewMarkers).catch(() => {})
         // Load priorities
         const prRes = await authFetch('/api/priorities')
         const prData: { business_line_id: string; project_id: string; rank: number }[] = await prRes.json()
@@ -2060,6 +2064,45 @@ const [showFilters, setShowFilters] = useState(false)
     return nearest
   }
 
+  // Parse a review's week string ("Week 15" or "2026-W15") into a Monday-of-that-week timestamp.
+  const reviewWeekToDate = (weekStr: string | null, createdAt: string | null): number | null => {
+    const fallback = () => {
+      if (!createdAt) return null
+      const t = new Date(createdAt.includes('T') ? createdAt : createdAt.replace(' ', 'T') + 'Z').getTime()
+      return isNaN(t) ? null : t
+    }
+    if (!weekStr) return fallback()
+    const iso = weekStr.match(/^(\d{4})-W(\d{1,2})$/i)
+    let year: number | null = null
+    let week: number | null = null
+    if (iso) { year = parseInt(iso[1], 10); week = parseInt(iso[2], 10) }
+    else {
+      const m = weekStr.match(/week\s*(\d{1,2})(?:\s*[,/-]?\s*(\d{4}))?/i)
+      if (m) { week = parseInt(m[1], 10); year = m[2] ? parseInt(m[2], 10) : null }
+    }
+    if (week == null) return fallback()
+    if (year == null && createdAt) {
+      const t = new Date(createdAt.includes('T') ? createdAt : createdAt.replace(' ', 'T') + 'Z')
+      if (!isNaN(t.getTime())) year = t.getUTCFullYear()
+    }
+    if (year == null) year = new Date().getUTCFullYear()
+    const jan4 = new Date(Date.UTC(year, 0, 4))
+    const jan4Day = jan4.getUTCDay() || 7
+    const mondayWeek1 = new Date(jan4.getTime() - (jan4Day - 1) * DAY_MS)
+    return mondayWeek1.getTime() + (week - 1) * 7 * DAY_MS
+  }
+
+  const getProjectReviewMarkers = (projectId: string) => {
+    return reviewMarkers
+      .filter(m => m.project_id === projectId)
+      .map(m => {
+        const t = reviewWeekToDate(m.week, m.created_at)
+        if (t == null) return null
+        return { date: new Date(t), review_id: m.review_id }
+      })
+      .filter((x): x is { date: Date; review_id: string } => x !== null)
+  }
+
   // Gantt chart helper functions
   const getGanttRange = (project: Project) => {
     const dates: Date[] = []
@@ -2080,6 +2123,11 @@ const [showFilters, setShowFilters] = useState(false)
     if (project.endDate) {
       const end = parseLocalDate(project.endDate)
       if (end) dates.push(end)
+    }
+
+    // Expand range to include review diamond markers (so they're always visible)
+    for (const m of getProjectReviewMarkers(project.id)) {
+      dates.push(m.date)
     }
 
     if (dates.length === 0) return null
@@ -3080,6 +3128,34 @@ const [showFilters, setShowFilters] = useState(false)
                                         </div>
                                       </div>
                                     ) : null}
+                                    {(() => {
+                                      const markers = getProjectReviewMarkers(project.id)
+                                      if (markers.length === 0) return null
+                                      const diamonds = markers.map((m, idx) => {
+                                        const pos = (m.date.getTime() - ganttRange.start.getTime()) / (ganttRange.totalDays * DAY_MS)
+                                        if (pos < 0 || pos > 1) return null
+                                        const dateLabel = m.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                        return (
+                                          <a
+                                            key={`rm-${idx}`}
+                                            className="gantt-review-diamond"
+                                            href={`/review/${m.review_id}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{ left: `${(pos * 100).toFixed(2)}%` }}
+                                            title={`Design Review · ${dateLabel}`}
+                                          >
+                                            <span className="gantt-review-diamond-shape" />
+                                          </a>
+                                        )
+                                      })
+                                      return (
+                                        <div className="gantt-track gantt-review-track">
+                                          <span className="gantt-track-label" title="Design Review">Design Review</span>
+                                          <div className="gantt-track-bars">{diamonds}</div>
+                                        </div>
+                                      )
+                                    })()}
                                   </div>
                                 </div>
                               </div>

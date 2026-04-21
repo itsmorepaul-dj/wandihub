@@ -2089,6 +2089,38 @@
   box-shadow: var(--shadow-glow);
 }
 
+/* Gantt Review Diamond Markers (own track row) */
+.gantt-review-track .gantt-track-bars {
+  position: relative;
+}
+.gantt-review-diamond {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  text-decoration: none;
+}
+.gantt-review-diamond-shape {
+  width: 13px;
+  height: 13px;
+  background: #f59e0b;
+  transform: rotate(45deg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.1);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.gantt-review-diamond:hover .gantt-review-diamond-shape {
+  transform: rotate(45deg) scale(1.3);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+[data-theme="dark"] .gantt-review-diamond-shape {
+  background: #fbbf24;
+}
+
 /* Gantt Container */
 .gantt-container {
   position: relative;

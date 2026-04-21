@@ -19,6 +19,17 @@ router.get('/api/reviews', async (_req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
+// Flat list of (project_id, review_id, week, created_at) for rendering gantt diamond markers
+router.get('/api/review-markers', async (_req, res) => {
+  try {
+    const rows = await all(
+      `SELECT ri.project_id, r.id as review_id, r.title, r.week, r.created_at
+       FROM review_items ri JOIN reviews r ON ri.review_id = r.id`
+    )
+    res.json(rows)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
 router.get('/api/reviews/:id', async (req, res) => {
   try {
     const review = await get('SELECT * FROM reviews WHERE id = ?', [req.params.id])
@@ -159,7 +170,47 @@ function escHtml(s: string) {
 
 const DAY_MS = 86400000
 
-function renderFullGantt(item: any): string {
+// Convert a review's stored week string into a Monday-of-that-week timestamp.
+// Accepts "Week 15", "Week 15 2026", "2026-W15", or falls back to the review's created_at.
+function reviewWeekToDate(weekStr: string | null | undefined, createdAt: string | null | undefined): number | null {
+  const fallback = () => {
+    if (!createdAt) return null
+    const t = new Date(createdAt.includes('T') ? createdAt : createdAt.replace(' ', 'T') + 'Z').getTime()
+    return isNaN(t) ? null : t
+  }
+  if (!weekStr) return fallback()
+  // ISO form "YYYY-Www"
+  const iso = weekStr.match(/^(\d{4})-W(\d{1,2})$/i)
+  let year: number | null = null
+  let week: number | null = null
+  if (iso) { year = parseInt(iso[1], 10); week = parseInt(iso[2], 10) }
+  else {
+    const m = weekStr.match(/week\s*(\d{1,2})(?:\s*[,/-]?\s*(\d{4}))?/i)
+    if (m) {
+      week = parseInt(m[1], 10)
+      year = m[2] ? parseInt(m[2], 10) : null
+    }
+  }
+  if (week == null) return fallback()
+  if (year == null) {
+    // Infer year from created_at if possible, else current year
+    if (createdAt) {
+      const t = new Date(createdAt.includes('T') ? createdAt : createdAt.replace(' ', 'T') + 'Z')
+      if (!isNaN(t.getTime())) year = t.getUTCFullYear()
+    }
+    if (year == null) year = new Date().getUTCFullYear()
+  }
+  // Monday of ISO week = Jan 4th of year, walked back to its Monday, plus (week-1)*7 days
+  const jan4 = new Date(Date.UTC(year, 0, 4))
+  const jan4Day = jan4.getUTCDay() || 7 // Mon=1..Sun=7
+  const mondayWeek1 = new Date(jan4.getTime() - (jan4Day - 1) * DAY_MS)
+  const targetMs = mondayWeek1.getTime() + (week - 1) * 7 * DAY_MS
+  return targetMs
+}
+
+type ReviewMarker = { date: number; url: string; label: string }
+
+function renderFullGantt(item: any, reviewMarkers: ReviewMarker[] = []): string {
   const dates: number[] = []
   if (item.timeline) {
     for (const t of item.timeline) {
@@ -169,6 +220,7 @@ function renderFullGantt(item: any): string {
   }
   if (item.startDate) dates.push(new Date(item.startDate + 'T12:00:00').getTime())
   if (item.endDate) dates.push(new Date(item.endDate + 'T12:00:00').getTime())
+  for (const m of reviewMarkers) dates.push(m.date)
 
   if (dates.length === 0) return '<div class="gantt-empty">No timeline data</div>'
 
@@ -204,6 +256,24 @@ function renderFullGantt(item: any): string {
   const todayHtml = todayPos !== null
     ? `<div class="gantt-today-global" style="--today-pos:${todayPos.toFixed(4)}"><span class="gantt-today-label">Today</span></div>`
     : ''
+
+  // Review diamond track (own row labeled "Design Review")
+  let reviewTrackHtml = ''
+  if (reviewMarkers.length > 0) {
+    let diamonds = ''
+    for (const m of reviewMarkers) {
+      if (m.date < minDate || m.date > maxDate) continue
+      const pos = (m.date - minDate) / totalMs
+      const dateLabel = new Date(m.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      diamonds += `<a class="gantt-review-diamond" href="${escHtml(m.url)}" target="_blank" rel="noopener" style="left:${(pos * 100).toFixed(2)}%" title="${escHtml(m.label)} · ${dateLabel}"><span class="gantt-review-diamond-shape"></span></a>`
+    }
+    if (diamonds) {
+      reviewTrackHtml = `<div class="gantt-track gantt-review-track">
+        <span class="gantt-track-label" title="Design Review">Design Review</span>
+        <div class="gantt-track-bars">${diamonds}</div>
+      </div>`
+    }
+  }
 
   // Build tracks
   let tracks = ''
@@ -257,6 +327,7 @@ function renderFullGantt(item: any): string {
         <div class="gantt-weekly-grid">${ticks}</div>
         ${todayHtml}
         ${tracks}
+        ${reviewTrackHtml}
       </div>
     </div>
   </div>`
@@ -380,6 +451,24 @@ router.get('/review/:id', async (req, res) => {
       ) as any[]
     }
 
+    // Load review diamond markers for each item: all reviews that include this project
+    const sidQuery = req.query.sid ? `?sid=${encodeURIComponent(req.query.sid as string)}` : ''
+    for (const item of parsed) {
+      const rows = await all(
+        `SELECT r.id, r.title, r.week, r.created_at
+         FROM reviews r JOIN review_items ri ON ri.review_id = r.id
+         WHERE ri.project_id = ?`,
+        [item.project_id]
+      ) as any[]
+      const markers: ReviewMarker[] = []
+      for (const r of rows) {
+        const t = reviewWeekToDate(r.week, r.created_at)
+        if (t == null) continue
+        markers.push({ date: t, url: `/review/${r.id}${sidQuery}`, label: 'Design Review' })
+      }
+      item.reviewMarkers = markers
+    }
+
     const allReviews = await all('SELECT id, title, week, created_at FROM reviews ORDER BY created_at DESC') as any[]
     const teamMembers = await all('SELECT name, slack FROM team') as { name: string; slack: string }[]
     const slackByName = new Map(teamMembers.map(t => [t.name, t.slack]))
@@ -402,7 +491,7 @@ router.get('/review/:id', async (req, res) => {
       const statusColor = statusColors[item.status] || '#6b7280'
       const statusLabel = statusLabels[item.status] || item.status
 
-      const gantt = renderFullGantt(item)
+      const gantt = renderFullGantt(item, item.reviewMarkers || [])
       const links = renderLinks(item)
       const linksSection = links ? `<div class="card-links">${links}</div>` : ''
       const hasNotes = !!(item.notes && item.notes.trim())
@@ -1415,6 +1504,25 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       border: 1px solid #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.1);
     }
     .gantt-empty { padding: 0.5rem 1.25rem; font-size: 0.75rem; color: var(--rv-text-dim); }
+
+    /* Review diamond track */
+    .gantt-review-track .gantt-track-bars { position: relative; }
+    .gantt-review-diamond {
+      position: absolute; top: 50%; transform: translate(-50%, -50%);
+      width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+      z-index: 6; text-decoration: none;
+    }
+    .gantt-review-diamond-shape {
+      width: 13px; height: 13px; background: #f59e0b;
+      transform: rotate(45deg);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.18), 0 1px 2px rgba(0,0,0,0.1);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .gantt-review-diamond:hover .gantt-review-diamond-shape {
+      transform: rotate(45deg) scale(1.3);
+      box-shadow: 0 3px 6px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.15);
+    }
+    [data-theme="dark"] .gantt-review-diamond-shape { background: #fbbf24; }
 
     /* Gantt accordion wrapper — reuses .notes-accordion button styles via shared class */
     .card-gantt-accordion { border-top: 1px solid var(--rv-border-subtle); }
