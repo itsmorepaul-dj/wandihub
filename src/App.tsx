@@ -29,10 +29,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Review time planner — set a total meeting length for each review; each project gets an auto-calculated time slot shown before its status. Drag the slider to give a project more or less time (others rebalance automatically), or mark a project "Exempt" — exempt projects drop to a "For awareness…" section at the bottom of the public page. Document links on the public page are now labeled (Design deck, PRD, Jira).',
   'Review site is more secure — shareable review links no longer carry login info in the URL, so copying and sharing a link won\'t expose your session.',
   'Gantt review diamonds — Project gantts now include a "Design Review" track row with a gold diamond for each review that includes the project, positioned by the review\'s week and linking to the public review page.',
-  'Public review site — project cards reprioritized: description and blue underlined links lead, gantt collapsed into an "Open Project Schedule" accordion matching "Open Notes". Red circle card numbers, clickable markdown links, and drag-to-reorder for images in the notes panel.',
-  'Filter-aware summary — Projects summary stats and risk warnings now scope to the active sort/filter, and sit below the controls. Archive button height matched to sort buttons.',
 ]
 
 
@@ -195,12 +194,45 @@ function WeeklyPendingEditor({ existing, placeholder, onSave, onDelete }: {
   )
 }
 
-function ReviewItemRow({ item, index, project, onRemove, authFetch }: {
+// Compute per-item review minutes. Excluded=0; items with explicit duration keep it;
+// remaining items split the leftover budget evenly (integer minutes, remainder distributed to first few).
+function computeItemMinutes(
+  items: { id: string; duration_minutes: number | null | undefined; excluded_from_time: number | boolean }[],
+  total: number
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  const autoIds: string[] = []
+  let lockedSum = 0
+  for (const it of items) {
+    if (it.excluded_from_time) { out[it.id] = 0; continue }
+    if (it.duration_minutes != null) {
+      const v = Math.max(0, Math.floor(it.duration_minutes))
+      out[it.id] = v
+      lockedSum += v
+    } else {
+      autoIds.push(it.id)
+    }
+  }
+  const remaining = Math.max(0, total - lockedSum)
+  if (autoIds.length > 0) {
+    const base = Math.floor(remaining / autoIds.length)
+    const extra = remaining - base * autoIds.length
+    autoIds.forEach((id, i) => { out[id] = base + (i < extra ? 1 : 0) })
+  }
+  return out
+}
+
+function ReviewItemRow({ item, index, project, onRemove, authFetch, computedMins, totalMinutes, onTimeChange, onExemptChange, onResetAuto }: {
   item: any
   index: number
   project: any
   onRemove: () => void
   authFetch: (url: string, opts?: RequestInit) => Promise<Response>
+  computedMins: number
+  totalMinutes: number
+  onTimeChange: (minutes: number) => void
+  onExemptChange: (excluded: boolean) => void
+  onResetAuto: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
@@ -264,6 +296,34 @@ function ReviewItemRow({ item, index, project, onRemove, authFetch }: {
             {i < links.length - 1 && <span className="review-link-sep">·</span>}
           </span>
         )) : <span style={{ color: 'var(--color-text-dim)' }}>—</span>}
+      </td>
+      <td className="review-item-time">
+        <div className="review-time-cell">
+          <div className="review-time-label">
+            <span className="review-time-value">{item.excluded_from_time ? '—' : `${computedMins} min`}</span>
+            {!item.excluded_from_time && item.duration_minutes != null && (
+              <button className="review-time-reset" onClick={onResetAuto} title="Reset to auto-split">auto</button>
+            )}
+          </div>
+          <input
+            type="range"
+            className="review-time-slider"
+            min={0}
+            max={Math.max(totalMinutes, 60)}
+            step={1}
+            value={item.excluded_from_time ? 0 : computedMins}
+            disabled={!!item.excluded_from_time}
+            onChange={e => onTimeChange(parseInt(e.target.value, 10))}
+          />
+          <label className="review-time-exempt">
+            <input
+              type="checkbox"
+              checked={!!item.excluded_from_time}
+              onChange={e => onExemptChange(e.target.checked)}
+            />
+            Exempt
+          </label>
+        </div>
       </td>
       <td>
         <button className="action-btn delete" onClick={onRemove} title="Remove from review">
@@ -5897,6 +5957,26 @@ const [showFilters, setShowFilters] = useState(false)
                   <span className="review-edit-meta">
                     {editingReview.items?.length || 0} project{(editingReview.items?.length || 0) !== 1 ? 's' : ''} · {new Date(editingReview.created_at + 'Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
+                  <label className="review-total-time-control" title="Total time scheduled for the review">
+                    <Clock size={11} />
+                    <input
+                      type="number"
+                      className="review-total-time-input"
+                      min={0}
+                      max={600}
+                      step={5}
+                      value={editingReview.total_minutes ?? 45}
+                      onChange={e => setEditingReview({ ...editingReview, total_minutes: parseInt(e.target.value, 10) || 0 })}
+                      onBlur={async () => {
+                        await authFetch(`/api/reviews/${editingReview.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ total_minutes: editingReview.total_minutes ?? 45 })
+                        })
+                      }}
+                    />
+                    min total
+                  </label>
                   <span className="project-meta-chip project-meta-action" style={{ opacity: 1 }} onClick={() => {
                     navigator.clipboard.writeText(`${window.location.origin}/review/${editingReview.id}`)
                     setReviewCopied(true)
@@ -5963,28 +6043,79 @@ const [showFilters, setShowFilters] = useState(false)
                         <tr>
                           <th style={{ width: 36 }}></th>
                           <th style={{ width: 36 }}>#</th>
-                          <th style={{ width: '60%' }}>Project</th>
-                          <th style={{ width: '25%' }}>Links</th>
+                          <th style={{ width: '48%' }}>Project</th>
+                          <th style={{ width: '20%' }}>Links</th>
+                          <th style={{ width: 180 }}>Time</th>
                           <th style={{ width: 40 }}></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(editingReview.items as any[]).map((item: any, idx: number) => {
-                          const proj = projects.find(p => p.id === item.project_id)
-                          return (
-                            <ReviewItemRow
-                              key={item.id}
-                              item={item}
-                              index={idx}
-                              project={proj || null}
-                              authFetch={authFetch}
-                              onRemove={async () => {
-                                await authFetch(`/api/review-items/${item.id}`, { method: 'DELETE' })
-                                loadReviewDetail(editingReview.id)
-                              }}
-                            />
-                          )
-                        })}
+                        {(() => {
+                          const totalMin = editingReview.total_minutes ?? 45
+                          const mins = computeItemMinutes(editingReview.items as any[], totalMin)
+                          const patchItem = (id: string, patch: any) => {
+                            const nextItems = (editingReview.items as any[]).map((it: any) => it.id === id ? { ...it, ...patch } : it)
+                            setEditingReview({ ...editingReview, items: nextItems })
+                          }
+                          const persistTime = async (id: string, body: any) => {
+                            await authFetch(`/api/review-items/${id}/time`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(body)
+                            })
+                          }
+                          // Applies exempt flag and (when turning on) moves item to the end — in ONE state update
+                          // so React can't drop the exempt flag when reordering.
+                          const setExemptAndMaybeReorder = async (id: string, excluded: boolean) => {
+                            const cur = editingReview.items as any[]
+                            const patched = cur.map((it: any) => it.id === id ? { ...it, excluded_from_time: excluded ? 1 : 0 } : it)
+                            let next = patched
+                            if (excluded) {
+                              const idx = patched.findIndex((i: any) => i.id === id)
+                              if (idx !== -1 && idx !== patched.length - 1) {
+                                next = [...patched]
+                                const [moved] = next.splice(idx, 1)
+                                next.push(moved)
+                              }
+                            }
+                            setEditingReview({ ...editingReview, items: next })
+                            await persistTime(id, { excluded_from_time: excluded })
+                            if (excluded && next !== patched) {
+                              await authFetch(`/api/reviews/${editingReview.id}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ item_order: next.map((i: any) => i.id) })
+                              })
+                            }
+                          }
+                          return (editingReview.items as any[]).map((item: any, idx: number) => {
+                            const proj = projects.find(p => p.id === item.project_id)
+                            return (
+                              <ReviewItemRow
+                                key={item.id}
+                                item={item}
+                                index={idx}
+                                project={proj || null}
+                                authFetch={authFetch}
+                                computedMins={mins[item.id] ?? 0}
+                                totalMinutes={totalMin}
+                                onTimeChange={(m) => {
+                                  patchItem(item.id, { duration_minutes: m })
+                                  persistTime(item.id, { duration_minutes: m })
+                                }}
+                                onExemptChange={(excluded) => setExemptAndMaybeReorder(item.id, excluded)}
+                                onResetAuto={() => {
+                                  patchItem(item.id, { duration_minutes: null })
+                                  persistTime(item.id, { duration_minutes: null })
+                                }}
+                                onRemove={async () => {
+                                  await authFetch(`/api/review-items/${item.id}`, { method: 'DELETE' })
+                                  loadReviewDetail(editingReview.id)
+                                }}
+                              />
+                            )
+                          })
+                        })()}
                       </tbody>
                     </table>
                   </SortableContext>

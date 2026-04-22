@@ -362,6 +362,10 @@ export const initSchema = async () => {
     description TEXT DEFAULT ''
   )`).catch(e => console.error('review_items init error:', e.message))
   await run(`ALTER TABLE review_items ADD COLUMN description TEXT DEFAULT ''`).catch(() => {})
+  // Time allocation: nullable duration (null = auto-split), exempt flag, and total per review
+  await run(`ALTER TABLE review_items ADD COLUMN duration_minutes INTEGER DEFAULT NULL`).catch(() => {})
+  await run(`ALTER TABLE review_items ADD COLUMN excluded_from_time INTEGER DEFAULT 0`).catch(() => {})
+  await run(`ALTER TABLE reviews ADD COLUMN total_minutes INTEGER DEFAULT 45`).catch(() => {})
 
   // Seed default business lines if empty
   const existing = await get('SELECT COUNT(*) as count FROM business_lines')

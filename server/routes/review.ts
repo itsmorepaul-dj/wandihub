@@ -79,7 +79,7 @@ router.post('/api/reviews', async (req, res) => {
 
 router.put('/api/reviews/:id', async (req, res) => {
   try {
-    const { title, week, description, item_order } = req.body
+    const { title, week, description, item_order, total_minutes } = req.body
     if (title !== undefined) {
       await run('UPDATE reviews SET title = ?, updated_at = datetime(\'now\') WHERE id = ?', [title, req.params.id])
     }
@@ -88,6 +88,10 @@ router.put('/api/reviews/:id', async (req, res) => {
     }
     if (description !== undefined) {
       await run('UPDATE reviews SET description = ?, updated_at = datetime(\'now\') WHERE id = ?', [description, req.params.id])
+    }
+    if (total_minutes !== undefined) {
+      const n = Math.max(0, Math.min(600, parseInt(total_minutes, 10) || 0))
+      await run('UPDATE reviews SET total_minutes = ?, updated_at = datetime(\'now\') WHERE id = ?', [n, req.params.id])
     }
     if (item_order && Array.isArray(item_order)) {
       for (let i = 0; i < item_order.length; i++) {
@@ -135,6 +139,21 @@ router.put('/api/review-items/:id/description', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
+// Update per-item time: duration_minutes (null = auto-split) and excluded_from_time (0/1)
+router.put('/api/review-items/:id/time', async (req, res) => {
+  try {
+    const { duration_minutes, excluded_from_time } = req.body
+    if (duration_minutes !== undefined) {
+      const v = duration_minutes === null ? null : Math.max(0, Math.min(600, parseInt(duration_minutes, 10) || 0))
+      await run('UPDATE review_items SET duration_minutes = ? WHERE id = ?', [v, req.params.id])
+    }
+    if (excluded_from_time !== undefined) {
+      await run('UPDATE review_items SET excluded_from_time = ? WHERE id = ?', [excluded_from_time ? 1 : 0, req.params.id])
+    }
+    res.json({ ok: true })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
 router.put('/api/review-items/:id/notes', async (req, res) => {
   try {
     const { notes, expected_updated_at } = req.body
@@ -165,6 +184,36 @@ router.put('/api/review-items/:id/notes', async (req, res) => {
 
 function escHtml(s: string) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// Given review items and a total minute budget, compute per-item minutes.
+// Excluded items: 0. Locked items (explicit duration_minutes): their value.
+// Auto items (duration_minutes == null): split the remaining budget evenly,
+// with leftover integer-minutes distributed to the first few auto items so the sum matches total.
+export function computeItemMinutes(
+  items: { id: string; duration_minutes: number | null | undefined; excluded_from_time: number | boolean }[],
+  total: number
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  const autoIds: string[] = []
+  let lockedSum = 0
+  for (const it of items) {
+    if (it.excluded_from_time) { out[it.id] = 0; continue }
+    if (it.duration_minutes != null) {
+      const v = Math.max(0, Math.floor(it.duration_minutes))
+      out[it.id] = v
+      lockedSum += v
+    } else {
+      autoIds.push(it.id)
+    }
+  }
+  const remaining = Math.max(0, total - lockedSum)
+  if (autoIds.length > 0) {
+    const base = Math.floor(remaining / autoIds.length)
+    const extra = remaining - base * autoIds.length
+    autoIds.forEach((id, i) => { out[id] = base + (i < extra ? 1 : 0) })
+  }
+  return out
 }
 
 const DAY_MS = 86400000
@@ -342,11 +391,15 @@ const svgTicket = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" s
 
 function renderLinks(item: any): string {
   const links: string[] = []
-  if (item.deckLink) links.push(`<a href="${escHtml(item.deckLink)}" target="_blank" rel="noopener">${svgPresentation}<span>${escHtml(item.deckName || 'Deck')}</span></a>`)
-  if (item.prdLink) links.push(`<a href="${escHtml(item.prdLink)}" target="_blank" rel="noopener">${svgFileText}<span>${escHtml(item.prdName || 'PRD')}</span></a>`)
+  if (item.deckLink) links.push(`<a href="${escHtml(item.deckLink)}" target="_blank" rel="noopener">${svgPresentation}<span>Design deck: ${escHtml(item.deckName || 'Deck')}</span></a>`)
+  if (item.prdLink) links.push(`<a href="${escHtml(item.prdLink)}" target="_blank" rel="noopener">${svgFileText}<span>PRD: ${escHtml(item.prdName || 'PRD')}</span></a>`)
   if (item.briefLink) links.push(`<a href="${escHtml(item.briefLink)}" target="_blank" rel="noopener">${svgFileEdit}<span>${escHtml(item.briefName || 'Brief')}</span></a>`)
   if (item.figmaLink) links.push(`<a href="${escHtml(item.figmaLink)}" target="_blank" rel="noopener">${svgFigma}<span>Figma</span></a>`)
-  if (item.url) links.push(`<a href="${escHtml(item.url)}" target="_blank" rel="noopener">${svgTicket}<span>JIRA</span></a>`)
+  if (item.url) {
+    const jiraMatch = String(item.url).match(/\/browse\/([A-Z][A-Z0-9]+-\d+)/i)
+    const jiraLabel = jiraMatch ? jiraMatch[1].toUpperCase() : 'ticket'
+    links.push(`<a href="${escHtml(item.url)}" target="_blank" rel="noopener">${svgTicket}<span>Jira: ${escHtml(jiraLabel)}</span></a>`)
+  }
   if (item.customLinks) {
     for (const cl of item.customLinks) {
       if (cl.url) links.push(`<a href="${escHtml(cl.url)}" target="_blank" rel="noopener">${svgLink}<span>${escHtml(cl.name || 'Link')}</span></a>`)
@@ -483,7 +536,11 @@ router.get('/review/:id', async (req, res) => {
     const session = sessionId ? sessions.get(sessionId) : null
     const isAuthed = !!session
 
+    const totalMinutes = typeof review.total_minutes === 'number' ? review.total_minutes : 45
+    const itemMinutes = computeItemMinutes(parsed, totalMinutes)
+
     let cards = ''
+    let awarenessCards = ''
     for (const item of parsed) {
       const designerNames: string[] = item.designers || []
       const slackSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`
@@ -601,12 +658,18 @@ router.get('/review/:id', async (req, res) => {
         </div>`
       }
 
-      cards += `<div class="project-card">
+      const mins = itemMinutes[item.id] ?? 0
+      const timeChip = item.excluded_from_time
+        ? ''
+        : `<span class="status-badge time-chip" title="Approximate review time">~${mins} min</span>`
+
+      const cardHtml = `<div class="project-card">
         <div class="card-header">
-          <span class="card-number">${item.rank + 1}</span>
+          <span class="card-number">${item.excluded_from_time ? '&bull;' : item.rank + 1}</span>
           <div class="card-title-area">
             <h2 class="card-title">${escHtml(item.project_name || 'Unknown Project')}</h2>
             <div class="card-meta">
+              ${timeChip}
               <span class="status-badge" style="background:${statusColor}">${statusLabel}</span>
               ${designers ? `<div class="card-designers">${designers}</div>` : ''}
             </div>
@@ -619,10 +682,19 @@ router.get('/review/:id', async (req, res) => {
         ${inlineImagesHtml}
         ${!hasImages && !isAuthed ? '' : imagesDataTag}
       </div>`
+      if (item.excluded_from_time) {
+        awarenessCards += cardHtml
+      } else {
+        cards += cardHtml
+      }
     }
 
+    const awarenessSection = awarenessCards
+      ? `<div class="awareness-section"><h2 class="awareness-heading">For awareness&hellip;</h2>${awarenessCards}</div>`
+      : ''
+
     const content = parsed.length > 0
-      ? `<div class="cards-stack">${cards}</div>`
+      ? `<div class="cards-stack">${cards}${awarenessSection}</div>`
       : '<div class="empty-state">No projects in this review yet.</div>'
 
     const title = escHtml(review.title || 'Design Review')
@@ -630,9 +702,13 @@ router.get('/review/:id', async (req, res) => {
     const createdAt = review.created_at ? new Date(review.created_at + 'Z').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''
     const descriptionHtml = review.description ? `<div class="page-description">${markdownToHtml(review.description)}</div>` : ''
 
+    const countedItems = parsed.filter((it: any) => !it.excluded_from_time).length
+    const timeSummary = parsed.length > 0
+      ? ` · ${totalMinutes} min total${countedItems < parsed.length ? ` (${countedItems} of ${parsed.length} counted)` : ''}`
+      : ''
     const header = `<div class="page-header">
       <h1>${title}${week}</h1>
-      <div class="page-meta">${createdAt} · ${parsed.length} project${parsed.length !== 1 ? 's' : ''}</div>
+      <div class="page-meta">${createdAt} · ${parsed.length} project${parsed.length !== 1 ? 's' : ''}${timeSummary}</div>
       ${descriptionHtml}
     </div>`
 
@@ -1404,6 +1480,16 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       display: inline-block; padding: 0.1rem 0.5rem; border-radius: 99px;
       font-size: 0.65rem; font-weight: 500; color: #fff; letter-spacing: 0.01em;
     }
+    .time-chip { background: var(--rv-bg-tertiary); color: var(--rv-text-secondary); }
+    .time-chip-excluded { background: transparent; color: var(--rv-text-dim); border: 1px dashed var(--rv-border); }
+    .awareness-section { margin-top: 2.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+    .awareness-heading {
+      font-size: 0.95rem; font-weight: 600; color: var(--rv-text-dim);
+      text-transform: none; letter-spacing: 0.01em;
+      padding: 0 0 0.75rem 0.25rem; margin: 0 0 0.75rem;
+      border-bottom: 1px solid var(--rv-border-subtle);
+    }
+    .awareness-section .project-card { opacity: 0.85; }
     .card-designers { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
     .designer-badge {
       display: inline-flex; align-items: center; gap: 0.3rem;

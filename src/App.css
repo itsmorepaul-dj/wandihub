@@ -8597,6 +8597,74 @@ select:focus {
   width: 36px;
 }
 
+/* Review time allocation controls */
+.review-total-time-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+  border-radius: 99px;
+}
+.review-total-time-input {
+  width: 3.5rem;
+  padding: 0.1rem 0.25rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+}
+.review-total-time-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.review-item-time { font-size: 0.72rem; }
+.review-time-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.review-time-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+.review-time-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.review-time-reset {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 0.65rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  text-decoration: underline;
+}
+.review-time-reset:hover { color: var(--color-accent); }
+.review-time-slider {
+  width: 100%;
+  accent-color: var(--color-accent);
+}
+.review-time-slider:disabled { opacity: 0.4; }
+.review-time-exempt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.65rem;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+.review-time-exempt input { margin: 0; }
+
 .review-item-project {
   display: flex;
   flex-direction: column;
