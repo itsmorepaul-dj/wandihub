@@ -375,6 +375,24 @@ export const initSchema = async () => {
   // Migration: per-item optional review_date override (null = inherit from parent review)
   await run(`ALTER TABLE review_items ADD COLUMN review_date TEXT`).catch(() => {})
 
+  // Per-user fan-out of interesting activity_log rows ("this alert applies to you").
+  // Absence of rows for a given activity_id = global alert, shown to everyone.
+  await run(`CREATE TABLE IF NOT EXISTS activity_recipients (
+    activity_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (activity_id, user_id)
+  )`).catch(e => console.error('activity_recipients init error:', e.message))
+  await run(`CREATE INDEX IF NOT EXISTS idx_activity_recipients_user ON activity_recipients(user_id)`).catch(() => {})
+
+  // Per-user read tracking for activity_log rows. Row exists = read.
+  await run(`CREATE TABLE IF NOT EXISTS activity_reads (
+    user_id INTEGER NOT NULL,
+    activity_id INTEGER NOT NULL,
+    read_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, activity_id)
+  )`).catch(e => console.error('activity_reads init error:', e.message))
+  await run(`CREATE INDEX IF NOT EXISTS idx_activity_reads_user ON activity_reads(user_id)`).catch(() => {})
+
   // Per-review-item comment thread (chat). Comments are author-stamped; authors
   // can edit or delete their own, admins can do both. Rendered on the public
   // review page beneath the pinned notes summary.

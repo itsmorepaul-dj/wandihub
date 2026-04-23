@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Personalized notifications — comments posted on your assigned projects now push to your notifications bell automatically, with the bell dot pulsing red/yellow until you check it. The Projects page shows a green "X comments this week" pill that respects whatever designer, business-line, or status filter you\'ve applied; click it for a grouped summary that links straight to the review.',
   'Per-project comment threads on the public review page — authenticated users can leave comments on any project in a review. Each comment is stamped with the user\'s name and time. Edit/delete your own; admins can moderate. Comments show up live across open tabs — no refresh needed.',
   'Gemini notes on reviews — paste Gemini-generated meeting notes from a Google Doc into the new field under the review description. Headings, bullets, bold, and links are preserved and appear on the public review page as a "Gemini notes" accordion above the project cards. Empty field = hidden.',
 ]
@@ -600,7 +601,20 @@ function App() {
   const [holidays, setHolidays] = useState<{ id: string; name: string; date: string }[]>([])
   const [holidayForm, setHolidayForm] = useState({ name: '', date: '' })
   const [showHolidayModal, setShowHolidayModal] = useState(false)
-  const [riskDetail, setRiskDetail] = useState<{ title: string; items: { name: string; detail: string; projectName?: string }[] } | null>(null)
+  const [riskDetail, setRiskDetail] = useState<{
+    title: string;
+    items: {
+      name: string;
+      detail: string;
+      projectName?: string;
+      // Optional structured fields for comment-activity rows. When present, the
+      // modal renders them in a hierarchy instead of the single-line `detail`.
+      reviewId?: string;
+      reviewTitle?: string;
+      author?: string;
+      when?: string;
+    }[];
+  } | null>(null)
 
   // Calendar day modal state
   const [selectedDay, setSelectedDay] = useState<{ date: string; events: CalendarEvent[]; dayName: string } | null>(null)
@@ -869,10 +883,23 @@ const [showFilters, setShowFilters] = useState(false)
     } catch (e) { /* silent */ }
   }
 
+  // Comment-week rollup (for the projects-page risk widget). The raw "all comments
+  // this week" feed; we filter it in the render to match the same projectFilters
+  // (designer, business line, status, project) that drive the rest of the summary.
+  const [commentWeek, setCommentWeek] = useState<{ count: number; items: any[] }>({ count: 0, items: [] })
+
+  const fetchCommentWeek = async () => {
+    try {
+      const res = await authFetch('/api/activity/comment-week?scope=global')
+      if (res.ok) setCommentWeek(await res.json())
+    } catch (e) { /* silent */ }
+  }
+
   useEffect(() => {
     if (!isAuthenticated) return
     fetchActivity()
-    const interval = setInterval(fetchActivity, 60000) // poll every 60s
+    fetchCommentWeek()
+    const interval = setInterval(() => { fetchActivity(); fetchCommentWeek() }, 60000)
     return () => clearInterval(interval)
   }, [isAuthenticated])
 
@@ -1086,6 +1113,13 @@ const [showFilters, setShowFilters] = useState(false)
     es.addEventListener('reload', () => {
       // Full DB replacement — refresh all data without losing session
       onDataChangeRef.current()
+    })
+
+    // Live activity: refresh the notification feed + comment-week rollup so
+    // the bell and projects-page risk widget update without the 60s poll.
+    es.addEventListener('activity', () => {
+      fetchActivity()
+      fetchCommentWeek()
     })
 
     return () => es.close()
@@ -2818,26 +2852,56 @@ const [showFilters, setShowFilters] = useState(false)
                         return Object.entries(grouped).map(([day, items]) => (
                           <div key={day} className="notif-day-group">
                             <div className="notif-day-label">{day}</div>
-                            {items.map(item => (
-                              <div key={item.id} className="notif-item">
-                                <div className="notif-item-icon" data-category={item.category}>
-                                  {item.category === 'project' && <LayoutGrid size={14} />}
-                                  {item.category === 'priority' && <GripVertical size={14} />}
-                                  {item.category === 'holiday' && <Calendar size={14} />}
-                                  {item.category === 'capacity' && <Gauge size={14} />}
-                                </div>
-                                <div className="notif-item-content">
-                                  <div className="notif-item-title">
-                                    <span className="notif-action">{item.action === 'create' ? 'Created' : item.action === 'update' ? 'Updated' : 'Deleted'}</span>
-                                    {' '}{item.target_name}
+                            {items.map(item => {
+                              // Comment activity carries a JSON `details` blob. Render a
+                              // friendly summary and link into the review; don't expose
+                              // the raw JSON.
+                              const isComment = item.category === 'review' && item.action === 'comment'
+                              let commentMeta: { review_id?: string; review_title?: string; project_name?: string; author_name?: string } | null = null
+                              if (isComment && item.details) {
+                                try { commentMeta = JSON.parse(item.details) } catch { /* ignore */ }
+                              }
+                              const verb = item.action === 'create' ? 'Created'
+                                : item.action === 'update' ? 'Updated'
+                                : item.action === 'delete' ? 'Deleted'
+                                : item.action === 'comment' ? 'Commented on'
+                                : 'Activity'
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`notif-item${isComment ? ' notif-item-clickable' : ''}`}
+                                  onClick={isComment && commentMeta?.review_id
+                                    ? () => window.open(`/review/${commentMeta!.review_id}`, '_blank')
+                                    : undefined}
+                                >
+                                  <div className="notif-item-icon" data-category={item.category}>
+                                    {item.category === 'project' && <LayoutGrid size={14} />}
+                                    {item.category === 'priority' && <GripVertical size={14} />}
+                                    {item.category === 'holiday' && <Calendar size={14} />}
+                                    {item.category === 'capacity' && <Gauge size={14} />}
+                                    {item.category === 'review' && <MessageSquare size={14} />}
                                   </div>
-                                  {item.details && <div className="notif-item-detail">{item.details}</div>}
-                                  <div className="notif-item-meta">
-                                    {item.user_email !== 'anonymous' ? item.user_email.split('@')[0] : 'System'} · {new Date(item.created_at + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                  <div className="notif-item-content">
+                                    <div className="notif-item-title">
+                                      <span className="notif-action">{verb}</span>
+                                      {' '}{item.target_name}
+                                    </div>
+                                    {isComment && commentMeta ? (
+                                      <div className="notif-item-detail">
+                                        {commentMeta.author_name || (item.user_email !== 'anonymous' ? item.user_email.split('@')[0] : 'Someone')}
+                                        {' on '}
+                                        <em>{commentMeta.review_title || 'a review'}</em>
+                                      </div>
+                                    ) : (
+                                      item.details && <div className="notif-item-detail">{item.details}</div>
+                                    )}
+                                    <div className="notif-item-meta">
+                                      {item.user_email !== 'anonymous' ? item.user_email.split('@')[0] : 'System'} · {new Date(item.created_at + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         ))
                       })()}
@@ -3092,7 +3156,23 @@ const [showFilters, setShowFilters] = useState(false)
                   const proj = summaryProjects.find(p => p.name === a.project_name)
                   return proj && (proj.status === 'active' || proj.status === 'review')
                 }) || []
-                const warnings: { icon: React.ReactNode; text: string; severity: 'danger' | 'warn' | 'info'; detail?: { title: string; items: { name: string; detail: string; projectName?: string }[] } }[] = []
+                const warnings: {
+                  icon: React.ReactNode;
+                  text: string;
+                  severity: 'danger' | 'warn' | 'info' | 'success';
+                  detail?: {
+                    title: string;
+                    items: {
+                      name: string;
+                      detail: string;
+                      projectName?: string;
+                      reviewId?: string;
+                      reviewTitle?: string;
+                      author?: string;
+                      when?: string;
+                    }[];
+                  };
+                }[] = []
 
                 const overdue = activeProjects.filter(p => {
                   if (!p.endDate) return false
@@ -3179,6 +3259,101 @@ const [showFilters, setShowFilters] = useState(false)
                     return { name: p.name, detail: `No update for ${currentWeek}`, projectName: p.name }
                   })}
                 })
+
+                // Weekly comment activity — scoped to the projects the user has
+                // filtered to (designer, business-line, status, project name).
+                // We intentionally IGNORE the archive boundary here: comments on
+                // archived projects still happened this week and the user should
+                // see them. The other warnings are all about *active* project
+                // health, so they keep using summaryProjects.
+                const matchesCurrentFilters = (p: { name: string; businessLines?: string[]; designers?: string[]; status: string }) => {
+                  if (projectFilters.project && p.name !== projectFilters.project) return false
+                  if (projectSortBy === 'businessLine' && projectFilters.businessLines.length > 0) {
+                    if (!p.businessLines || !p.businessLines.some(bl => projectFilters.businessLines.includes(bl))) return false
+                  }
+                  if (projectSortBy === 'designer' && projectFilters.designers.length > 0) {
+                    if (!p.designers || p.designers.length === 0) return false
+                    if (!p.designers.some(d => projectFilters.designers.includes(d))) return false
+                  }
+                  if (projectSortBy === 'status' && projectFilters.statuses.length > 0) {
+                    if (!projectFilters.statuses.includes(p.status)) return false
+                  }
+                  return true
+                }
+                const commentScopedProjectIds = new Set(
+                  projects.filter(matchesCurrentFilters).map(p => p.id)
+                )
+                const scopedCommentItems = commentWeek.items.filter((row: any) => {
+                  try {
+                    const d = row.details ? JSON.parse(row.details) : {}
+                    return d.project_id && commentScopedProjectIds.has(d.project_id)
+                  } catch { return false }
+                })
+                if (scopedCommentItems.length > 0) {
+                  // Group by project × review so the modal shows one row per project,
+                  // summarizing commenters with counts. Keeps long threads from
+                  // flooding the list.
+                  type Group = {
+                    projectName: string
+                    reviewId?: string
+                    reviewTitle?: string
+                    byAuthor: Map<string, number>
+                    latestTs: number // ms
+                  }
+                  const groups = new Map<string, Group>()
+                  for (const row of scopedCommentItems) {
+                    let d: any = {}
+                    try { d = row.details ? JSON.parse(row.details) : {} } catch {}
+                    const projName = d.project_name || row.target_name || 'Project'
+                    const reviewId = d.review_id || ''
+                    const reviewTitle = d.review_title || 'Review'
+                    const authorName = d.author_name || (row.user_email && row.user_email !== 'anonymous' ? row.user_email.split('@')[0] : 'Someone')
+                    const ts = row.created_at ? new Date(row.created_at.replace(' ', 'T') + 'Z').getTime() : 0
+                    const key = `${reviewId}::${projName}`
+                    let g = groups.get(key)
+                    if (!g) {
+                      g = { projectName: projName, reviewId, reviewTitle, byAuthor: new Map(), latestTs: 0 }
+                      groups.set(key, g)
+                    }
+                    g.byAuthor.set(authorName, (g.byAuthor.get(authorName) || 0) + 1)
+                    if (ts > g.latestTs) g.latestTs = ts
+                  }
+                  // Format "Paul (4), Jason (3) and Fariah (2)" — Oxford-comma-free
+                  // join for 3+, "A and B" for 2, "A" for 1. Sorted by count desc,
+                  // then name for stable ordering.
+                  const formatAuthors = (byAuthor: Map<string, number>) => {
+                    const entries = Array.from(byAuthor.entries())
+                      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+                      .map(([name, n]) => `${name} (${n})`)
+                    if (entries.length === 0) return ''
+                    if (entries.length === 1) return entries[0]
+                    if (entries.length === 2) return `${entries[0]} and ${entries[1]}`
+                    return `${entries.slice(0, -1).join(', ')} and ${entries[entries.length - 1]}`
+                  }
+                  // Sort groups by most-recent activity first
+                  const groupArr = Array.from(groups.values()).sort((a, b) => b.latestTs - a.latestTs)
+                  warnings.push({
+                    icon: <MessageSquare size={12} />,
+                    text: `${scopedCommentItems.length} comment${scopedCommentItems.length !== 1 ? 's' : ''} this week`,
+                    severity: 'success',
+                    detail: {
+                      title: 'Comments this week',
+                      items: groupArr.map(g => {
+                        const when = g.latestTs ? new Date(g.latestTs).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''
+                        const authorsLine = formatAuthors(g.byAuthor)
+                        return {
+                          name: g.projectName,
+                          detail: `${authorsLine}${when ? ' · ' + when : ''}`,
+                          projectName: g.projectName,
+                          reviewId: g.reviewId,
+                          reviewTitle: g.reviewTitle,
+                          author: authorsLine ? `Commented by ${authorsLine}` : undefined,
+                          when: when ? `Last comment ${when}` : '',
+                        }
+                      })
+                    }
+                  })
+                }
 
                 return (
                   <div className="projects-summary">
@@ -7579,20 +7754,48 @@ const [showFilters, setShowFilters] = useState(false)
             </div>
             <div className="modal-body">
               <div className="risk-detail-list">
-                {riskDetail.items.map((item, i) => (
-                  <div key={i} className="risk-detail-row">
-                    {item.projectName ? (
-                      <a className="risk-detail-name risk-detail-link" onClick={() => {
-                        setRiskDetail(null)
-                        setActiveTab('projects')
-                        setProjectFilters({ businessLines: [], designers: [], statuses: [], project: item.projectName! })
-                      }}>{item.name}</a>
-                    ) : (
-                      <span className="risk-detail-name">{item.name}</span>
-                    )}
-                    <span className="risk-detail-info">{item.detail}</span>
-                  </div>
-                ))}
+                {riskDetail.items.map((item, i) => {
+                  // Comment-activity rows carry structured fields and link to the
+                  // review site — render them in a 3-line hierarchy: project / who /
+                  // when. Everything else falls back to the original single-line shape.
+                  const isComment = !!item.reviewId
+                  if (isComment) {
+                    return (
+                      <div key={i} className="risk-detail-row risk-detail-comment">
+                        <a
+                          className="risk-detail-name risk-detail-link"
+                          href={`/review/${item.reviewId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => setRiskDetail(null)}
+                        >{item.name}</a>
+                        {item.reviewTitle && (
+                          <span className="risk-detail-sub">in {item.reviewTitle}</span>
+                        )}
+                        {item.author && (
+                          <span className="risk-detail-sub">{item.author}</span>
+                        )}
+                        {item.when && (
+                          <span className="risk-detail-meta">{item.when}</span>
+                        )}
+                      </div>
+                    )
+                  }
+                  return (
+                    <div key={i} className="risk-detail-row">
+                      {item.projectName ? (
+                        <a className="risk-detail-name risk-detail-link" onClick={() => {
+                          setRiskDetail(null)
+                          setActiveTab('projects')
+                          setProjectFilters({ businessLines: [], designers: [], statuses: [], project: item.projectName! })
+                        }}>{item.name}</a>
+                      ) : (
+                        <span className="risk-detail-name">{item.name}</span>
+                      )}
+                      <span className="risk-detail-info">{item.detail}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>

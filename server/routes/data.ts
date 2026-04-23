@@ -1,6 +1,7 @@
 import express from 'express';
 import { all, get, run } from '../db.js';
 import { searchProjects, searchTeam, searchBusinessLines, searchNotes } from '../../search.js';
+import { getUserEmail } from '../auth.js';
 
 const router = express.Router();
 
@@ -164,8 +165,83 @@ router.get('/calendar', async (req, res) => {
 router.get('/activity', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500)
-    const rows = await all(`SELECT * FROM activity_log ORDER BY created_at DESC LIMIT ?`, [limit])
+    const email = getUserEmail(req)
+    // Scope rule: comment activity is personal — only show it to the author or a
+    // declared recipient. All other categories stay global. This keeps the bell
+    // from surfacing every comment to every logged-in user.
+    const user = email
+      ? await get('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
+      : null
+    const userId = user?.id ?? null
+
+    if (!userId) {
+      const rows = await all(
+        `SELECT * FROM activity_log
+         WHERE NOT (category = 'review' AND action = 'comment')
+         ORDER BY created_at DESC LIMIT ?`,
+        [limit]
+      )
+      return res.json(rows)
+    }
+
+    const rows = await all(
+      `SELECT * FROM activity_log WHERE id IN (
+         SELECT id FROM activity_log
+         WHERE NOT (category = 'review' AND action = 'comment')
+         UNION
+         SELECT al.id FROM activity_log al
+         WHERE al.category = 'review' AND al.action = 'comment'
+           AND (LOWER(al.user_email) = LOWER(?) OR EXISTS (
+             SELECT 1 FROM activity_recipients ar WHERE ar.activity_id = al.id AND ar.user_id = ?
+           ))
+       )
+       ORDER BY created_at DESC LIMIT ?`,
+      [email, userId, limit]
+    )
     res.json(rows)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// Week-scoped comment-activity rollup for the projects-page risk widget.
+// scope=global → every review comment this week (total count + detail rows)
+// scope=mine   → unread comments this week where the current user is a recipient
+router.get('/activity/comment-week', async (req, res) => {
+  try {
+    const scope = req.query.scope === 'mine' ? 'mine' : 'global'
+    const email = getUserEmail(req)
+    // ISO-week-ish window: Monday 00:00 UTC through now, to match the app's
+    // other "this week" calculations. SQLite: weekday 0=Sunday ... 6=Saturday.
+    // Use strftime('%w','now') to find days since Sunday, subtract 1 then mod 7
+    // to get days since Monday. Clamp to UTC.
+    const weekStartSql = `datetime(datetime('now','start of day','-' || ((CAST(strftime('%w','now') AS INTEGER)+6) % 7) || ' days'))`
+
+    if (scope === 'mine') {
+      if (!email) return res.json({ count: 0, items: [] })
+      const user = await get('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
+      if (!user?.id) return res.json({ count: 0, items: [] })
+      const rows = await all(
+        `SELECT al.id, al.target_name, al.user_email, al.details, al.created_at
+         FROM activity_log al
+         JOIN activity_recipients ar ON ar.activity_id = al.id AND ar.user_id = ?
+         LEFT JOIN activity_reads arr ON arr.activity_id = al.id AND arr.user_id = ?
+         WHERE al.category = 'review' AND al.action = 'comment'
+           AND al.created_at >= ${weekStartSql}
+           AND arr.activity_id IS NULL
+         ORDER BY al.created_at DESC`,
+        [user.id, user.id]
+      )
+      return res.json({ count: (rows as any[]).length, items: rows })
+    }
+
+    // Global: every comment posted this week, no read-state filter
+    const rows = await all(
+      `SELECT al.id, al.target_name, al.user_email, al.details, al.created_at
+       FROM activity_log al
+       WHERE al.category = 'review' AND al.action = 'comment'
+         AND al.created_at >= ${weekStartSql}
+       ORDER BY al.created_at DESC`
+    )
+    res.json({ count: (rows as any[]).length, items: rows })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 

@@ -2,8 +2,8 @@ import express from 'express';
 import { run, get } from './db.js';
 import { broadcast } from './sse.js';
 
-export const SITE_VERSION = '2026.04.23.1700'
-export const SITE_TIME = '1700'
+export const SITE_VERSION = '2026.04.23.1900'
+export const SITE_TIME = '1900'
 
 const VERSION_KEY = 'dcc_versions'
 
@@ -52,20 +52,22 @@ export const initVersions = async () => {
 }
 
 export const logActivity = async (
-  category: 'project' | 'priority' | 'holiday' | 'capacity',
-  action: 'create' | 'update' | 'delete',
+  category: 'project' | 'priority' | 'holiday' | 'capacity' | 'review',
+  action: 'create' | 'update' | 'delete' | 'comment',
   targetName: string,
   userEmail: string | null,
   details?: string
-) => {
+): Promise<number | null> => {
   try {
-    await run(
+    const r = await run(
       `INSERT INTO activity_log (category, action, target_name, user_email, details, created_at)
        VALUES (?, ?, ?, ?, ?, datetime('now'))`,
       [category, action, targetName, userEmail || 'anonymous', details || null]
-    )
+    ) as any
+    return r?.lastID ?? null
   } catch (e: any) {
     console.error('Activity log error:', e.message)
+    return null
   }
 }
 

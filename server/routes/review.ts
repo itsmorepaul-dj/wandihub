@@ -4,6 +4,34 @@ import path from 'path';
 import { run, get, all, IMAGES_DIR } from '../db.js';
 import { getUserEmail, sessions, getSessionIdFromRequest, setSessionCookie } from '../auth.js';
 import { broadcast } from '../sse.js';
+import { logActivity } from '../version.js';
+
+// Resolve a user_id from a (possibly null) email. Returns null if no matching user.
+async function userIdForEmail(email: string | null | undefined): Promise<number | null> {
+  if (!email) return null
+  const row = await get('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
+  return row?.id ?? null
+}
+
+// Resolve the recipient user_ids for a project: every designer assigned to it
+// (projects.designers is a JSON array of display names), joined through team.email
+// then users.id. Silent no-op for unmatched names.
+async function recipientIdsForProject(projectId: string, excludeUserId: number | null): Promise<number[]> {
+  const p = await get('SELECT designers FROM projects WHERE id = ?', [projectId]) as any
+  if (!p?.designers) return []
+  let names: string[] = []
+  try { names = JSON.parse(p.designers) || [] } catch { names = [] }
+  if (names.length === 0) return []
+  const ids = new Set<number>()
+  for (const n of names) {
+    const t = await get('SELECT email FROM team WHERE name = ?', [n]) as any
+    const email = t?.email
+    if (!email) continue
+    const u = await get('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
+    if (u?.id && u.id !== excludeUserId) ids.add(u.id)
+  }
+  return Array.from(ids)
+}
 
 const router = express.Router();
 
@@ -308,6 +336,22 @@ router.get('/api/review-items/:id/comments', async (req, res) => {
       'SELECT id, review_item_id, author_email, author_name, body, created_at, updated_at FROM review_item_comments WHERE review_item_id = ? ORDER BY created_at ASC',
       [req.params.id]
     )
+    // Mark-read: viewing the thread counts as "seen" for any prior comment activity
+    // on this review item (activity rows where details json encodes review_item_id).
+    const email = getUserEmail(req)
+    if (email) {
+      const userId = await userIdForEmail(email)
+      if (userId) {
+        await run(
+          `INSERT OR IGNORE INTO activity_reads (user_id, activity_id)
+           SELECT ?, al.id
+           FROM activity_log al
+           WHERE al.category = 'review' AND al.action = 'comment'
+             AND al.details LIKE ?`,
+          [userId, `%"review_item_id":"${req.params.id}"%`]
+        )
+      }
+    }
     res.json(rows)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -320,7 +364,14 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
     if (!body) return res.status(400).json({ error: 'Comment cannot be empty' })
     if (body.length > 5000) return res.status(400).json({ error: 'Comment too long (5000 char max)' })
 
-    const item = await get('SELECT id, review_id FROM review_items WHERE id = ?', [req.params.id]) as any
+    const item = await get(
+      `SELECT ri.id, ri.review_id, ri.project_id, p.name AS project_name, r.title AS review_title, r.review_date
+       FROM review_items ri
+       LEFT JOIN projects p ON p.id = ri.project_id
+       LEFT JOIN reviews r ON r.id = ri.review_id
+       WHERE ri.id = ?`,
+      [req.params.id]
+    ) as any
     if (!item) return res.status(404).json({ error: 'Review item not found' })
 
     const authorName = await resolveDisplayName(email)
@@ -332,6 +383,52 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
     )
     const saved = await get('SELECT * FROM review_item_comments WHERE id = ?', [id]) as any
     broadcast('review-comment', { type: 'created', review_id: item.review_id, comment: saved })
+
+    // Log activity + fan out to every assigned designer except the commenter.
+    // Details holds a JSON blob we re-use on the client to build the modal row.
+    const commenterUserId = await userIdForEmail(email)
+    const detailsJson = JSON.stringify({
+      review_id: item.review_id,
+      review_item_id: item.id,
+      review_title: item.review_title || 'Review',
+      review_date: item.review_date || null,
+      project_id: item.project_id,
+      project_name: item.project_name || 'Unknown project',
+      author_name: authorName,
+      comment_id: id,
+    })
+    const activityId = await logActivity('review', 'comment', item.project_name || 'Unknown project', email, detailsJson)
+    if (activityId) {
+      const recipients = item.project_id
+        ? await recipientIdsForProject(item.project_id, commenterUserId)
+        : []
+      for (const uid of recipients) {
+        await run('INSERT OR IGNORE INTO activity_recipients (activity_id, user_id) VALUES (?, ?)', [activityId, uid])
+      }
+      // The commenter has already engaged with the item — auto-mark all prior
+      // comment activities on it as read for them.
+      if (commenterUserId) {
+        await run(
+          `INSERT OR IGNORE INTO activity_reads (user_id, activity_id)
+           SELECT ?, al.id FROM activity_log al
+           WHERE al.category = 'review' AND al.action = 'comment'
+             AND al.details LIKE ?`,
+          [commenterUserId, `%"review_item_id":"${item.id}"%`]
+        )
+      }
+      // Live push: let every open client know an activity arrived so they can
+      // refresh their bell/risk counts without waiting for the 60s poll.
+      broadcast('activity', {
+        id: activityId,
+        category: 'review',
+        action: 'comment',
+        target_name: item.project_name || 'Unknown project',
+        user_email: email,
+        details: detailsJson,
+        recipients,
+      })
+    }
+
     res.json(saved)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -869,7 +966,10 @@ router.get('/review/:id', async (req, res) => {
       const renderCommentHtml = (c: any) => {
         const isAuthor = c.author_email && c.author_email.toLowerCase() === currentUserEmail
         const canEdit = isAuthed && (isAuthor || userIsAdmin)
-        const ts = c.created_at ? new Date(c.created_at + 'Z').toISOString() : ''
+        // SQLite datetime('now') returns UTC in 'YYYY-MM-DD HH:MM:SS' form (no 'T', no 'Z').
+        // Emit the raw value in data-ts — JS in the browser formats it in the viewer's
+        // local timezone on load, so Node's server-side locale doesn't leak through.
+        const rawTs = c.created_at || ''
         const edited = c.updated_at && c.created_at && c.updated_at !== c.created_at
         const actions = canEdit
           ? `<div class="comment-actions">
@@ -877,10 +977,10 @@ router.get('/review/:id', async (req, res) => {
                <button class="comment-delete-btn" data-comment-id="${escHtml(c.id)}" title="Delete">Delete</button>
              </div>`
           : ''
-        return `<div class="comment" data-comment-id="${escHtml(c.id)}" data-author-email="${escHtml(c.author_email || '')}">
+        return `<div class="comment" data-comment-id="${escHtml(c.id)}" data-author-email="${escHtml(c.author_email || '')}"${edited ? ' data-edited="1"' : ''}>
           <div class="comment-head">
             <span class="comment-author">${escHtml(c.author_name || (c.author_email || '').split('@')[0])}</span>
-            <span class="comment-time" data-ts="${ts}">${ts ? new Date(c.created_at + 'Z').toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}${edited ? ' · edited' : ''}</span>
+            <span class="comment-time" data-ts="${escHtml(rawTs)}"></span>
             ${actions}
           </div>
           <div class="comment-body">${renderNotesHtml(c.body)}</div>
@@ -1147,11 +1247,19 @@ router.get('/review/:id', async (req, res) => {
           '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
         return '<p>' + safe.replace(/\\n{2,}/g, '</p><p>').replace(/\\n/g, '<br>') + '</p>';
       }
-      function formatCommentTime(iso) {
+      // SQLite datetime('now') stores UTC as 'YYYY-MM-DD HH:MM:SS' (no 'T', no 'Z').
+      // Reshape to ISO 8601 before parsing so Date sees it as UTC, then format in
+      // the viewer's local timezone.
+      function formatCommentTime(raw) {
+        if (!raw) return '';
         try {
-          var d = new Date(iso.indexOf('T') >= 0 ? iso : iso.replace(' ', 'T') + 'Z');
-          return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-        } catch (e) { return iso; }
+          var iso = raw;
+          if (iso.indexOf('T') < 0) iso = iso.replace(' ', 'T');
+          if (!/Z$|[+\\-]\\d{2}:?\\d{2}$/.test(iso)) iso = iso + 'Z';
+          var d = new Date(iso);
+          if (isNaN(d.getTime())) return raw;
+          return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        } catch (e) { return raw; }
       }
       function buildCommentEl(c) {
         var isOwn = c.author_email && c.author_email.toLowerCase() === CURRENT_USER_EMAIL;
@@ -1161,25 +1269,35 @@ router.get('/review/:id', async (req, res) => {
         wrapper.setAttribute('data-comment-id', c.id);
         wrapper.setAttribute('data-author-email', c.author_email || '');
         var edited = c.updated_at && c.created_at && c.updated_at !== c.created_at;
+        if (edited) wrapper.setAttribute('data-edited', '1');
         var actions = canEdit
           ? '<div class="comment-actions">' +
               '<button class="comment-edit-btn" data-comment-id="' + escHtmlJs(c.id) + '">Edit</button>' +
               '<button class="comment-delete-btn" data-comment-id="' + escHtmlJs(c.id) + '">Delete</button>' +
             '</div>'
           : '';
+        var timeLabel = formatCommentTime(c.created_at || '') + (edited ? ' · edited' : '');
         wrapper.innerHTML =
           '<div class="comment-head">' +
             '<span class="comment-author">' + escHtmlJs(c.author_name || (c.author_email || '').split('@')[0]) + '</span>' +
-            '<span class="comment-time">' + escHtmlJs(formatCommentTime(c.created_at || '')) + (edited ? ' · edited' : '') + '</span>' +
+            '<span class="comment-time" data-ts="' + escHtmlJs(c.created_at || '') + '">' + escHtmlJs(timeLabel) + '</span>' +
             actions +
           '</div>' +
           '<div class="comment-body">' + linkifyComment(c.body || '') + '</div>';
         return wrapper;
       }
-      // Mark existing server-rendered "own" comments for styling
+      // Hydrate server-rendered comments: format times in the viewer's local timezone,
+      // tag own comments for styling.
       document.querySelectorAll('.comment').forEach(function(el) {
         var e = (el.getAttribute('data-author-email') || '').toLowerCase();
         if (e && e === CURRENT_USER_EMAIL) el.classList.add('own');
+        var timeEl = el.querySelector('.comment-time');
+        if (timeEl) {
+          var raw = timeEl.getAttribute('data-ts') || '';
+          var label = formatCommentTime(raw);
+          if (el.getAttribute('data-edited') === '1') label += ' · edited';
+          timeEl.textContent = label;
+        }
       });
 
       // SSE: listen for new/updated/deleted comments
