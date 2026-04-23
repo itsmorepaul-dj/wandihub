@@ -4,9 +4,12 @@ import { useFloating, offset, flip, shift, arrow } from '@floating-ui/react';
 interface TooltipProps {
   content: string;
   children: React.ReactNode;
+  onClick?: (e: React.MouseEvent) => void;
+  className?: string;
+  title?: string;
 }
 
-export function Tooltip({ content, children }: TooltipProps) {
+export function Tooltip({ content, children, onClick, className, title }: TooltipProps) {
   const [isMounted, setIsMounted] = useState(false);
   const arrowRef = useRef<HTMLDivElement>(null);
   const showTimeoutRef = useRef<number | undefined>(undefined);
@@ -50,8 +53,10 @@ export function Tooltip({ content, children }: TooltipProps) {
         ref={refs.setReference}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className="tooltip-trigger action-btn"
-        style={{ display: 'inline-flex', width: 'auto', padding: '0 8px' }}
+        onClick={onClick}
+        title={title}
+        className={className || 'tooltip-trigger action-btn'}
+        style={{ display: 'inline-flex', width: 'auto', padding: '0 8px', cursor: onClick ? 'pointer' : undefined }}
       >
         {children}
       </div>

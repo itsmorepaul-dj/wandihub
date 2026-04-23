@@ -354,6 +354,10 @@ export const initSchema = async () => {
   )`).catch(e => console.error('reviews init error:', e.message))
   // Migration: add description column if missing
   await run(`ALTER TABLE reviews ADD COLUMN description TEXT DEFAULT ''`).catch(() => {})
+  // Migration: explicit review_date (ISO YYYY-MM-DD) — independent of created_at
+  await run(`ALTER TABLE reviews ADD COLUMN review_date TEXT`).catch(() => {})
+  // Backfill: if review_date is null, derive from created_at (date portion)
+  await run(`UPDATE reviews SET review_date = substr(created_at, 1, 10) WHERE review_date IS NULL OR review_date = ''`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS review_items (
     id TEXT PRIMARY KEY, review_id TEXT NOT NULL, project_id TEXT NOT NULL,
@@ -366,6 +370,45 @@ export const initSchema = async () => {
   await run(`ALTER TABLE review_items ADD COLUMN duration_minutes INTEGER DEFAULT NULL`).catch(() => {})
   await run(`ALTER TABLE review_items ADD COLUMN excluded_from_time INTEGER DEFAULT 0`).catch(() => {})
   await run(`ALTER TABLE reviews ADD COLUMN total_minutes INTEGER DEFAULT 45`).catch(() => {})
+  // Migration: per-item optional review_date override (null = inherit from parent review)
+  await run(`ALTER TABLE review_items ADD COLUMN review_date TEXT`).catch(() => {})
+
+  // Review-scoped images: each review_item has its own gallery, independent of the
+  // project's gallery. Files are stored in IMAGES_DIR; each row owns its own filename
+  // so duplicate/delete operate independently.
+  await run(`CREATE TABLE IF NOT EXISTS review_item_images (
+    id TEXT PRIMARY KEY, review_item_id TEXT NOT NULL,
+    filename TEXT NOT NULL, original_name TEXT DEFAULT '',
+    mime_type TEXT DEFAULT 'image/png', size_bytes INTEGER DEFAULT 0,
+    caption TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`).catch(e => console.error('review_item_images init error:', e.message))
+
+  // One-time migration: prior versions stored review-scoped uploads in project_images
+  // with project_id = review_item.id. Move those rows into review_item_images.
+  const legacyReviewImages = await all(
+    `SELECT pi.* FROM project_images pi
+     WHERE EXISTS (SELECT 1 FROM review_items ri WHERE ri.id = pi.project_id)`
+  ).catch(() => [] as any[])
+  for (const img of legacyReviewImages) {
+    try {
+      const existing = await get('SELECT id FROM review_item_images WHERE id = ?', [img.id])
+      if (existing) continue
+      await run(
+        `INSERT INTO review_item_images (id, review_item_id, filename, original_name, mime_type, size_bytes, caption, sort_order, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [img.id, img.project_id, img.filename, img.original_name || '', img.mime_type || 'image/png',
+         img.size_bytes || 0, img.caption || '', img.sort_order || 0, img.created_at || new Date().toISOString()]
+      )
+      await run('DELETE FROM project_images WHERE id = ?', [img.id])
+    } catch (e: any) {
+      console.error('review_item_images migration error for', img.id, e.message)
+    }
+  }
+  if (legacyReviewImages.length > 0) {
+    console.log(`Migrated ${legacyReviewImages.length} review-scoped images to review_item_images`)
+  }
 
   // Seed default business lines if empty
   const existing = await get('SELECT COUNT(*) as count FROM business_lines')

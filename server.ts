@@ -17,6 +17,7 @@ import dataRouter from './server/routes/data.js';
 import adminRouter from './server/routes/admin.js';
 import weeklyRouter, { startWeeklyCron } from './server/routes/weekly.js';
 import imagesRouter from './server/routes/images.js';
+import reviewItemImagesRouter from './server/routes/review-item-images.js';
 import reviewRouter, { startReviewCron } from './server/routes/review.js';
 
 const app = express();
@@ -32,7 +33,7 @@ app.use(express.json({ limit: '10mb' }));
 const versionGuard = createVersionGuard(() => SITE_VERSION)
 app.use((req, res, next) => {
   if (['POST', 'PUT', 'DELETE'].includes(req.method) && req.path.startsWith('/api/')) {
-    const skipPaths = ['/api/auth/', '/api/upload-db', '/api/seed', '/api/maintenance', '/api/review-items/', '/api/images']
+    const skipPaths = ['/api/auth/', '/api/upload-db', '/api/seed', '/api/maintenance', '/api/review-items/', '/api/images', '/api/review-item-images']
     if (skipPaths.some(p => req.path.startsWith(p))) return next()
     return versionGuard(req, res, next)
   }
@@ -73,6 +74,7 @@ app.use('/api', dataRouter);
 app.use('/api', adminRouter);
 app.use('/api', weeklyRouter);
 app.use('/api', imagesRouter);
+app.use('/api', reviewItemImagesRouter);
 app.use('/api/versions', versionRouter);
 app.use(reviewRouter);
 

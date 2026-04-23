@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Review dates + copy to another review — each review now has an explicit review date (pick it when creating the review or edit it in the header), independent of when the review was created. Each project in a review has its own gallery of images, exclusive to that review — images added for Week 14 don\'t bleed into Week 15. Hover the copy icon on any review item for a tooltip; clicking it clones the item into another review, deep-copying notes, description, and image files so the two entries stay fully independent. All destructive actions (removing a project from a review, deleting project/business line images, clearing a weekly report section) now require confirmation first.',
   'Review time planner — set a total meeting length for each review; each project gets an auto-calculated time slot shown before its status. Drag the slider to give a project more or less time (others rebalance automatically), or mark a project "Exempt" — exempt projects drop to a "For awareness…" section at the bottom of the public page. Document links on the public page are now labeled (Design deck, PRD, Jira).',
   'Review site is more secure — shareable review links no longer carry login info in the URL, so copying and sharing a link won\'t expose your session.',
   'Gantt review diamonds — Project gantts now include a "Design Review" track row with a gold diamond for each review that includes the project, positioned by the review\'s week and linking to the public review page.',
@@ -222,11 +223,12 @@ function computeItemMinutes(
   return out
 }
 
-function ReviewItemRow({ item, index, project, onRemove, authFetch, computedMins, totalMinutes, onTimeChange, onExemptChange, onResetAuto }: {
+function ReviewItemRow({ item, index, project, onRemove, onCopyToReview, authFetch, computedMins, totalMinutes, onTimeChange, onExemptChange, onResetAuto }: {
   item: any
   index: number
   project: any
   onRemove: () => void
+  onCopyToReview: () => void
   authFetch: (url: string, opts?: RequestInit) => Promise<Response>
   computedMins: number
   totalMinutes: number
@@ -326,9 +328,18 @@ function ReviewItemRow({ item, index, project, onRemove, authFetch, computedMins
         </div>
       </td>
       <td>
-        <button className="action-btn delete" onClick={onRemove} title="Remove from review">
-          <Trash2 size={14} />
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+          <Tooltip
+            content="Duplicate into another review — preserves notes, description, and images as independent copies"
+            onClick={onCopyToReview}
+            className="action-btn"
+          >
+            <Copy size={14} />
+          </Tooltip>
+          <button className="action-btn delete" onClick={onRemove} title="Remove from review">
+            <Trash2 size={14} />
+          </button>
+        </div>
       </td>
     </tr>
   )
@@ -421,13 +432,14 @@ function App() {
   const [lightbox, setLightbox] = useState<{ images: ProjectImage[]; index: number } | null>(null)
 
   // Reviews state
-  const [reviews, setReviews] = useState<{ id: string; title: string; week: string | null; created_by: string | null; created_at: string; updated_at: string; itemCount: number }[]>([])
+  const [reviews, setReviews] = useState<{ id: string; title: string; week: string | null; review_date: string | null; created_by: string | null; created_at: string; updated_at: string; itemCount: number }[]>([])
   const [reviewMarkers, setReviewMarkers] = useState<{ project_id: string; review_id: string; title: string; week: string | null; created_at: string }[]>([])
   const [editingReview, setEditingReview] = useState<any>(null)
   const [showCreateReviewModal, setShowCreateReviewModal] = useState(false)
-  const [createReviewForm, setCreateReviewForm] = useState({ title: '', selectedProjectIds: [] as string[] })
+  const [createReviewForm, setCreateReviewForm] = useState({ title: '', selectedProjectIds: [] as string[], review_date: new Date().toISOString().slice(0, 10) })
   const [reviewCopied, setReviewCopied] = useState(false)
   const [showDeleteReviewModal, setShowDeleteReviewModal] = useState(false)
+  const [copyItemToReview, setCopyItemToReview] = useState<{ itemId: string; projectName: string } | null>(null)
 
   // Timeline editing state
   const [showTimelineModal, setShowTimelineModal] = useState(false)
@@ -5506,7 +5518,13 @@ const [showFilters, setShowFilters] = useState(false)
                                   await saveWeeklyGeneral({ id: existing?.id, designer_id: String(currentUser?.id || 'admin'), week: currentWeek, category: section.category, content })
                                 }}
                                 onDelete={async () => {
-                                  for (const old of allForCategory) await deleteWeeklyGeneral(old.id)
+                                  openConfirmModal(
+                                    `Delete ${section.label.toLowerCase()}?`,
+                                    `This will permanently remove your "${section.label}" entries for this week. This can't be undone.`,
+                                    async () => {
+                                      for (const old of allForCategory) await deleteWeeklyGeneral(old.id)
+                                    },
+                                  )
                                 }}
                               />
                             </div>
@@ -5864,7 +5882,7 @@ const [showFilters, setShowFilters] = useState(false)
                   const ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
                   const wk = Math.ceil(((t.getTime() - ys.getTime()) / 86400000 + 1) / 7)
                   const reviewIds = currentProjects.filter(p => p.status === 'review').map(p => p.id)
-                  setCreateReviewForm({ title: `W&I Open Critique — Week ${wk}`, selectedProjectIds: reviewIds })
+                  setCreateReviewForm({ title: `W&I Open Critique — Week ${wk}`, selectedProjectIds: reviewIds, review_date: new Date().toISOString().slice(0, 10) })
                   setShowCreateReviewModal(true)
                 })()
               }}>+ New Review</button>
@@ -5882,19 +5900,22 @@ const [showFilters, setShowFilters] = useState(false)
                         const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
                         return Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
                       }
+                      const dateFor = (r: any) => r.review_date
+                        ? new Date(r.review_date + 'T00:00:00Z')
+                        : new Date(r.created_at + 'Z')
                       const groups: Record<string, typeof reviews> = {}
                       for (const r of reviews) {
-                        const d = new Date(r.created_at + 'Z')
-                        const key = d.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+                        const d = dateFor(r)
+                        const key = d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', timeZone: 'UTC' })
                         if (!groups[key]) groups[key] = []
                         groups[key].push(r)
                       }
                       return Object.entries(groups).map(([label, items]) => (
                         <optgroup key={label} label={label}>
                           {items.map(r => {
-                            const d = new Date(r.created_at + 'Z')
+                            const d = dateFor(r)
                             const wk = getWeek(d)
-                            const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
                             return <option key={r.id} value={r.id}>Week {wk} — {day}</option>
                           })}
                         </optgroup>
@@ -5929,7 +5950,7 @@ const [showFilters, setShowFilters] = useState(false)
                       const ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
                       const wk = Math.ceil(((t.getTime() - ys.getTime()) / 86400000 + 1) / 7)
                       const reviewIds = currentProjects.filter(p => p.status === 'review').map(p => p.id)
-                      setCreateReviewForm({ title: `W&I Open Critique — Week ${wk}`, selectedProjectIds: reviewIds })
+                      setCreateReviewForm({ title: `W&I Open Critique — Week ${wk}`, selectedProjectIds: reviewIds, review_date: new Date().toISOString().slice(0, 10) })
                       setShowCreateReviewModal(true)
                     }}>+ New Review</button>
                   </div>
@@ -5955,8 +5976,27 @@ const [showFilters, setShowFilters] = useState(false)
                 {/* Row 3: Meta + actions inline */}
                 <div className="review-edit-meta-row">
                   <span className="review-edit-meta">
-                    {editingReview.items?.length || 0} project{(editingReview.items?.length || 0) !== 1 ? 's' : ''} · {new Date(editingReview.created_at + 'Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                    {editingReview.items?.length || 0} project{(editingReview.items?.length || 0) !== 1 ? 's' : ''}
                   </span>
+                  <label className="review-total-time-control" title="Date this review is scheduled for">
+                    <Calendar size={11} />
+                    <input
+                      type="date"
+                      className="review-total-time-input"
+                      style={{ width: 140 }}
+                      value={editingReview.review_date || (editingReview.created_at ? (editingReview.created_at as string).slice(0, 10) : '')}
+                      onChange={e => setEditingReview({ ...editingReview, review_date: e.target.value })}
+                      onBlur={async () => {
+                        await authFetch(`/api/reviews/${editingReview.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ review_date: editingReview.review_date || null })
+                        })
+                        loadReviews()
+                      }}
+                    />
+                    review date
+                  </label>
                   <label className="review-total-time-control" title="Total time scheduled for the review">
                     <Clock size={11} />
                     <input
@@ -6108,10 +6148,16 @@ const [showFilters, setShowFilters] = useState(false)
                                   patchItem(item.id, { duration_minutes: null })
                                   persistTime(item.id, { duration_minutes: null })
                                 }}
-                                onRemove={async () => {
-                                  await authFetch(`/api/review-items/${item.id}`, { method: 'DELETE' })
-                                  loadReviewDetail(editingReview.id)
-                                }}
+                                onRemove={() => openConfirmModal(
+                                  'Remove project from review?',
+                                  `This will remove "${proj?.name || 'this project'}" from the review, along with its notes and any images attached to it in this review. This can't be undone.`,
+                                  async () => {
+                                    await authFetch(`/api/review-items/${item.id}`, { method: 'DELETE' })
+                                    loadReviewDetail(editingReview.id)
+                                  },
+                                  { confirmLabel: 'Remove' }
+                                )}
+                                onCopyToReview={() => setCopyItemToReview({ itemId: item.id, projectName: proj?.name || 'this project' })}
                               />
                             )
                           })
@@ -6145,6 +6191,30 @@ const [showFilters, setShowFilters] = useState(false)
                 <input type="text" value={createReviewForm.title} onChange={e => setCreateReviewForm({ ...createReviewForm, title: e.target.value })}
                   placeholder=" " autoFocus />
                 <label>Title</label>
+              </div>
+              <div className="float-field has-value" style={{ marginBottom: '1rem' }}>
+                <input
+                  type="date"
+                  value={createReviewForm.review_date}
+                  onChange={e => {
+                    const newDate = e.target.value
+                    setCreateReviewForm(f => {
+                      let newTitle = f.title
+                      const wkMatch = f.title.match(/Week \d+/)
+                      if (wkMatch && newDate) {
+                        const d = new Date(newDate + 'T00:00:00Z')
+                        const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+                        t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7))
+                        const ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+                        const wk = Math.ceil(((t.getTime() - ys.getTime()) / 86400000 + 1) / 7)
+                        newTitle = f.title.replace(/Week \d+/, `Week ${wk}`)
+                      }
+                      return { ...f, review_date: newDate, title: newTitle }
+                    })
+                  }}
+                  placeholder=" "
+                />
+                <label>Review date</label>
               </div>
               <label className="review-picker-label">Projects</label>
               <div className="review-project-picker">
@@ -6190,6 +6260,7 @@ const [showFilters, setShowFilters] = useState(false)
                       body: JSON.stringify({
                         title: createReviewForm.title.trim(),
                         project_ids: createReviewForm.selectedProjectIds,
+                        review_date: createReviewForm.review_date || null,
                       })
                     })
                     const review = await res.json()
@@ -6202,6 +6273,65 @@ const [showFilters, setShowFilters] = useState(false)
               >
                 Create Review
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {copyItemToReview && editingReview && (
+        <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === overlayMouseDownTarget.current && (e.target as HTMLElement).classList.contains('modal-overlay')) setCopyItemToReview(null) }}>
+          <div className="modal" style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <h2>Copy to another review</h2>
+              <button className="modal-close-btn" onClick={() => setCopyItemToReview(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', margin: '0 0 0.75rem' }}>
+                Copies <strong>{copyItemToReview.projectName}</strong> — including notes, description, and images — into the selected review.
+              </p>
+              <label className="review-picker-label">Target review</label>
+              <div className="review-project-picker">
+                {reviews.filter(r => r.id !== editingReview.id).map(r => {
+                  const d = r.review_date ? new Date(r.review_date + 'T00:00:00Z') : new Date(r.created_at + 'Z')
+                  const dayLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+                  return (
+                    <button
+                      key={r.id}
+                      className="review-project-option"
+                      style={{ textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer', padding: '0.5rem 0.75rem' }}
+                      onClick={async () => {
+                        try {
+                          const res = await authFetch(`/api/review-items/${copyItemToReview.itemId}/duplicate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ target_review_id: r.id })
+                          })
+                          if (!res.ok) {
+                            const err = await res.json().catch(() => ({ error: res.statusText }))
+                            alert(`Copy failed: ${err.error || res.statusText}`)
+                            return
+                          }
+                          setCopyItemToReview(null)
+                          loadReviews()
+                          loadReviewDetail(r.id)
+                        } catch (err) {
+                          console.error('Copy to review error:', err)
+                          alert('Copy failed — see console')
+                        }
+                      }}
+                    >
+                      <div style={{ fontWeight: 500 }}>{r.title}</div>
+                      <div className="review-project-option-meta">{dayLabel} · {r.itemCount} project{r.itemCount !== 1 ? 's' : ''}</div>
+                    </button>
+                  )
+                })}
+                {reviews.filter(r => r.id !== editingReview.id).length === 0 && (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>No other reviews to copy into. Create another review first.</p>
+                )}
+              </div>
+            </div>
+            <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)' }}>
+              <button className="secondary-btn" onClick={() => setCopyItemToReview(null)}>Cancel</button>
             </div>
           </div>
         </div>
@@ -7146,7 +7276,11 @@ const [showFilters, setShowFilters] = useState(false)
                                 index={idx}
                                 images={projectImages}
                                 onOpenLightbox={(imgs, i) => setLightbox({ images: imgs, index: i })}
-                                onDelete={deleteProjectImage}
+                                onDelete={(imageId) => openConfirmModal(
+                                  'Delete image?',
+                                  'This image will be permanently removed from the project. This can\'t be undone.',
+                                  () => deleteProjectImage(imageId),
+                                )}
                                 onCaptionBlur={updateImageCaption}
                               />
                             ))}
@@ -7909,7 +8043,11 @@ const [showFilters, setShowFilters] = useState(false)
                             <div className="project-image-thumb">
                               <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
                                 onClick={() => setLightbox({ images: blImages, index: idx })} />
-                              <button className="project-image-delete" onClick={() => deleteBlImage(img.id)} title="Delete image">
+                              <button className="project-image-delete" onClick={() => openConfirmModal(
+                                'Delete image?',
+                                'This image will be permanently removed from the business line. This can\'t be undone.',
+                                () => deleteBlImage(img.id),
+                              )} title="Delete image">
                                 <Trash2 size={12} />
                               </button>
                             </div>

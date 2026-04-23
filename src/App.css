@@ -5928,8 +5928,13 @@ a.report-view-btn {
   border-radius: 0 0 6px 6px;
   min-height: calc(0.75rem * 1.45 * 3 + 0.6rem);
 }
+.review-item-rte .rte-editor:hover {
+  background: var(--color-bg-tertiary);
+}
 .review-item-rte .rte-editor:focus {
-  border-color: var(--color-accent, #3b82f6);
+  border-color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--shadow-glow);
 }
 
 /* Context: review description in modal */
@@ -5937,15 +5942,14 @@ a.report-view-btn {
   font-size: 0.8125rem;
   line-height: 1.55;
   color: var(--color-text-secondary);
-  background: transparent;
-  border: 1px solid transparent;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
   border-top: none;
   border-radius: 0 0 6px 6px;
   padding: 0.35rem 0.5rem;
   min-height: 2.5rem;
 }
 .review-description-rte .rte-editor:hover {
-  border-color: var(--color-border);
   background: var(--color-bg-tertiary);
 }
 .review-description-rte .rte-editor:focus {
@@ -8733,6 +8737,130 @@ select:focus {
   color: var(--color-text-dim);
   margin: 0 0.2rem;
   font-size: 0.6rem;
+}
+
+/* Mobile breakpoint: stack review edit controls + flatten items table into cards */
+@media (max-width: 720px) {
+  /* Header: nav + actions wrap onto their own lines, title goes full-width */
+  .review-nav {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .review-title-input {
+    flex: 1 0 100%;
+    font-size: 1.1rem;
+  }
+  .review-nav-actions {
+    flex: 1 0 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .review-nav-actions .primary-btn,
+  .review-nav-actions .secondary-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* Meta row: chips + date + minutes stack vertically on their own rows */
+  .review-edit-meta-row {
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
+  }
+  .review-edit-meta {
+    flex: 1 0 100%;
+    white-space: normal;
+  }
+  .review-total-time-control {
+    flex: 0 0 auto;
+  }
+
+  .review-project-select {
+    max-width: 100%;
+  }
+
+  /* Flatten the table: each <tr> becomes a card, each <td> a labeled row */
+  .review-items-table,
+  .review-items-table thead,
+  .review-items-table tbody,
+  .review-items-table tr,
+  .review-items-table td {
+    display: block;
+    width: 100%;
+  }
+  .review-items-table {
+    table-layout: auto;
+  }
+  .review-items-table thead {
+    /* Hide the header row — each td gets its own inline label below */
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .review-items-table tr {
+    position: relative;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem 0.5rem 2.5rem;
+    margin-bottom: 0.75rem;
+    background: var(--color-bg);
+  }
+  .review-items-table tr:hover td {
+    background: transparent;
+  }
+  .review-items-table td {
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+  .review-items-table td:last-child {
+    border-bottom: none;
+  }
+  /* Drag handle: pin to the card's left gutter */
+  .review-items-table td:nth-child(1) {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    width: auto;
+    padding: 0;
+    border: none;
+  }
+  /* Rank number: inline with project name area, small */
+  .review-items-table td.review-rank {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+    padding: 0;
+    border: none;
+    font-size: 0.75rem;
+  }
+  /* Add labels in front of links/time cells so the card reads clearly */
+  .review-items-table td.review-item-links::before {
+    content: "Links";
+    display: block;
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-dim);
+    margin-bottom: 0.2rem;
+  }
+  .review-items-table td.review-item-time::before {
+    content: "Time";
+    display: block;
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-dim);
+    margin-bottom: 0.2rem;
+  }
+  /* Actions column (last): lay buttons out horizontally instead of stacked */
+  .review-items-table td:last-child > div {
+    flex-direction: row !important;
+    gap: 0.5rem !important;
+  }
 }
 
 /* Create review modal — project picker */

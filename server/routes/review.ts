@@ -1,5 +1,7 @@
 import express from 'express';
-import { run, get, all } from '../db.js';
+import fs from 'fs';
+import path from 'path';
+import { run, get, all, IMAGES_DIR } from '../db.js';
 import { getUserEmail, sessions, getSessionIdFromRequest, setSessionCookie } from '../auth.js';
 
 const router = express.Router();
@@ -56,12 +58,15 @@ router.get('/api/reviews/:id', async (req, res) => {
 
 router.post('/api/reviews', async (req, res) => {
   try {
-    const { title, week, project_ids, description } = req.body
+    const { title, week, project_ids, description, review_date } = req.body
     const id = Math.random().toString(36).substring(2) + Date.now().toString(36)
     const email = getUserEmail(req)
+    const reviewDate = typeof review_date === 'string' && review_date.match(/^\d{4}-\d{2}-\d{2}$/)
+      ? review_date
+      : new Date().toISOString().slice(0, 10)
     await run(
-      'INSERT INTO reviews (id, title, week, created_by, description) VALUES (?, ?, ?, ?, ?)',
-      [id, title || 'Design Review', week || null, email, description || '']
+      'INSERT INTO reviews (id, title, week, created_by, description, review_date) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, title || 'Design Review', week || null, email, description || '', reviewDate]
     )
     if (project_ids && Array.isArray(project_ids)) {
       for (let i = 0; i < project_ids.length; i++) {
@@ -79,7 +84,7 @@ router.post('/api/reviews', async (req, res) => {
 
 router.put('/api/reviews/:id', async (req, res) => {
   try {
-    const { title, week, description, item_order, total_minutes } = req.body
+    const { title, week, description, item_order, total_minutes, review_date } = req.body
     if (title !== undefined) {
       await run('UPDATE reviews SET title = ?, updated_at = datetime(\'now\') WHERE id = ?', [title, req.params.id])
     }
@@ -93,6 +98,10 @@ router.put('/api/reviews/:id', async (req, res) => {
       const n = Math.max(0, Math.min(600, parseInt(total_minutes, 10) || 0))
       await run('UPDATE reviews SET total_minutes = ?, updated_at = datetime(\'now\') WHERE id = ?', [n, req.params.id])
     }
+    if (review_date !== undefined) {
+      const v = typeof review_date === 'string' && review_date.match(/^\d{4}-\d{2}-\d{2}$/) ? review_date : null
+      await run('UPDATE reviews SET review_date = ?, updated_at = datetime(\'now\') WHERE id = ?', [v, req.params.id])
+    }
     if (item_order && Array.isArray(item_order)) {
       for (let i = 0; i < item_order.length; i++) {
         await run('UPDATE review_items SET rank = ? WHERE id = ?', [i, item_order[i]])
@@ -104,6 +113,22 @@ router.put('/api/reviews/:id', async (req, res) => {
 
 router.delete('/api/reviews/:id', async (req, res) => {
   try {
+    const imgs = await all(
+      `SELECT rii.filename FROM review_item_images rii
+       JOIN review_items ri ON ri.id = rii.review_item_id
+       WHERE ri.review_id = ?`,
+      [req.params.id]
+    ) as any[]
+    for (const img of imgs) {
+      try {
+        const fp = path.join(IMAGES_DIR, img.filename)
+        if (fs.existsSync(fp)) fs.unlinkSync(fp)
+      } catch (e: any) { console.error('review image file delete error:', e.message) }
+    }
+    await run(
+      `DELETE FROM review_item_images WHERE review_item_id IN (SELECT id FROM review_items WHERE review_id = ?)`,
+      [req.params.id]
+    )
     await run('DELETE FROM review_items WHERE review_id = ?', [req.params.id])
     await run('DELETE FROM reviews WHERE id = ?', [req.params.id])
     res.json({ ok: true })
@@ -126,8 +151,90 @@ router.post('/api/reviews/:id/items', async (req, res) => {
 
 router.delete('/api/review-items/:id', async (req, res) => {
   try {
+    // Cascade: remove image rows + files owned by this review item
+    const images = await all('SELECT filename FROM review_item_images WHERE review_item_id = ?', [req.params.id]) as any[]
+    for (const img of images) {
+      try {
+        const fp = path.join(IMAGES_DIR, img.filename)
+        if (fs.existsSync(fp)) fs.unlinkSync(fp)
+      } catch (e: any) { console.error('review item image file delete error:', e.message) }
+    }
+    await run('DELETE FROM review_item_images WHERE review_item_id = ?', [req.params.id])
     await run('DELETE FROM review_items WHERE id = ?', [req.params.id])
     res.json({ ok: true })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.put('/api/review-items/:id/review-date', async (req, res) => {
+  try {
+    const { review_date } = req.body
+    const v = review_date === null || review_date === ''
+      ? null
+      : (typeof review_date === 'string' && review_date.match(/^\d{4}-\d{2}-\d{2}$/) ? review_date : null)
+    await run('UPDATE review_items SET review_date = ? WHERE id = ?', [v, req.params.id])
+    res.json({ ok: true, review_date: v })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// Duplicate a review item into a target review. Deep-copies image files on disk so
+// the two galleries have fully independent bytes — safe against deletes.
+router.post('/api/review-items/:id/duplicate', async (req, res) => {
+  try {
+    const { target_review_id } = req.body as { target_review_id?: string }
+    if (!target_review_id) return res.status(400).json({ error: 'target_review_id required' })
+
+    const source = await get('SELECT * FROM review_items WHERE id = ?', [req.params.id]) as any
+    if (!source) return res.status(404).json({ error: 'Source review item not found' })
+
+    const target = await get('SELECT id FROM reviews WHERE id = ?', [target_review_id])
+    if (!target) return res.status(404).json({ error: 'Target review not found' })
+
+    const maxRank = await get('SELECT MAX(rank) as max FROM review_items WHERE review_id = ?', [target_review_id]) as any
+    const rank = (maxRank?.max ?? -1) + 1
+    const newItemId = Math.random().toString(36).substring(2) + Date.now().toString(36)
+
+    await run(
+      `INSERT INTO review_items
+       (id, review_id, project_id, rank, notes, notes_updated_by, notes_updated_at,
+        description, duration_minutes, excluded_from_time, review_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [newItemId, target_review_id, source.project_id, rank,
+       source.notes || '', source.notes_updated_by || '', source.notes_updated_at || '',
+       source.description || '', source.duration_minutes,
+       source.excluded_from_time ? 1 : 0, null]
+    )
+
+    // Deep-copy each image: new file on disk + new row pointing at the new filename.
+    const srcImages = await all(
+      'SELECT * FROM review_item_images WHERE review_item_id = ? ORDER BY sort_order ASC, created_at ASC',
+      [req.params.id]
+    ) as any[]
+    for (const img of srcImages) {
+      try {
+        const ext = (img.filename.split('.').pop() || 'png')
+        const newImgId = `rimg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+        const newFilename = `${newImgId}.${ext}`
+        const srcPath = path.join(IMAGES_DIR, img.filename)
+        const dstPath = path.join(IMAGES_DIR, newFilename)
+        if (fs.existsSync(srcPath)) {
+          fs.copyFileSync(srcPath, dstPath)
+        } else {
+          console.error('Source image file missing, skipping copy:', srcPath)
+          continue
+        }
+        await run(
+          `INSERT INTO review_item_images
+           (id, review_item_id, filename, original_name, mime_type, size_bytes, caption, sort_order, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+          [newImgId, newItemId, newFilename, img.original_name || '', img.mime_type || 'image/png',
+           img.size_bytes || 0, img.caption || '', img.sort_order || 0]
+        )
+      } catch (e: any) {
+        console.error('Image deep-copy error for', img.id, e.message)
+      }
+    }
+
+    res.json({ id: newItemId, review_id: target_review_id, project_id: source.project_id, rank })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -499,16 +606,15 @@ router.get('/review/:id', async (req, res) => {
       designers: item.designers ? JSON.parse(item.designers) : [],
     }))
 
-    // Load images for each review item.
-    // Historical uploads via the review editor were stored under project_id=review_item.id,
-    // while the project edit modal stores them under the real project.id.
-    // Union both so all images show until a migration is run.
+    // Load review-item-scoped images. Each review_item has its own gallery —
+    // project-level images are NOT included, so the same project in multiple
+    // reviews can have independent sets of supporting images.
     for (const item of parsed) {
       item.images = await all(
-        `SELECT * FROM project_images
-         WHERE project_id = ? OR project_id = ?
+        `SELECT * FROM review_item_images
+         WHERE review_item_id = ?
          ORDER BY sort_order ASC, created_at ASC`,
-        [item.project_id, item.id]
+        [item.id]
       ) as any[]
     }
 
@@ -580,7 +686,7 @@ router.get('/review/:id', async (req, res) => {
           <div class="review-image-item" draggable="true" data-image-id="${escHtml(img.id)}">
             <div class="review-image-thumb">
               <span class="review-image-drag" title="Drag to reorder"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg></span>
-              <img src="/api/images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
+              <img src="/api/review-item-images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
                 data-lightbox-trigger data-item-id="${escHtml(item.id)}" data-image-index="${idx}" />
               <button class="review-image-delete" data-image-id="${escHtml(img.id)}" title="Delete image"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg></button>
             </div>
@@ -595,7 +701,7 @@ router.get('/review/:id', async (req, res) => {
         const shown = imgs.slice(0, 4)
         const thumbs = shown.map((img: any, idx: number) => `
           <div class="review-inline-thumb">
-            <img src="/api/images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
+            <img src="/api/review-item-images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
               data-lightbox-trigger data-item-id="${escHtml(item.id)}" data-image-index="${idx}" />
           </div>`).join('')
         const more = imgs.length > 4 ? `<span class="review-inline-more">+${imgs.length - 4} more</span>` : ''
@@ -744,7 +850,7 @@ router.get('/review/:id', async (req, res) => {
       function rvLbRender() {
         var img = rvLbState.images[rvLbState.index];
         if (!img) return;
-        rvLbOverlay.querySelector('.rv-lightbox-content img').src = '/api/images/' + img.id;
+        rvLbOverlay.querySelector('.rv-lightbox-content img').src = '/api/review-item-images/' + img.id;
         rvLbOverlay.querySelector('.rv-lightbox-content img').alt = img.caption || img.original_name || '';
         var cap = rvLbOverlay.querySelector('.rv-lightbox-caption');
         cap.textContent = img.caption || '';
@@ -1003,11 +1109,10 @@ router.get('/review/:id', async (req, res) => {
         var dropZone = document.querySelector('.review-image-drop[data-item-id="' + itemId + '"]');
         if (!dropZone) return;
         dropZone.classList.add('uploading');
-        fetch('/api/images', {
+        fetch('/api/review-items/' + itemId + '/images', {
           method: 'POST',
           headers: {
             'Content-Type': file.type || 'image/png',
-            'X-Project-Id': itemId,
             'X-Original-Name': originalName || 'image.png'
           },
           body: file
@@ -1034,7 +1139,7 @@ router.get('/review/:id', async (req, res) => {
           var trashSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>';
           div.innerHTML = '<div class="review-image-thumb">' +
             '<span class="review-image-drag" title="Drag to reorder">' + gripSvg + '</span>' +
-            '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />' +
+            '<img src="/api/review-item-images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />' +
             '<button class="review-image-delete" data-image-id="' + img.id + '" title="Delete image">' + trashSvg + '</button>' +
             '</div>' +
             '<input class="review-image-caption" placeholder="Add caption..." value="" data-image-id="' + img.id + '" data-original-caption="" />';
@@ -1058,7 +1163,7 @@ router.get('/review/:id', async (req, res) => {
               var inlineThumb = document.createElement('div');
               inlineThumb.className = 'review-inline-thumb';
               var idx = reviewItemImages[itemId].length - 1;
-              inlineThumb.innerHTML = '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />';
+              inlineThumb.innerHTML = '<img src="/api/review-item-images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />';
               row.insertBefore(inlineThumb, row.querySelector('.review-inline-more'));
             } else {
               var moreSpan = row.querySelector('.review-inline-more');
@@ -1118,7 +1223,7 @@ router.get('/review/:id', async (req, res) => {
         if (!delBtn) return;
         var imageId = delBtn.dataset.imageId;
         if (!imageId) return;
-        fetch('/api/images/' + imageId, {
+        fetch('/api/review-item-images/' + imageId, {
           method: 'DELETE'
         }).then(function(r) {
           if (!r.ok) return;
@@ -1155,7 +1260,7 @@ router.get('/review/:id', async (req, res) => {
               remaining.slice(0, 4).forEach(function(img, idx) {
                 var t = document.createElement('div');
                 t.className = 'review-inline-thumb';
-                t.innerHTML = '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemIdForInline + '" data-image-index="' + idx + '" />';
+                t.innerHTML = '<img src="/api/review-item-images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemIdForInline + '" data-image-index="' + idx + '" />';
                 row.appendChild(t);
               });
               if (remaining.length > 4) {
@@ -1215,14 +1320,11 @@ router.get('/review/:id', async (req, res) => {
           reviewItemImages[itemId].forEach(function(img) { byId[img.id] = img; });
           reviewItemImages[itemId] = imageIds.map(function(id) { return byId[id]; }).filter(Boolean);
         }
-        // Find project_id from the existing images for this item (all in the project_images row share it)
-        var firstImg = reviewItemImages[itemId] && reviewItemImages[itemId][0];
-        var projectId = firstImg && firstImg.project_id;
-        if (!projectId) return;
-        fetch('/api/images/reorder', {
+        if (!itemId) return;
+        fetch('/api/review-items/' + itemId + '/images/reorder', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ project_id: projectId, image_ids: imageIds })
+          body: JSON.stringify({ image_ids: imageIds })
         }).catch(function(err) { console.error('Image reorder failed:', err); });
         // Rebuild inline thumbnail strip on the card
         var projectCard = drop && drop.closest('.project-card');
@@ -1233,7 +1335,7 @@ router.get('/review/:id', async (req, res) => {
             (reviewItemImages[itemId] || []).slice(0, 4).forEach(function(img, idx) {
               var t = document.createElement('div');
               t.className = 'review-inline-thumb';
-              t.innerHTML = '<img src="/api/images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />';
+              t.innerHTML = '<img src="/api/review-item-images/' + img.id + '" alt="" loading="lazy" data-lightbox-trigger data-item-id="' + itemId + '" data-image-index="' + idx + '" />';
               inlineRow.appendChild(t);
             });
             var total = (reviewItemImages[itemId] || []).length;
@@ -1256,7 +1358,7 @@ router.get('/review/:id', async (req, res) => {
         var oldCaption = input.dataset.originalCaption || '';
         if (newCaption === oldCaption) return;
         input.dataset.originalCaption = newCaption;
-        fetch('/api/images/' + imageId, {
+        fetch('/api/review-item-images/' + imageId, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ caption: newCaption })
