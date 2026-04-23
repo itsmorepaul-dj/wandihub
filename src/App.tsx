@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Gemini notes on reviews — paste Gemini-generated meeting notes from a Google Doc into the new field under the review description. Headings, bullets, bold, and links are preserved and appear on the public review page as a "Gemini notes" accordion above the project cards. Empty field = hidden.',
   'Review dates, per-review image galleries, and copy-to-review — each review has its own date and each project in a review keeps its own exclusive images. Use the copy icon on any row to clone an item into another review (deep copy of notes and images). Destructive actions now confirm first, and the edit page is mobile-friendly.',
   'Review time planner — set a total meeting length; each project gets an auto-calculated time slot. Drag to rebalance, or mark a project "Exempt" to drop it into a "For awareness…" section.',
 ]
@@ -64,6 +65,154 @@ function renderMarkdownLinks(text: string): React.ReactNode {
     }
     return <div key={i}>{line ? renderInline(line, i) : <br />}</div>
   })}</>
+}
+
+// Convert pasted HTML (from Google Docs / Gemini notes) to the lightweight
+// markdown shape that renderGeminiNotesHtml understands on the public page:
+// # / ## / ### headings, "- " bullets, **bold**, and [text](url) links.
+function convertHtmlToMarkdown(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const out: string[] = []
+
+  // Google Docs renders every paragraph as <p> with bold applied via
+  // font-weight on a <span>. Peek at the element's effective style to infer
+  // whether a whole paragraph is bold, and at its font-size to decide how
+  // big a heading it should become.
+  const fontSizePx = (el: HTMLElement): number => {
+    const style = el.getAttribute('style') || ''
+    const m = style.match(/font-size:\s*([\d.]+)(pt|px)/i)
+    if (!m) return 0
+    const v = parseFloat(m[1])
+    return m[2].toLowerCase() === 'pt' ? v * 1.333 : v
+  }
+  const isBoldStyle = (el: HTMLElement): boolean => {
+    const style = el.getAttribute('style') || ''
+    const m = style.match(/font-weight:\s*(\d+|bold|bolder)/i)
+    if (!m) return false
+    const w = m[1].toLowerCase()
+    if (w === 'bold' || w === 'bolder') return true
+    const n = parseInt(w, 10)
+    return !isNaN(n) && n >= 600
+  }
+  // Is every non-whitespace text node inside `el` wrapped in bold context?
+  const isEntirelyBold = (el: HTMLElement): boolean => {
+    let sawText = false
+    let allBold = true
+    const walk = (n: Node, boldCtx: boolean) => {
+      if (n.nodeType === Node.TEXT_NODE) {
+        if ((n.textContent || '').trim()) {
+          sawText = true
+          if (!boldCtx) allBold = false
+        }
+        return
+      }
+      if (n.nodeType !== Node.ELEMENT_NODE) return
+      const c = n as HTMLElement
+      const tag = c.tagName.toLowerCase()
+      const bold = boldCtx || tag === 'strong' || tag === 'b' || isBoldStyle(c)
+      Array.from(c.childNodes).forEach(cn => walk(cn, bold))
+    }
+    walk(el, false)
+    return sawText && allBold
+  }
+  // Largest font-size seen among descendants of el (in px)
+  const maxDescendantFontPx = (el: HTMLElement): number => {
+    let max = fontSizePx(el)
+    const walk = (n: Node) => {
+      if (n.nodeType !== Node.ELEMENT_NODE) return
+      const c = n as HTMLElement
+      const s = fontSizePx(c)
+      if (s > max) max = s
+      Array.from(c.childNodes).forEach(walk)
+    }
+    walk(el)
+    return max
+  }
+
+  const walk = (node: Node, listDepth: number) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = (node.textContent || '').replace(/\s+/g, ' ')
+      if (text.trim()) out.push(text)
+      return
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    const el = node as HTMLElement
+    const tag = el.tagName.toLowerCase()
+    const children = Array.from(el.childNodes)
+    const inline = () => {
+      const buf: string[] = []
+      const pushInline = (n: Node) => {
+        if (n.nodeType === Node.TEXT_NODE) {
+          buf.push((n.textContent || '').replace(/\s+/g, ' '))
+          return
+        }
+        if (n.nodeType !== Node.ELEMENT_NODE) return
+        const c = n as HTMLElement
+        const ct = c.tagName.toLowerCase()
+        if (ct === 'br') { buf.push('\n'); return }
+        if (ct === 'a') {
+          const href = c.getAttribute('href') || ''
+          const label = (c.textContent || '').trim()
+          if (href && label) { buf.push(`[${label}](${href})`); return }
+          buf.push(label)
+          return
+        }
+        if (ct === 'strong' || ct === 'b' || isBoldStyle(c)) {
+          const t = Array.from(c.childNodes).map(ci => { const sub: string[] = []; pushInlineInto(ci, sub); return sub.join('') }).join('')
+          if (t.trim()) buf.push(`**${t.trim()}**`)
+          return
+        }
+        Array.from(c.childNodes).forEach(pushInline)
+      }
+      const pushInlineInto = (n: Node, target: string[]) => {
+        const saved = buf.length
+        pushInline(n)
+        const added = buf.splice(saved).join('')
+        target.push(added)
+      }
+      children.forEach(pushInline)
+      return buf.join('').replace(/[ \t]+/g, ' ').trim()
+    }
+    if (tag.match(/^h[1-6]$/)) {
+      const level = Math.min(3, parseInt(tag.slice(1), 10))
+      const text = inline()
+      if (text) out.push('\n' + '#'.repeat(level) + ' ' + text + '\n')
+      return
+    }
+    if (tag === 'ul' || tag === 'ol') {
+      out.push('\n')
+      children.forEach(c => walk(c, listDepth + 1))
+      out.push('\n')
+      return
+    }
+    if (tag === 'li') {
+      const text = inline()
+      if (text) out.push('  '.repeat(Math.max(0, listDepth - 1)) + '- ' + text + '\n')
+      return
+    }
+    if (tag === 'p' || tag === 'div') {
+      // Detect Google Docs "fake heading": a paragraph whose entire content
+      // is bold. Promote to # / ## / ### based on its max font-size.
+      const text = inline()
+      if (!text) return
+      if (isEntirelyBold(el)) {
+        const px = maxDescendantFontPx(el)
+        // Thresholds (px): >= 20 → h1, >= 16 → h2, otherwise h3
+        const level = px >= 20 ? 1 : px >= 16 ? 2 : 3
+        // Strip surrounding ** since the whole line is a heading now
+        const clean = text.replace(/^\*\*(.+)\*\*$/s, '$1')
+        out.push('\n' + '#'.repeat(level) + ' ' + clean + '\n')
+        return
+      }
+      out.push('\n' + text + '\n')
+      return
+    }
+    if (tag === 'br') { out.push('\n'); return }
+    // Default: descend
+    children.forEach(c => walk(c, listDepth))
+  }
+  walk(doc.body, 0)
+  return out.join('').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 // Parse Gemini note content_preview to extract structured sections
@@ -5970,6 +6119,37 @@ const [showFilters, setShowFilters] = useState(false)
                   features={['bold', 'bullets', 'links']}
                   minHeight="40px"
                 />
+
+                {/* Row 2c: Gemini notes paste target */}
+                <div className="gemini-notes-field">
+                  <label className="gemini-notes-label">
+                    Gemini notes
+                    <span className="gemini-notes-hint">Paste from the Google Doc after the meeting.</span>
+                  </label>
+                  <textarea
+                    className="gemini-notes-textarea"
+                    value={editingReview.gemini_notes || ''}
+                    onChange={e => setEditingReview({ ...editingReview, gemini_notes: e.target.value })}
+                    onBlur={async () => {
+                      await authFetch(`/api/reviews/${editingReview.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ gemini_notes: editingReview.gemini_notes || '' })
+                      })
+                    }}
+                    onPaste={e => {
+                      const html = e.clipboardData.getData('text/html')
+                      if (!html) return
+                      e.preventDefault()
+                      const md = convertHtmlToMarkdown(html)
+                      const existing = editingReview.gemini_notes || ''
+                      const separator = existing && !existing.endsWith('\n\n') ? '\n\n' : ''
+                      setEditingReview({ ...editingReview, gemini_notes: existing + separator + md })
+                    }}
+                    placeholder="Paste the Gemini-generated notes here..."
+                    rows={8}
+                  />
+                </div>
 
                 {/* Row 3: Meta + actions inline */}
                 <div className="review-edit-meta-row">

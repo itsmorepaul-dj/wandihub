@@ -8739,6 +8739,55 @@ select:focus {
   font-size: 0.6rem;
 }
 
+/* Gemini notes paste field — below review description in edit page */
+.gemini-notes-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.gemini-notes-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.gemini-notes-hint {
+  font-size: 0.7rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-text-dim);
+}
+.gemini-notes-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  resize: vertical;
+  min-height: 6rem;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.gemini-notes-textarea:hover {
+  background: var(--color-bg-tertiary);
+}
+.gemini-notes-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--shadow-glow);
+}
+
 /* Mobile breakpoint: stack review edit controls + flatten items table into cards */
 @media (max-width: 720px) {
   /* Header: nav + actions wrap onto their own lines, title goes full-width */

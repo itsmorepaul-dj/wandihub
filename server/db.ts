@@ -358,6 +358,8 @@ export const initSchema = async () => {
   await run(`ALTER TABLE reviews ADD COLUMN review_date TEXT`).catch(() => {})
   // Backfill: if review_date is null, derive from created_at (date portion)
   await run(`UPDATE reviews SET review_date = substr(created_at, 1, 10) WHERE review_date IS NULL OR review_date = ''`).catch(() => {})
+  // Migration: Gemini-generated meeting notes pasted after the review
+  await run(`ALTER TABLE reviews ADD COLUMN gemini_notes TEXT DEFAULT ''`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS review_items (
     id TEXT PRIMARY KEY, review_id TEXT NOT NULL, project_id TEXT NOT NULL,

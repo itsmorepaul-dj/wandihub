@@ -102,6 +102,9 @@ router.put('/api/reviews/:id', async (req, res) => {
       const v = typeof review_date === 'string' && review_date.match(/^\d{4}-\d{2}-\d{2}$/) ? review_date : null
       await run('UPDATE reviews SET review_date = ?, updated_at = datetime(\'now\') WHERE id = ?', [v, req.params.id])
     }
+    if (req.body.gemini_notes !== undefined) {
+      await run('UPDATE reviews SET gemini_notes = ?, updated_at = datetime(\'now\') WHERE id = ?', [req.body.gemini_notes || '', req.params.id])
+    }
     if (item_order && Array.isArray(item_order)) {
       for (let i = 0; i < item_order.length; i++) {
         await run('UPDATE review_items SET rank = ? WHERE id = ?', [i, item_order[i]])
@@ -528,6 +531,47 @@ function markdownToHtml(text: string): string {
   }).join('')
 }
 
+// Render Gemini-generated meeting notes pasted from a Google Doc.
+// Input is expected to be markdown-ish: headings (# ## ###), bullets (- * •),
+// bold (**text**), and [name](url) links.
+function renderGeminiNotesHtml(notes: string): string {
+  if (!notes || !notes.trim()) return ''
+  const lines = notes.split('\n')
+  let html = ''
+  let inList = false
+  const closeList = () => { if (inList) { html += '</ul>'; inList = false } }
+  const inlineReplace = (raw: string) => {
+    let s = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    s = s.replace(/(^|\s)(https?:\/\/[^\s<]+)/g,
+      '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>')
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    return s
+  }
+  for (const raw of lines) {
+    const line = raw.trimEnd()
+    if (!line.trim()) { closeList(); continue }
+    const h = line.match(/^(#{1,3})\s+(.+)$/)
+    if (h) {
+      closeList()
+      const level = h[1].length
+      html += `<h${level}>${inlineReplace(h[2])}</h${level}>`
+      continue
+    }
+    const bullet = line.match(/^\s*(?:[-*•])\s+(.+)$/)
+    if (bullet) {
+      if (!inList) { html += '<ul>'; inList = true }
+      html += `<li>${inlineReplace(bullet[1])}</li>`
+      continue
+    }
+    closeList()
+    html += `<p>${inlineReplace(line)}</p>`
+  }
+  closeList()
+  return html
+}
+
 function renderNotesHtml(notes: string): string {
   if (!notes || !notes.trim()) return ''
   let html = escHtml(notes)
@@ -799,6 +843,16 @@ router.get('/review/:id', async (req, res) => {
       ? `<div class="awareness-section"><h2 class="awareness-heading">For awareness&hellip;</h2>${awarenessCards}</div>`
       : ''
 
+    const geminiNotesSection = review.gemini_notes && review.gemini_notes.trim()
+      ? `<details class="gemini-notes-accordion">
+          <summary class="gemini-notes-summary">
+            <svg class="notes-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            Gemini notes
+          </summary>
+          <div class="gemini-notes-body">${renderGeminiNotesHtml(review.gemini_notes)}</div>
+        </details>`
+      : ''
+
     const content = parsed.length > 0
       ? `<div class="cards-stack">${cards}${awarenessSection}</div>`
       : '<div class="empty-state">No projects in this review yet.</div>'
@@ -816,6 +870,7 @@ router.get('/review/:id', async (req, res) => {
       <h1>${title}${week}</h1>
       <div class="page-meta">${createdAt} · ${parsed.length} project${parsed.length !== 1 ? 's' : ''}${timeSummary}</div>
       ${descriptionHtml}
+      ${geminiNotesSection}
     </div>`
 
     const notesScript = `<script>
@@ -1722,6 +1777,37 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     .card-gantt-accordion > summary::-webkit-details-marker { display: none; }
     .card-gantt-accordion[open] > summary .notes-chevron { transform: rotate(90deg); }
     .card-gantt-accordion > .project-gantt { border-top: 1px solid var(--rv-border-subtle); }
+
+    /* Gemini notes accordion — page-level, sits above project cards */
+    .gemini-notes-accordion {
+      background: var(--rv-bg); border: 1px solid var(--rv-border);
+      border-radius: 10px; margin-top: 1.5rem; margin-bottom: 1rem; overflow: hidden;
+    }
+    .gemini-notes-summary {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.85rem 1.25rem; cursor: pointer; user-select: none;
+      font-weight: 600; font-size: 0.95rem; color: var(--rv-text);
+      list-style: none;
+    }
+    .gemini-notes-summary::-webkit-details-marker { display: none; }
+    .gemini-notes-accordion[open] > .gemini-notes-summary .notes-chevron { transform: rotate(90deg); }
+    .gemini-notes-accordion[open] > .gemini-notes-summary { border-bottom: 1px solid var(--rv-border-subtle); }
+    .gemini-notes-body {
+      padding: 1rem 1.25rem; color: var(--rv-text-secondary);
+      font-size: 0.88rem; line-height: 1.6;
+      max-width: 85ch;
+    }
+    .gemini-notes-body h1, .gemini-notes-body h2, .gemini-notes-body h3 {
+      margin: 1rem 0 0.35rem; color: var(--rv-text); font-weight: 600;
+    }
+    .gemini-notes-body h1 { font-size: 1.05rem; }
+    .gemini-notes-body h2 { font-size: 0.98rem; }
+    .gemini-notes-body h3 { font-size: 0.92rem; }
+    .gemini-notes-body ul { margin: 0.35rem 0; padding-left: 1.25rem; }
+    .gemini-notes-body li { margin: 0.15rem 0; }
+    .gemini-notes-body p { margin: 0.5rem 0; }
+    .gemini-notes-body a { color: var(--rv-accent); text-decoration: none; }
+    .gemini-notes-body a:hover { text-decoration: underline; }
 
     /* Links section */
     .card-links {
