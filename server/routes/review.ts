@@ -4,7 +4,7 @@ import path from 'path';
 import { run, get, all, IMAGES_DIR } from '../db.js';
 import { getUserEmail, sessions, getSessionIdFromRequest, setSessionCookie } from '../auth.js';
 import { broadcast } from '../sse.js';
-import { logActivity } from '../version.js';
+import { logActivity, updateDbVersion } from '../version.js';
 
 // Resolve a user_id from a (possibly null) email. Returns null if no matching user.
 async function userIdForEmail(email: string | null | undefined): Promise<number | null> {
@@ -3035,7 +3035,67 @@ router.post('/api/review-snapshots/generate', async (req, res) => {
 
 let lastReviewSnapshotCheck = ''
 
+// Post-review rollover: once a review's scheduled date is 36+ hours in the
+// past, any project still stuck in 'review' status should fall back to
+// 'active'. Runs as part of the review cron ticker.
+//
+// A review_date of '2026-04-22' is interpreted as the END of that day in
+// Eastern Time — i.e. 2026-04-22T23:59:59 America/New_York — since the
+// meeting itself happens on that day. 36h after that is the trigger.
+export const runReviewRollover = async () => {
+  try {
+    const rows = await all(
+      `SELECT DISTINCT ri.project_id, r.id AS review_id, r.review_date, r.title AS review_title
+       FROM review_items ri
+       JOIN reviews r ON r.id = ri.review_id
+       JOIN projects p ON p.id = ri.project_id
+       WHERE p.status = 'review'
+         AND r.review_date IS NOT NULL AND r.review_date != ''`
+    ) as any[]
+    if (!rows || rows.length === 0) return
+    const now = Date.now()
+    // Group per project so we flip only once even if the project sits on
+    // multiple reviews. Flip requires that ALL the project's review_items'
+    // reviews have passed the 36h cutoff (otherwise an upcoming re-review
+    // would keep it "in review" correctly).
+    const byProject = new Map<string, { allPast: boolean; projectId: string }>()
+    for (const row of rows) {
+      // Parse "YYYY-MM-DD" as end-of-day Eastern. Approximation: ET is UTC-5
+      // (standard) or UTC-4 (DST). We use a conservative UTC-4 offset which
+      // gives us the *earlier* trigger — matches "36 hours after" intent.
+      const [y, m, d] = row.review_date.split('-').map((n: string) => parseInt(n, 10))
+      if (!y || !m || !d) continue
+      const endOfDayUtcMs = Date.UTC(y, m - 1, d, 23 + 4, 59, 59) // 23:59 ET ≈ 03:59 UTC next day
+      const cutoffMs = endOfDayUtcMs + 36 * 60 * 60 * 1000
+      const past = now >= cutoffMs
+      const existing = byProject.get(row.project_id)
+      if (!existing) byProject.set(row.project_id, { allPast: past, projectId: row.project_id })
+      else if (!past) existing.allPast = false
+    }
+    let flipped = 0
+    for (const { projectId, allPast } of byProject.values()) {
+      if (!allPast) continue
+      const proj = await get('SELECT name, status FROM projects WHERE id = ?', [projectId]) as any
+      if (!proj || proj.status !== 'review') continue // race / already changed
+      await run("UPDATE projects SET status = 'active', updatedAt = datetime('now') WHERE id = ?", [projectId])
+      await logActivity('project', 'update', proj.name || projectId, null, 'Auto-reverted to active after review')
+      flipped++
+    }
+    if (flipped > 0) {
+      await updateDbVersion()
+      console.log(`Post-review rollover: flipped ${flipped} project(s) back to active`)
+    }
+  } catch (e: any) {
+    console.error('Review rollover error:', e.message)
+  }
+}
+
 export const startReviewCron = () => {
+  // Run the rollover once at boot so we catch up anything missed while the
+  // server was down.
+  runReviewRollover().catch(e => console.error('Initial rollover failed:', e))
+
+  let tick = 0
   setInterval(() => {
     const now = new Date()
     const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
@@ -3049,8 +3109,14 @@ export const startReviewCron = () => {
       const week = getISOWeekStr(now)
       generateReviewSnapshot(week).catch(e => console.error('Auto review snapshot failed:', e))
     }
+
+    // Rollover every ~5 minutes (10 ticks × 30s) — often enough that a
+    // designer who logs in shortly after the 36h mark sees the flip without
+    // having to refresh a second time.
+    tick = (tick + 1) % 10
+    if (tick === 0) runReviewRollover().catch(e => console.error('Rollover tick failed:', e))
   }, 30_000)
-  console.log('Review snapshot cron started (Tuesday 5pm ET)')
+  console.log('Review snapshot cron started (Tuesday 5pm ET); rollover check every 5m')
 }
 
 export default router;
