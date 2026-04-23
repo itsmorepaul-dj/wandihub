@@ -29,10 +29,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Review dates + copy to another review — each review now has an explicit review date (pick it when creating the review or edit it in the header), independent of when the review was created. Each project in a review has its own gallery of images, exclusive to that review — images added for Week 14 don\'t bleed into Week 15. Hover the copy icon on any review item for a tooltip; clicking it clones the item into another review, deep-copying notes, description, and image files so the two entries stay fully independent. All destructive actions (removing a project from a review, deleting project/business line images, clearing a weekly report section) now require confirmation first.',
-  'Review time planner — set a total meeting length for each review; each project gets an auto-calculated time slot shown before its status. Drag the slider to give a project more or less time (others rebalance automatically), or mark a project "Exempt" — exempt projects drop to a "For awareness…" section at the bottom of the public page. Document links on the public page are now labeled (Design deck, PRD, Jira).',
-  'Review site is more secure — shareable review links no longer carry login info in the URL, so copying and sharing a link won\'t expose your session.',
-  'Gantt review diamonds — Project gantts now include a "Design Review" track row with a gold diamond for each review that includes the project, positioned by the review\'s week and linking to the public review page.',
+  'Review dates, per-review image galleries, and copy-to-review — each review has its own date and each project in a review keeps its own exclusive images. Use the copy icon on any row to clone an item into another review (deep copy of notes and images). Destructive actions now confirm first, and the edit page is mobile-friendly.',
+  'Review time planner — set a total meeting length; each project gets an auto-calculated time slot. Drag to rebalance, or mark a project "Exempt" to drop it into a "For awareness…" section.',
 ]
 
 
