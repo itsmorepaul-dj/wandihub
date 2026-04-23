@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { run, get, all, IMAGES_DIR } from '../db.js';
 import { getUserEmail, sessions, getSessionIdFromRequest, setSessionCookie } from '../auth.js';
+import { broadcast } from '../sse.js';
 
 const router = express.Router();
 
@@ -287,6 +288,113 @@ router.put('/api/review-items/:id/notes', async (req, res) => {
     )
     const updated = await get('SELECT notes_updated_at FROM review_items WHERE id = ?', [req.params.id]) as any
     res.json({ ok: true, notes_updated_at: updated?.notes_updated_at || null })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// ============ REVIEW ITEM COMMENTS (chat) ============
+
+// Resolve a display name for an authenticated user: team.name when the email
+// matches a team member, otherwise the email local-part.
+async function resolveDisplayName(email: string): Promise<string> {
+  if (!email) return ''
+  const t = await get('SELECT name FROM team WHERE LOWER(email) = LOWER(?)', [email]) as any
+  if (t?.name) return t.name
+  return email.split('@')[0]
+}
+
+router.get('/api/review-items/:id/comments', async (req, res) => {
+  try {
+    const rows = await all(
+      'SELECT id, review_item_id, author_email, author_name, body, created_at, updated_at FROM review_item_comments WHERE review_item_id = ? ORDER BY created_at ASC',
+      [req.params.id]
+    )
+    res.json(rows)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.post('/api/review-items/:id/comments', async (req, res) => {
+  try {
+    const email = getUserEmail(req)
+    if (!email) return res.status(401).json({ error: 'Authentication required to comment' })
+    const body = typeof req.body?.body === 'string' ? req.body.body.trim() : ''
+    if (!body) return res.status(400).json({ error: 'Comment cannot be empty' })
+    if (body.length > 5000) return res.status(400).json({ error: 'Comment too long (5000 char max)' })
+
+    const item = await get('SELECT id, review_id FROM review_items WHERE id = ?', [req.params.id]) as any
+    if (!item) return res.status(404).json({ error: 'Review item not found' })
+
+    const authorName = await resolveDisplayName(email)
+    const id = `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    await run(
+      `INSERT INTO review_item_comments (id, review_item_id, author_email, author_name, body)
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, req.params.id, email, authorName, body]
+    )
+    const saved = await get('SELECT * FROM review_item_comments WHERE id = ?', [id]) as any
+    broadcast('review-comment', { type: 'created', review_id: item.review_id, comment: saved })
+    res.json(saved)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.put('/api/review-item-comments/:id', async (req, res) => {
+  try {
+    const email = getUserEmail(req)
+    if (!email) return res.status(401).json({ error: 'Authentication required' })
+    const session = (() => {
+      const sid = getSessionIdFromRequest(req)
+      return sid ? sessions.get(sid) : null
+    })()
+    const isAdmin = session?.role === 'admin'
+
+    const existing = await get(
+      `SELECT c.*, ri.review_id FROM review_item_comments c
+       JOIN review_items ri ON ri.id = c.review_item_id
+       WHERE c.id = ?`,
+      [req.params.id]
+    ) as any
+    if (!existing) return res.status(404).json({ error: 'Comment not found' })
+    if (!isAdmin && existing.author_email.toLowerCase() !== email.toLowerCase()) {
+      return res.status(403).json({ error: 'You can only edit your own comments' })
+    }
+
+    const body = typeof req.body?.body === 'string' ? req.body.body.trim() : ''
+    if (!body) return res.status(400).json({ error: 'Comment cannot be empty' })
+    if (body.length > 5000) return res.status(400).json({ error: 'Comment too long (5000 char max)' })
+
+    await run(
+      'UPDATE review_item_comments SET body = ?, updated_at = datetime(\'now\') WHERE id = ?',
+      [body, req.params.id]
+    )
+    const saved = await get('SELECT * FROM review_item_comments WHERE id = ?', [req.params.id]) as any
+    broadcast('review-comment', { type: 'updated', review_id: existing.review_id, comment: saved })
+    res.json(saved)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.delete('/api/review-item-comments/:id', async (req, res) => {
+  try {
+    const email = getUserEmail(req)
+    if (!email) return res.status(401).json({ error: 'Authentication required' })
+    const session = (() => {
+      const sid = getSessionIdFromRequest(req)
+      return sid ? sessions.get(sid) : null
+    })()
+    const isAdmin = session?.role === 'admin'
+
+    const existing = await get(
+      `SELECT c.*, ri.review_id FROM review_item_comments c
+       JOIN review_items ri ON ri.id = c.review_item_id
+       WHERE c.id = ?`,
+      [req.params.id]
+    ) as any
+    if (!existing) return res.status(404).json({ error: 'Comment not found' })
+    if (!isAdmin && existing.author_email.toLowerCase() !== email.toLowerCase()) {
+      return res.status(403).json({ error: 'You can only delete your own comments' })
+    }
+
+    await run('DELETE FROM review_item_comments WHERE id = ?', [req.params.id])
+    broadcast('review-comment', { type: 'deleted', review_id: existing.review_id, comment_id: req.params.id, review_item_id: existing.review_item_id })
+    res.json({ ok: true })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -662,6 +770,17 @@ router.get('/review/:id', async (req, res) => {
       ) as any[]
     }
 
+    // Load comment thread for each item
+    for (const item of parsed) {
+      item.comments = await all(
+        `SELECT id, review_item_id, author_email, author_name, body, created_at, updated_at
+         FROM review_item_comments
+         WHERE review_item_id = ?
+         ORDER BY created_at ASC`,
+        [item.id]
+      ) as any[]
+    }
+
     // Load review diamond markers for each item: all reviews that include this project
     for (const item of parsed) {
       const rows = await all(
@@ -710,18 +829,6 @@ router.get('/review/:id', async (req, res) => {
       const linksSection = links ? `<div class="card-links">${links}</div>` : ''
       const hasNotes = !!(item.notes && item.notes.trim())
 
-      // Build project quick-links for the link toolbar
-      const quickLinks: string[] = []
-      if (item.deckLink) quickLinks.push(`<button class="notes-quick-link" data-name="${escHtml(item.deckName || 'Deck')}" data-url="${escHtml(item.deckLink)}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg> ${escHtml(item.deckName || 'Deck')}</button>`)
-      if (item.prdLink) quickLinks.push(`<button class="notes-quick-link" data-name="${escHtml(item.prdName || 'PRD')}" data-url="${escHtml(item.prdLink)}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg> ${escHtml(item.prdName || 'PRD')}</button>`)
-      if (item.briefLink) quickLinks.push(`<button class="notes-quick-link" data-name="${escHtml(item.briefName || 'Brief')}" data-url="${escHtml(item.briefLink)}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg> ${escHtml(item.briefName || 'Brief')}</button>`)
-      if (item.figmaLink) quickLinks.push(`<button class="notes-quick-link" data-name="Figma" data-url="${escHtml(item.figmaLink)}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg> Figma</button>`)
-      if (item.customLinks) {
-        for (const cl of item.customLinks) {
-          if (cl.url) quickLinks.push(`<button class="notes-quick-link" data-name="${escHtml(cl.name || 'Link')}" data-url="${escHtml(cl.url)}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg> ${escHtml(cl.name || 'Link')}</button>`)
-        }
-      }
-
       const hasImages = item.images && item.images.length > 0
 
       // Editable image grid for inside the accordion (auth only)
@@ -757,33 +864,61 @@ router.get('/review/:id', async (req, res) => {
 
       const imagesDataTag = `<script type="application/json" class="review-images-data" data-item-id="${escHtml(item.id)}">${JSON.stringify(item.images || [])}</script>`
 
+      const currentUserEmail = (session?.email || '').toLowerCase()
+      const userIsAdmin = session?.role === 'admin'
+      const renderCommentHtml = (c: any) => {
+        const isAuthor = c.author_email && c.author_email.toLowerCase() === currentUserEmail
+        const canEdit = isAuthed && (isAuthor || userIsAdmin)
+        const ts = c.created_at ? new Date(c.created_at + 'Z').toISOString() : ''
+        const edited = c.updated_at && c.created_at && c.updated_at !== c.created_at
+        const actions = canEdit
+          ? `<div class="comment-actions">
+               <button class="comment-edit-btn" data-comment-id="${escHtml(c.id)}" title="Edit">Edit</button>
+               <button class="comment-delete-btn" data-comment-id="${escHtml(c.id)}" title="Delete">Delete</button>
+             </div>`
+          : ''
+        return `<div class="comment" data-comment-id="${escHtml(c.id)}" data-author-email="${escHtml(c.author_email || '')}">
+          <div class="comment-head">
+            <span class="comment-author">${escHtml(c.author_name || (c.author_email || '').split('@')[0])}</span>
+            <span class="comment-time" data-ts="${ts}">${ts ? new Date(c.created_at + 'Z').toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}${edited ? ' · edited' : ''}</span>
+            ${actions}
+          </div>
+          <div class="comment-body">${renderNotesHtml(c.body)}</div>
+        </div>`
+      }
+      const commentsHtml = (item.comments || []).map(renderCommentHtml).join('')
+      const commentsDataTag = `<script type="application/json" class="review-comments-data" data-item-id="${escHtml(item.id)}">${JSON.stringify(item.comments || [])}</script>`
+      const composerHtml = isAuthed
+        ? `<div class="comment-composer" data-item-id="${escHtml(item.id)}">
+             <input class="comment-input" type="text" placeholder="Add a comment..." />
+             <button class="comment-send-btn" type="button">Post</button>
+           </div>`
+        : ''
+      const commentsSection = `<div class="review-comments" data-item-id="${escHtml(item.id)}">
+        <div class="review-comments-label">Feedback</div>
+        <div class="comments-list">
+          <div class="comments-scroll">${commentsHtml}</div>
+          ${composerHtml}
+        </div>
+        ${commentsDataTag}
+      </div>`
+      const hasComments = (item.comments || []).length > 0
+
       let notesSection = ''
       if (isAuthed) {
-        const badgeHtml = hasNotes ? ' <span class="notes-badge">has notes</span>' : ''
+        const commentCount = (item.comments || []).length
+        const activity = hasNotes || hasComments
+        const badgeParts: string[] = []
+        if (hasNotes) badgeParts.push('<span class="notes-badge">has notes</span>')
+        if (commentCount > 0) badgeParts.push(`<span class="notes-badge comment-count-badge">${commentCount} comment${commentCount !== 1 ? 's' : ''}</span>`)
+        const badgeHtml = badgeParts.length > 0 ? ' ' + badgeParts.join(' ') : ''
 
         notesSection = `<div class="card-notes">
-          <button class="notes-accordion${hasNotes ? ' has-notes' : ''}" data-item-id="${escHtml(item.id)}">
+          <button class="notes-accordion${activity ? ' has-notes' : ''}" data-item-id="${escHtml(item.id)}">
             <svg class="notes-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            Open Notes${badgeHtml}
+            Open Notes &amp; Feedback${badgeHtml}
           </button>
           <div class="notes-panel" style="display:none">
-            <div class="notes-toolbar">
-              <button class="notes-toolbar-btn" data-action="bullet" title="Insert bullet">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-              </button>
-              <div class="notes-link-anchor">
-                <button class="notes-toolbar-btn" data-action="link" title="Add link">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-                </button>
-                <div class="notes-link-popover" style="display:none">
-                  <input type="text" class="notes-link-input" placeholder="Link name" data-field="name" />
-                  <input type="url" class="notes-link-input" placeholder="https://..." data-field="url" />
-                  <button class="notes-link-add-btn">Add link</button>
-                </div>
-              </div>
-              ${quickLinks.length > 0 ? `<div class="notes-quick-links">${quickLinks.join('')}</div>` : ''}
-            </div>
-            <div class="notes-editor" contenteditable="true" data-item-id="${escHtml(item.id)}" data-updated-at="${escHtml(item.notes_updated_at || '')}" data-placeholder="Add review notes...">${markdownToHtml(item.notes || '')}</div>
             <div class="review-images" data-item-id="${escHtml(item.id)}">
               <div class="review-images-label">Images</div>
               <div class="review-image-drop" data-item-id="${escHtml(item.id)}" tabindex="0">
@@ -792,18 +927,47 @@ router.get('/review/:id', async (req, res) => {
               </div>
             </div>
             ${imagesDataTag}
-            <div class="notes-resize-handle" title="Drag to resize"></div>
+            <div class="notes-feedback-row">
+              <div class="notes-column">
+                <div class="notes-column-label">Notes</div>
+                <div class="notes-toolbar">
+                  <button class="notes-toolbar-btn" data-action="bullet" title="Insert bullet">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                  </button>
+                  <div class="notes-link-anchor">
+                    <button class="notes-toolbar-btn" data-action="link" title="Add link">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                    </button>
+                    <div class="notes-link-popover" style="display:none">
+                      <input type="text" class="notes-link-input" placeholder="Link name" data-field="name" />
+                      <input type="url" class="notes-link-input" placeholder="https://..." data-field="url" />
+                      <button class="notes-link-add-btn">Add link</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="notes-editor" contenteditable="true" data-item-id="${escHtml(item.id)}" data-updated-at="${escHtml(item.notes_updated_at || '')}" data-placeholder="Add review notes...">${markdownToHtml(item.notes || '')}</div>
+              </div>
+              <div class="feedback-column">
+                ${commentsSection}
+              </div>
+            </div>
+            <div class="notes-feedback-resizer" title="Drag to resize notes and feedback"></div>
           </div>
         </div>`
-      } else if (hasNotes) {
+      } else if (hasNotes || hasComments) {
+        const commentCountLabel = hasComments ? `<span class="notes-badge comment-count-badge">${item.comments.length} comment${item.comments.length !== 1 ? 's' : ''}</span>` : ''
         notesSection = `<div class="card-notes">
           <button class="notes-accordion has-notes" data-item-id="${escHtml(item.id)}">
             <svg class="notes-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            Open Notes <span class="notes-badge">has notes</span>
+            Open Notes &amp; Feedback ${hasNotes ? '<span class="notes-badge">has notes</span>' : ''} ${commentCountLabel}
           </button>
           <div class="notes-panel" style="display:none">
-            <div class="notes-rendered">${renderNotesHtml(item.notes)}</div>
             ${imagesDataTag}
+            <div class="notes-feedback-row">
+              ${hasNotes ? `<div class="notes-column"><div class="notes-column-label">Notes</div><div class="notes-rendered">${renderNotesHtml(item.notes)}</div></div>` : ''}
+              <div class="feedback-column">${commentsSection}</div>
+            </div>
+            <div class="notes-feedback-resizer" title="Drag to resize notes and feedback"></div>
           </div>
         </div>`
       }
@@ -881,6 +1045,10 @@ router.get('/review/:id', async (req, res) => {
           var isOpen = panel.style.display !== 'none';
           panel.style.display = isOpen ? 'none' : 'block';
           btn.classList.toggle('open', !isOpen);
+          if (!isOpen) {
+            // Opening: scroll each comment thread to the newest message
+            panel.querySelectorAll('.comments-scroll').forEach(function(s) { s.scrollTop = s.scrollHeight; });
+          }
         });
       });
 
@@ -959,6 +1127,217 @@ router.get('/review/:id', async (req, res) => {
           rvLbOpen(trigger.dataset.itemId, parseInt(trigger.dataset.imageIndex || '0', 10));
         }
       });
+
+      // ============ COMMENTS (read + SSE — available to all viewers) ============
+
+      var CURRENT_USER_EMAIL = ${JSON.stringify((session?.email || '').toLowerCase())};
+      var CURRENT_USER_IS_ADMIN = ${JSON.stringify(!!session && session.role === 'admin')};
+      var CURRENT_REVIEW_ID = ${JSON.stringify(req.params.id)};
+
+      function escHtmlJs(s) {
+        return String(s == null ? '' : s)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      }
+      function linkifyComment(text) {
+        var safe = escHtmlJs(text);
+        safe = safe.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)]+)\\)/g,
+          '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        safe = safe.replace(/(^|\\s)(https?:\\/\\/[^\\s<&]+)/g,
+          '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+        return '<p>' + safe.replace(/\\n{2,}/g, '</p><p>').replace(/\\n/g, '<br>') + '</p>';
+      }
+      function formatCommentTime(iso) {
+        try {
+          var d = new Date(iso.indexOf('T') >= 0 ? iso : iso.replace(' ', 'T') + 'Z');
+          return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        } catch (e) { return iso; }
+      }
+      function buildCommentEl(c) {
+        var isOwn = c.author_email && c.author_email.toLowerCase() === CURRENT_USER_EMAIL;
+        var canEdit = CURRENT_USER_EMAIL && (isOwn || CURRENT_USER_IS_ADMIN);
+        var wrapper = document.createElement('div');
+        wrapper.className = 'comment' + (isOwn ? ' own' : '');
+        wrapper.setAttribute('data-comment-id', c.id);
+        wrapper.setAttribute('data-author-email', c.author_email || '');
+        var edited = c.updated_at && c.created_at && c.updated_at !== c.created_at;
+        var actions = canEdit
+          ? '<div class="comment-actions">' +
+              '<button class="comment-edit-btn" data-comment-id="' + escHtmlJs(c.id) + '">Edit</button>' +
+              '<button class="comment-delete-btn" data-comment-id="' + escHtmlJs(c.id) + '">Delete</button>' +
+            '</div>'
+          : '';
+        wrapper.innerHTML =
+          '<div class="comment-head">' +
+            '<span class="comment-author">' + escHtmlJs(c.author_name || (c.author_email || '').split('@')[0]) + '</span>' +
+            '<span class="comment-time">' + escHtmlJs(formatCommentTime(c.created_at || '')) + (edited ? ' · edited' : '') + '</span>' +
+            actions +
+          '</div>' +
+          '<div class="comment-body">' + linkifyComment(c.body || '') + '</div>';
+        return wrapper;
+      }
+      // Mark existing server-rendered "own" comments for styling
+      document.querySelectorAll('.comment').forEach(function(el) {
+        var e = (el.getAttribute('data-author-email') || '').toLowerCase();
+        if (e && e === CURRENT_USER_EMAIL) el.classList.add('own');
+      });
+
+      // SSE: listen for new/updated/deleted comments
+      (function() {
+        if (typeof EventSource === 'undefined') return;
+        try {
+          var es = new EventSource('/api/events');
+          es.addEventListener('review-comment', function(ev) {
+            try {
+              var payload = JSON.parse(ev.data);
+              if (payload.review_id !== CURRENT_REVIEW_ID) return;
+              if (payload.type === 'created') {
+                var c = payload.comment;
+                if (!c) return;
+                // Don't double-add: skip if we already rendered it
+                var existing = document.querySelector('.comment[data-comment-id="' + c.id + '"]');
+                if (existing) return;
+                var list = document.querySelector('.review-comments[data-item-id="' + c.review_item_id + '"] .comments-scroll');
+                if (!list) return;
+                list.appendChild(buildCommentEl(c));
+                list.scrollTop = list.scrollHeight;
+                bumpCommentBadge(c.review_item_id, 1);
+              } else if (payload.type === 'updated') {
+                var c2 = payload.comment;
+                if (!c2) return;
+                var el = document.querySelector('.comment[data-comment-id="' + c2.id + '"]');
+                if (!el) return;
+                var next = buildCommentEl(c2);
+                el.replaceWith(next);
+              } else if (payload.type === 'deleted') {
+                var target = document.querySelector('.comment[data-comment-id="' + payload.comment_id + '"]');
+                if (target) target.remove();
+                if (payload.review_item_id) bumpCommentBadge(payload.review_item_id, -1);
+              }
+            } catch (e) { console.error('SSE comment parse error:', e); }
+          });
+        } catch (e) { console.error('SSE init error:', e); }
+      })();
+
+      function bumpCommentBadge(itemId, delta) {
+        var card = document.querySelector('.review-comments[data-item-id="' + itemId + '"]');
+        if (!card) return;
+        var acc = card.closest('.card-notes') && card.closest('.card-notes').querySelector('.notes-accordion');
+        if (!acc) return;
+        var badge = acc.querySelector('.comment-count-badge');
+        var list = card.querySelector('.comments-scroll');
+        var newCount = list ? list.querySelectorAll('.comment').length : 0;
+        if (newCount <= 0) {
+          if (badge) badge.remove();
+          return;
+        }
+        var label = newCount + ' comment' + (newCount !== 1 ? 's' : '');
+        if (badge) { badge.textContent = label; return; }
+        badge = document.createElement('span');
+        badge.className = 'notes-badge comment-count-badge';
+        badge.textContent = label;
+        acc.appendChild(document.createTextNode(' '));
+        acc.appendChild(badge);
+        acc.classList.add('has-notes');
+      }
+
+      ${isAuthed ? `
+      // ============ COMMENTS (write — authed only) ============
+      document.querySelectorAll('.comment-composer').forEach(function(composer) {
+        var itemId = composer.dataset.itemId;
+        var input = composer.querySelector('.comment-input');
+        var sendBtn = composer.querySelector('.comment-send-btn');
+        function send() {
+          var body = input.value.trim();
+          if (!body) return;
+          sendBtn.disabled = true;
+          fetch('/api/review-items/' + itemId + '/comments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body: body })
+          }).then(function(r) {
+            if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || 'Post failed'); });
+            return r.json();
+          }).then(function(c) {
+            input.value = '';
+            // Append locally (SSE will also fire, but buildCommentEl dedupes by id)
+            var list = composer.parentElement.querySelector('.comments-scroll');
+            if (list && !list.querySelector('.comment[data-comment-id="' + c.id + '"]')) {
+              list.appendChild(buildCommentEl(c));
+              list.scrollTop = list.scrollHeight;
+              bumpCommentBadge(itemId, 1);
+            }
+          }).catch(function(err) {
+            alert('Could not post comment: ' + err.message);
+          }).finally(function() {
+            sendBtn.disabled = false;
+          });
+        }
+        sendBtn.addEventListener('click', send);
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); send(); }
+        });
+      });
+
+      // Edit + delete (event delegation)
+      document.addEventListener('click', function(e) {
+        var editBtn = e.target.closest('.comment-edit-btn');
+        if (editBtn) {
+          var el = editBtn.closest('.comment');
+          if (!el || el.classList.contains('editing')) return;
+          el.classList.add('editing');
+          var bodyDiv = el.querySelector('.comment-body');
+          var original = bodyDiv.textContent.trim();
+          var ta = document.createElement('textarea');
+          ta.className = 'comment-edit-textarea';
+          ta.value = original;
+          var actions = document.createElement('div');
+          actions.className = 'comment-edit-actions';
+          actions.innerHTML = '<button class="comment-send-btn comment-save-btn">Save</button>' +
+                              '<button class="comment-actions comment-cancel-btn" style="background:none;border:1px solid var(--rv-border);padding:0.4rem 0.75rem;border-radius:6px;cursor:pointer;font-size:0.78rem;">Cancel</button>';
+          bodyDiv.replaceWith(ta);
+          el.appendChild(actions);
+          ta.focus();
+          actions.querySelector('.comment-cancel-btn').addEventListener('click', function() {
+            ta.replaceWith(bodyDiv);
+            actions.remove();
+            el.classList.remove('editing');
+          });
+          actions.querySelector('.comment-save-btn').addEventListener('click', function() {
+            var newBody = ta.value.trim();
+            if (!newBody) { alert('Comment cannot be empty'); return; }
+            fetch('/api/review-item-comments/' + el.dataset.commentId, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ body: newBody })
+            }).then(function(r) {
+              if (!r.ok) return r.json().then(function(e2) { throw new Error(e2.error || 'Save failed'); });
+              return r.json();
+            }).then(function(c) {
+              var next = buildCommentEl(c);
+              el.replaceWith(next);
+            }).catch(function(err) { alert('Could not save: ' + err.message); });
+          });
+          return;
+        }
+        var delBtn = e.target.closest('.comment-delete-btn');
+        if (delBtn) {
+          if (!confirm('Delete this comment? This cannot be undone.')) return;
+          var el = delBtn.closest('.comment');
+          if (!el) return;
+          var itemEl = delBtn.closest('.review-comments');
+          var itemId = itemEl && itemEl.dataset.itemId;
+          fetch('/api/review-item-comments/' + el.dataset.commentId, {
+            method: 'DELETE'
+          }).then(function(r) {
+            if (!r.ok) return r.json().then(function(e2) { throw new Error(e2.error || 'Delete failed'); });
+            el.remove();
+            if (itemId) bumpCommentBadge(itemId, -1);
+          }).catch(function(err) { alert('Could not delete: ' + err.message); });
+          return;
+        }
+      });
+      ` : ''}
 
       ${isAuthed ? `
       // htmlToMarkdown
@@ -1120,20 +1499,6 @@ router.get('/review/:id', async (req, res) => {
         });
       });
 
-      // Quick links: insert project link at cursor
-      document.querySelectorAll('.notes-quick-link').forEach(function(btn) {
-        btn.addEventListener('mousedown', function(e) { e.preventDefault(); });
-        btn.addEventListener('click', function() {
-          var panel = btn.closest('.notes-panel');
-          var editor = panel.querySelector('.notes-editor');
-          editor.focus();
-          var safeName = btn.dataset.name.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          var safeUrl = btn.dataset.url.replace(/"/g, '&quot;');
-          document.execCommand('insertHTML', false, '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" class="notes-inline-link">' + safeName + '</a>');
-          editor.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-      });
-
       // Close link popovers on outside click
       document.addEventListener('mousedown', function(e) {
         document.querySelectorAll('.notes-link-popover').forEach(function(pop) {
@@ -1143,16 +1508,28 @@ router.get('/review/:id', async (req, res) => {
         });
       });
 
-      // Resize handle
-      document.querySelectorAll('.notes-resize-handle').forEach(function(handle) {
-        var editor = handle.closest('.notes-panel').querySelector('.notes-editor');
-        if (!editor) return;
+      // ============ SHARED RESIZER (notes + feedback) ============
+      document.querySelectorAll('.notes-feedback-resizer').forEach(function(handle) {
+        var row = handle.previousElementSibling;
+        if (!row || !row.classList.contains('notes-feedback-row')) return;
         handle.addEventListener('mousedown', function(e) {
           e.preventDefault();
+          handle.classList.add('dragging');
           var startY = e.clientY;
-          var startH = editor.offsetHeight;
-          function onMove(ev) { editor.style.height = Math.max(80, startH + ev.clientY - startY) + 'px'; }
-          function onUp() { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); }
+          var startH = row.getBoundingClientRect().height;
+          document.body.style.cursor = 'ns-resize';
+          document.body.style.userSelect = 'none';
+          function onMove(ev) {
+            var next = Math.max(140, Math.min(900, startH + ev.clientY - startY));
+            row.style.setProperty('--nf-height', next + 'px');
+          }
+          function onUp() {
+            handle.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          }
           document.addEventListener('mousemove', onMove);
           document.addEventListener('mouseup', onUp);
         });
@@ -1842,11 +2219,188 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       margin-left: 0.25rem;
     }
     [data-theme="dark"] .notes-badge { background: rgba(59,130,246,0.12); }
-    .notes-panel { padding: 0 1.25rem 1rem; }
+    .comment-count-badge { background: rgba(34,197,94,0.1); color: #15803d; }
+    [data-theme="dark"] .comment-count-badge { background: rgba(34,197,94,0.15); color: #86efac; }
+    .notes-panel { padding: 0 1.25rem 0.35rem; }
 
-    /* Notes toolbar */
+    /* Two-column layout inside "Open Notes & Feedback".
+       Height lives on the row via --nf-height (default 260px) and both
+       children stretch to fill. A single .notes-feedback-resizer handle
+       below the row adjusts --nf-height so notes + feedback grow together.
+       Explicit grid-template-rows: 1fr forces the single row to fill the
+       container height — without it the row stays content-sized and the
+       columns don't actually grow when the container expands. */
+    .notes-feedback-row {
+      --nf-height: 260px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: 1fr;
+      gap: 1rem;
+      align-items: stretch;
+      height: var(--nf-height);
+      margin-top: 1.25rem;
+    }
+    .notes-column, .feedback-column {
+      min-width: 0; min-height: 0;
+      display: flex; flex-direction: column;
+      height: 100%;
+    }
+    /* The feedback column wraps .review-comments — forward the height down */
+    .feedback-column > .review-comments { flex: 1 1 auto; min-height: 0; height: auto; }
+    /* Shared bottom-bar resize handle */
+    .notes-feedback-resizer {
+      height: 14px;
+      margin-top: 4px;
+      cursor: ns-resize;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 4px;
+      background: transparent;
+      transition: background 0.15s;
+    }
+    .notes-feedback-resizer::after {
+      content: ''; display: block; width: 64px; height: 5px;
+      border-radius: 3px; background: var(--rv-text-dim);
+      opacity: 0.55;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .notes-feedback-resizer:hover::after { opacity: 0.9; }
+    .notes-feedback-resizer:hover { background: var(--rv-bg-subtle); }
+    .notes-feedback-resizer.dragging::after { background: var(--rv-accent); opacity: 1; }
+    .notes-feedback-resizer.dragging { background: var(--rv-bg-subtle); }
+    .notes-column-label {
+      font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--rv-text-dim); margin-bottom: 0.5rem;
+    }
+
+    /* Comments thread */
+    .review-comments {
+      display: flex; flex-direction: column; height: 100%;
+    }
+    .review-comments-label {
+      font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--rv-text-dim); margin-bottom: 0.5rem;
+    }
+    /* .comments-list is the bordered outer container. Inside:
+       - .comments-scroll — the actual scrolling area (flex:1)
+       - .comment-composer — pinned at the bottom as a visually separate row
+       Height fills the shared .notes-feedback-row. */
+    .comments-list {
+      display: flex; flex-direction: column;
+      flex: 1 1 auto; min-height: 0;
+      border: 1px solid var(--rv-border);
+      border-radius: 8px;
+      background: var(--rv-bg-subtle);
+      overflow: hidden;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.04),
+                  inset 0 -2px 4px rgba(0,0,0,0.04);
+    }
+    [data-theme="dark"] .comments-list {
+      box-shadow: inset 0 2px 6px rgba(0,0,0,0.25),
+                  inset 0 -2px 6px rgba(0,0,0,0.25);
+    }
+    .comments-scroll {
+      flex: 1 1 auto; min-height: 0;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 0.6rem;
+      padding: 0.5rem 0.5rem 0.5rem 0.6rem;
+    }
+    .comments-scroll:empty::before {
+      content: 'No comments yet.';
+      color: var(--rv-text-dim); font-size: 0.78rem; font-style: italic;
+    }
+    .comments-scroll::-webkit-scrollbar { width: 10px; }
+    .comments-scroll::-webkit-scrollbar-thumb {
+      background: var(--rv-border); border-radius: 5px;
+      border: 2px solid var(--rv-bg-subtle);
+    }
+    .comments-scroll::-webkit-scrollbar-thumb:hover { background: var(--rv-text-dim); }
+    .comments-scroll::-webkit-scrollbar-track { background: transparent; }
+    /* Comments inside the scroll container — lift against the inset bg */
+    .comments-scroll .comment { background: var(--rv-bg); }
+    .comment {
+      background: var(--rv-bg-subtle); border: 1px solid var(--rv-border-subtle);
+      border-radius: 8px; padding: 0.55rem 0.75rem;
+      animation: comment-fade-in 0.3s ease-out;
+    }
+    @keyframes comment-fade-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .comment.own { border-color: rgba(37,99,235,0.3); background: rgba(37,99,235,0.04); }
+    [data-theme="dark"] .comment.own { border-color: rgba(59,130,246,0.35); background: rgba(59,130,246,0.08); }
+    .comment-head {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.7rem; margin-bottom: 0.25rem;
+    }
+    .comment-author { font-weight: 600; color: var(--rv-text); }
+    .comment-time { color: var(--rv-text-dim); }
+    .comment-actions { margin-left: auto; display: flex; gap: 0.35rem; }
+    .comment-actions button {
+      background: none; border: none; padding: 0.1rem 0.3rem;
+      font-size: 0.68rem; color: var(--rv-text-dim); cursor: pointer;
+      border-radius: 3px;
+    }
+    .comment-actions button:hover { background: var(--rv-bg); color: var(--rv-accent); }
+    .comment-body {
+      font-size: 0.82rem; line-height: 1.5; color: var(--rv-text);
+      word-wrap: break-word;
+    }
+    .comment-body p { margin: 0.25rem 0; }
+    .comment-body p:first-child { margin-top: 0; }
+    .comment-body p:last-child { margin-bottom: 0; }
+    .comment-body a { color: var(--rv-accent); }
+    .comment-edit-textarea {
+      width: 100%; font-family: inherit; font-size: 0.82rem; line-height: 1.5;
+      padding: 0.4rem 0.5rem; border: 1px solid var(--rv-border); border-radius: 6px;
+      background: var(--rv-bg); color: var(--rv-text); resize: vertical; min-height: 4rem;
+    }
+    .comment-edit-actions { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
+    /* Composer — pinned at the bottom of the list container, single pill with input + send */
+    .comment-composer {
+      flex: 0 0 auto;
+      display: flex; align-items: stretch; gap: 0;
+      padding: 0.35rem;
+      border-top: 1px solid var(--rv-border);
+      background: var(--rv-bg);
+    }
+    .comment-input {
+      flex: 1 1 auto; min-width: 0;
+      height: 32px; padding: 0 0.65rem;
+      font-family: inherit; font-size: 0.82rem; line-height: 32px;
+      border: 1px solid var(--rv-border);
+      border-right: none;
+      border-radius: 6px 0 0 6px;
+      background: var(--rv-bg); color: var(--rv-text);
+      outline: none;
+    }
+    .comment-input:focus {
+      border-color: var(--rv-accent);
+      box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+      z-index: 1;
+    }
+    .comment-send-btn {
+      flex: 0 0 auto;
+      height: 32px; padding: 0 0.85rem;
+      background: var(--rv-accent); color: white;
+      border: 1px solid var(--rv-accent);
+      border-radius: 0 6px 6px 0;
+      font-size: 0.78rem; font-weight: 500;
+      cursor: pointer; white-space: nowrap;
+    }
+    .comment-send-btn:hover { opacity: 0.9; }
+    .comment-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Notes toolbar — matches the shared .rte-toolbar pattern in-app */
     .notes-toolbar {
-      display: flex; align-items: flex-start; gap: 0.25rem; padding: 0.15rem 0; margin-bottom: 0.35rem;
+      display: flex; align-items: center; gap: 0.25rem;
+      padding: 0.35rem 0.5rem;
+      background: color-mix(in srgb, var(--rv-bg) 92.5%, black);
+      border: 1px solid var(--rv-border);
+      border-radius: 6px 6px 0 0;
+      border-bottom: none;
+    }
+    [data-theme="dark"] .notes-toolbar {
+      background: color-mix(in srgb, var(--rv-bg) 88%, white);
     }
     .notes-toolbar-btn {
       display: inline-flex; align-items: center; justify-content: center;
@@ -1875,24 +2429,18 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     }
     .notes-link-add-btn:hover { opacity: 0.85; }
 
-    /* Quick links */
-    .notes-quick-links {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin-left: 0.25rem;
-    }
-    .notes-quick-link {
-      display: inline-flex; align-items: center; gap: 0.2rem;
-      font-size: 0.72rem; font-family: inherit; color: var(--rv-accent); text-decoration: none;
-      padding: 0.15rem 0.4rem; background: var(--rv-bg);
-      border: 1px solid var(--rv-border-subtle); border-radius: 4px;
-      cursor: pointer; transition: all 0.15s;
-    }
-    .notes-quick-link:hover { border-color: var(--rv-accent); background: rgba(37,99,235,0.05); }
-
-    /* ContentEditable editor */
+    /* ContentEditable editor — continues from .notes-toolbar (no top border,
+       bottom-only rounded corners) to match the in-app .rte-editor pattern.
+       Height is driven by the parent .notes-column flex layout so it fills
+       the shared row height set by the .notes-feedback-resizer handle. */
     .notes-editor {
-      width: 100%; min-height: 300px; padding: 0.5rem 0.6rem; font-size: 0.8rem;
+      width: 100%; flex: 1 1 auto; min-height: 0;
+      padding: 0.5rem 0.6rem; font-size: 0.8rem;
       font-family: inherit; line-height: 1.5;
-      background: var(--rv-bg); border: 1px solid var(--rv-border); border-radius: 6px;
+      background: var(--rv-bg);
+      border: 1px solid var(--rv-border);
+      border-top: none;
+      border-radius: 0 0 6px 6px;
       color: var(--rv-text); outline: none; overflow-y: auto;
       white-space: pre-wrap; word-wrap: break-word; cursor: text;
       transition: border-color 0.2s, box-shadow 0.2s;
@@ -1923,17 +2471,6 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       cursor: pointer; font-weight: 500;
     }
     .notes-inline-link:hover { opacity: 0.8; }
-
-    /* Resize handle */
-    .notes-resize-handle {
-      height: 8px; cursor: ns-resize; display: flex; align-items: center; justify-content: center;
-      margin-top: 2px; opacity: 0.4; transition: opacity 0.15s;
-    }
-    .notes-resize-handle:hover { opacity: 0.8; }
-    .notes-resize-handle::after {
-      content: ''; display: block; width: 32px; height: 3px;
-      border-radius: 2px; background: var(--rv-text-dim);
-    }
 
     /* Rendered notes (readonly) */
     .notes-rendered {
@@ -2121,7 +2658,8 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       .card-links { padding: 0.5rem 1rem; }
       .card-notes { padding: 0; }
       .notes-accordion { padding: 0.6rem 1rem; }
-      .notes-panel { padding: 0 1rem 1rem; }
+      .notes-panel { padding: 0 1rem 0.35rem; }
+      .notes-feedback-row { grid-template-columns: minmax(0, 1fr); }
     }
   </style>
   <script>

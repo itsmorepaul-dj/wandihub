@@ -375,6 +375,20 @@ export const initSchema = async () => {
   // Migration: per-item optional review_date override (null = inherit from parent review)
   await run(`ALTER TABLE review_items ADD COLUMN review_date TEXT`).catch(() => {})
 
+  // Per-review-item comment thread (chat). Comments are author-stamped; authors
+  // can edit or delete their own, admins can do both. Rendered on the public
+  // review page beneath the pinned notes summary.
+  await run(`CREATE TABLE IF NOT EXISTS review_item_comments (
+    id TEXT PRIMARY KEY,
+    review_item_id TEXT NOT NULL,
+    author_email TEXT NOT NULL,
+    author_name TEXT DEFAULT '',
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`).catch(e => console.error('review_item_comments init error:', e.message))
+  await run(`CREATE INDEX IF NOT EXISTS idx_review_comments_item ON review_item_comments(review_item_id)`).catch(() => {})
+
   // Review-scoped images: each review_item has its own gallery, independent of the
   // project's gallery. Files are stored in IMAGES_DIR; each row owns its own filename
   // so duplicate/delete operate independently.

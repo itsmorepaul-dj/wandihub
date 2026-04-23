@@ -29,9 +29,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Per-project comment threads on the public review page — authenticated users can leave comments on any project in a review. Each comment is stamped with the user\'s name and time. Edit/delete your own; admins can moderate. Comments show up live across open tabs — no refresh needed.',
   'Gemini notes on reviews — paste Gemini-generated meeting notes from a Google Doc into the new field under the review description. Headings, bullets, bold, and links are preserved and appear on the public review page as a "Gemini notes" accordion above the project cards. Empty field = hidden.',
-  'Review dates, per-review image galleries, and copy-to-review — each review has its own date and each project in a review keeps its own exclusive images. Use the copy icon on any row to clone an item into another review (deep copy of notes and images). Destructive actions now confirm first, and the edit page is mobile-friendly.',
-  'Review time planner — set a total meeting length; each project gets an auto-calculated time slot. Drag to rebalance, or mark a project "Exempt" to drop it into a "For awareness…" section.',
 ]
 
 
