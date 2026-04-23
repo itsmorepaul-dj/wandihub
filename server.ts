@@ -33,7 +33,7 @@ app.use(express.json({ limit: '10mb' }));
 const versionGuard = createVersionGuard(() => SITE_VERSION)
 app.use((req, res, next) => {
   if (['POST', 'PUT', 'DELETE'].includes(req.method) && req.path.startsWith('/api/')) {
-    const skipPaths = ['/api/auth/', '/api/upload-db', '/api/seed', '/api/maintenance', '/api/review-items/', '/api/images', '/api/review-item-images']
+    const skipPaths = ['/api/auth/', '/api/upload-db', '/api/seed', '/api/maintenance', '/api/review-items/', '/api/images', '/api/review-item-images', '/api/review-item-comments']
     if (skipPaths.some(p => req.path.startsWith(p))) return next()
     return versionGuard(req, res, next)
   }

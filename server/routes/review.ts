@@ -1293,8 +1293,8 @@ router.get('/review/:id', async (req, res) => {
           ta.value = original;
           var actions = document.createElement('div');
           actions.className = 'comment-edit-actions';
-          actions.innerHTML = '<button class="comment-send-btn comment-save-btn">Save</button>' +
-                              '<button class="comment-actions comment-cancel-btn" style="background:none;border:1px solid var(--rv-border);padding:0.4rem 0.75rem;border-radius:6px;cursor:pointer;font-size:0.78rem;">Cancel</button>';
+          actions.innerHTML = '<button class="comment-cancel-btn">Cancel</button>' +
+                              '<button class="comment-save-btn">Save</button>';
           bodyDiv.replaceWith(ta);
           el.appendChild(actions);
           ta.focus();
@@ -2354,7 +2354,32 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       padding: 0.4rem 0.5rem; border: 1px solid var(--rv-border); border-radius: 6px;
       background: var(--rv-bg); color: var(--rv-text); resize: vertical; min-height: 4rem;
     }
-    .comment-edit-actions { display: flex; gap: 0.4rem; margin-top: 0.4rem; }
+    .comment-edit-actions {
+      display: flex; gap: 0.4rem; margin-top: 0.4rem;
+      justify-content: flex-end;
+    }
+    .comment-save-btn, .comment-cancel-btn {
+      height: 32px; padding: 0 0.85rem;
+      font-size: 0.78rem; font-weight: 500; font-family: inherit;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .comment-save-btn {
+      background: var(--rv-accent); color: white;
+      border: 1px solid var(--rv-accent);
+    }
+    .comment-save-btn:hover { opacity: 0.9; }
+    .comment-save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .comment-cancel-btn {
+      background: transparent; color: var(--rv-text-secondary);
+      border: 1px solid var(--rv-border);
+    }
+    .comment-cancel-btn:hover {
+      background: var(--rv-bg-subtle);
+      border-color: var(--rv-text-dim);
+      color: var(--rv-text);
+    }
     /* Composer — pinned at the bottom of the list container, single pill with input + send */
     .comment-composer {
       flex: 0 0 auto;
