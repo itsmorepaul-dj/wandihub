@@ -3,6 +3,7 @@ import { run, get, all, upsertAssignment } from '../db.js';
 import { updateDbVersion, logActivity } from '../version.js';
 import { getUserEmail } from '../auth.js';
 import { reconcileProjectDesignerAssignments, syncAssignmentToProjectDesigners } from './projects.js';
+import { pinRecipients, userIdForEmail, recipientForTeamMember } from '../activity.js';
 
 const router = express.Router();
 
@@ -75,7 +76,11 @@ router.post('/capacity/assignments', async (req, res) => {
     await updateDbVersion()
     const projName = (await get('SELECT name FROM projects WHERE id = ?', [project_id]) as any)?.name || project_id
     const designerName = (await get('SELECT name FROM team WHERE id = ?', [designer_id]) as any)?.name || designer_id
-    await logActivity('capacity', 'update', projName, getUserEmail(req), `${designerName} → ${allocation_percent}%`)
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const activityId = await logActivity('capacity', 'update', projName, initiatorEmail, `${designerName} → ${allocation_percent}%`)
+    // Fan out to the designer whose allocation changed (not the initiator).
+    await pinRecipients(activityId, await recipientForTeamMember(designer_id, initiatorId))
     res.json({ success: true, id })
   } catch (e: any) { res.status(500).json({error: e.message}); }
 })
@@ -88,7 +93,12 @@ router.delete('/capacity/assignments/:id', async (req, res) => {
       await syncAssignmentToProjectDesigners(existing.project_id, existing.designer_id, false)
     }
     await updateDbVersion()
-    await logActivity('capacity', 'delete', existing?.project_name || req.params.id, getUserEmail(req), `Removed ${existing?.designer_name || 'assignment'}`)
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const activityId = await logActivity('capacity', 'delete', existing?.project_name || req.params.id, initiatorEmail, `Removed ${existing?.designer_name || 'assignment'}`)
+    if (existing?.designer_id) {
+      await pinRecipients(activityId, await recipientForTeamMember(existing.designer_id, initiatorId))
+    }
     res.json({ success: true })
   } catch (e: any) { res.status(500).json({error: e.message}); }
 })
@@ -107,7 +117,10 @@ router.put('/capacity/availability/:designerId', async (req, res) => {
     await updateDbVersion()
     const designer = await get('SELECT name, weekly_hours, excluded FROM team WHERE id = ?', [req.params.designerId]) as any
     const detail = weekly_hours !== undefined ? `Weekly hours → ${weekly_hours}h` : `Excluded → ${excluded}`
-    await logActivity('capacity', 'update', designer?.name || req.params.designerId, getUserEmail(req), detail)
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const activityId = await logActivity('capacity', 'update', designer?.name || req.params.designerId, initiatorEmail, detail)
+    await pinRecipients(activityId, await recipientForTeamMember(req.params.designerId, initiatorId))
     res.json({ success: true })
   } catch (e: any) { res.status(500).json({error: e.message}); }
 })

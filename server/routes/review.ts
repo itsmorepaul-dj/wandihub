@@ -5,34 +5,7 @@ import { run, get, all, IMAGES_DIR } from '../db.js';
 import { getUserEmail, sessions, getSessionIdFromRequest, setSessionCookie } from '../auth.js';
 import { broadcast } from '../sse.js';
 import { logActivity, updateDbVersion } from '../version.js';
-import { recipientsForProject, pinRecipients } from '../activity.js';
-
-// Resolve a user_id from a (possibly null) email. Returns null if no matching user.
-async function userIdForEmail(email: string | null | undefined): Promise<number | null> {
-  if (!email) return null
-  const row = await get('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
-  return row?.id ?? null
-}
-
-// Resolve the recipient user_ids for a project: every designer assigned to it
-// (projects.designers is a JSON array of display names), joined through team.email
-// then users.id. Silent no-op for unmatched names.
-async function recipientIdsForProject(projectId: string, excludeUserId: number | null): Promise<number[]> {
-  const p = await get('SELECT designers FROM projects WHERE id = ?', [projectId]) as any
-  if (!p?.designers) return []
-  let names: string[] = []
-  try { names = JSON.parse(p.designers) || [] } catch { names = [] }
-  if (names.length === 0) return []
-  const ids = new Set<number>()
-  for (const n of names) {
-    const t = await get('SELECT email FROM team WHERE name = ?', [n]) as any
-    const email = t?.email
-    if (!email) continue
-    const u = await get('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
-    if (u?.id && u.id !== excludeUserId) ids.add(u.id)
-  }
-  return Array.from(ids)
-}
+import { recipientsForProject, pinRecipients, userIdForEmail } from '../activity.js';
 
 const router = express.Router();
 
@@ -99,12 +72,26 @@ router.post('/api/reviews', async (req, res) => {
       [id, title || 'Design Review', week || null, email, description || '', reviewDate]
     )
     if (project_ids && Array.isArray(project_ids)) {
+      const initiatorId = await userIdForEmail(email)
       for (let i = 0; i < project_ids.length; i++) {
         const itemId = Math.random().toString(36).substring(2) + Date.now().toString(36) + i
         await run(
           'INSERT INTO review_items (id, review_id, project_id, rank) VALUES (?, ?, ?, ?)',
           [itemId, id, project_ids[i], i]
         )
+        try {
+          const p = await get('SELECT id, name FROM projects WHERE id = ?', [project_ids[i]]) as any
+          const detailsJson = JSON.stringify({
+            review_id: id,
+            review_title: title || 'Design Review',
+            review_date: reviewDate,
+            project_id: project_ids[i],
+            project_name: p?.name || 'Project',
+            summary: `Added to ${title || 'a new review'}${reviewDate ? ` on ${reviewDate}` : ''}`,
+          })
+          const activityId = await logActivity('review', 'update', p?.name || project_ids[i], email, detailsJson)
+          await pinRecipients(activityId, await recipientsForProject(project_ids[i], initiatorId))
+        } catch (e: any) { console.error('Create-review fan-out error:', e.message) }
       }
     }
     const review = await get('SELECT * FROM reviews WHERE id = ?', [id])
@@ -178,6 +165,25 @@ router.post('/api/reviews/:id/items', async (req, res) => {
       'INSERT INTO review_items (id, review_id, project_id, rank) VALUES (?, ?, ?, ?)',
       [id, req.params.id, project_id, rank]
     )
+    // Fan-out: tell the project's designers (except the scheduler) that their
+    // project got added to a review. Use a JSON details payload so the panel
+    // can render a friendly summary and link to the review.
+    try {
+      const r = await get('SELECT id, title, review_date FROM reviews WHERE id = ?', [req.params.id]) as any
+      const p = await get('SELECT id, name FROM projects WHERE id = ?', [project_id]) as any
+      const initiatorEmail = getUserEmail(req)
+      const initiatorId = await userIdForEmail(initiatorEmail)
+      const detailsJson = JSON.stringify({
+        review_id: req.params.id,
+        review_title: r?.title || 'Review',
+        review_date: r?.review_date || null,
+        project_id,
+        project_name: p?.name || 'Project',
+        summary: `Added to ${r?.title || 'a review'}${r?.review_date ? ` on ${r.review_date}` : ''}`,
+      })
+      const activityId = await logActivity('review', 'update', p?.name || project_id, initiatorEmail, detailsJson)
+      await pinRecipients(activityId, await recipientsForProject(project_id, initiatorId))
+    } catch (e: any) { console.error('Add-to-review fan-out error:', e.message) }
     res.json({ id, review_id: req.params.id, project_id, rank })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -401,11 +407,9 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
     const activityId = await logActivity('review', 'comment', item.project_name || 'Unknown project', email, detailsJson)
     if (activityId) {
       const recipients = item.project_id
-        ? await recipientIdsForProject(item.project_id, commenterUserId)
+        ? await recipientsForProject(item.project_id, commenterUserId)
         : []
-      for (const uid of recipients) {
-        await run('INSERT OR IGNORE INTO activity_recipients (activity_id, user_id) VALUES (?, ?)', [activityId, uid])
-      }
+      await pinRecipients(activityId, recipients)
       // The commenter has already engaged with the item — auto-mark all prior
       // comment activities on it as read for them.
       if (commenterUserId) {

@@ -42,7 +42,12 @@ router.post('/projects', async (req, res) => {
     await syncProjectDesignersToAssignments(projectId, designers || [])
 
     await updateDbVersion()
-    await logActivity('project', id ? 'update' : 'create', name || projectId, getUserEmail(req))
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const activityId = await logActivity('project', id ? 'update' : 'create', name || projectId, initiatorEmail)
+    // Fan out to assigned designers (now reflects the new list), minus the editor.
+    const recipients = await recipientsForProject(projectId, initiatorId)
+    await pinRecipients(activityId, recipients)
     const saved = await get('SELECT * FROM projects WHERE id = ?', [projectId])
     res.json(saved);
   } catch (e: any) { res.status(500).json({error: e.message}); }
@@ -51,10 +56,15 @@ router.post('/projects', async (req, res) => {
 router.delete('/projects/:id', async (req, res) => {
   try {
     const existing = await get('SELECT name FROM projects WHERE id = ?', [req.params.id]) as any
+    // Snapshot recipients BEFORE delete — `projects.designers` disappears in the row-delete.
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const recipients = await recipientsForProject(req.params.id, initiatorId)
     await run('DELETE FROM projects WHERE id = ?', [req.params.id]);
     await run('DELETE FROM project_assignments WHERE project_id = ?', [req.params.id]);
     await updateDbVersion()
-    await logActivity('project', 'delete', existing?.name || req.params.id, getUserEmail(req))
+    const activityId = await logActivity('project', 'delete', existing?.name || req.params.id, initiatorEmail)
+    await pinRecipients(activityId, recipients)
     res.json({success: true});
   } catch (e: any) { res.status(500).json({error: e.message}); }
 });
@@ -65,7 +75,10 @@ router.put('/projects/:id/done', async (req, res) => {
     await run("UPDATE projects SET status = 'done', updatedAt = datetime('now') WHERE id = ?", [req.params.id])
     await run('UPDATE project_assignments SET allocation_percent = 0 WHERE project_id = ?', [req.params.id])
     await updateDbVersion()
-    await logActivity('project', 'update', proj?.name || req.params.id, getUserEmail(req), 'Marked as done')
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const activityId = await logActivity('project', 'update', proj?.name || req.params.id, initiatorEmail, 'Marked as done')
+    await pinRecipients(activityId, await recipientsForProject(req.params.id, initiatorId))
     res.json({ success: true })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -75,7 +88,10 @@ router.put('/projects/:id/undone', async (req, res) => {
     const proj = await get('SELECT name FROM projects WHERE id = ?', [req.params.id]) as any
     await run("UPDATE projects SET status = 'active', updatedAt = datetime('now') WHERE id = ?", [req.params.id])
     await updateDbVersion()
-    await logActivity('project', 'update', proj?.name || req.params.id, getUserEmail(req), 'Restored to active')
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const activityId = await logActivity('project', 'update', proj?.name || req.params.id, initiatorEmail, 'Restored to active')
+    await pinRecipients(activityId, await recipientsForProject(req.params.id, initiatorId))
     res.json({ success: true })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -90,7 +106,10 @@ router.put('/projects/:id/archive', async (req, res) => {
     await run("UPDATE projects SET status = 'archived', archivedQuarter = ?, updatedAt = datetime('now') WHERE id = ?", [quarter, req.params.id])
     await run('UPDATE project_assignments SET allocation_percent = 0 WHERE project_id = ?', [req.params.id])
     await updateDbVersion()
-    await logActivity('project', 'update', proj?.name || req.params.id, getUserEmail(req), `Archived to ${quarter}`)
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const activityId = await logActivity('project', 'update', proj?.name || req.params.id, initiatorEmail, `Archived to ${quarter}`)
+    await pinRecipients(activityId, await recipientsForProject(req.params.id, initiatorId))
     res.json({ success: true })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -100,7 +119,10 @@ router.put('/projects/:id/unarchive', async (req, res) => {
     const proj = await get('SELECT name, archivedQuarter FROM projects WHERE id = ?', [req.params.id]) as any
     await run("UPDATE projects SET archivedQuarter = NULL, status = 'active', updatedAt = datetime('now') WHERE id = ?", [req.params.id])
     await updateDbVersion()
-    await logActivity('project', 'update', proj?.name || req.params.id, getUserEmail(req), `Restored from archive (${proj?.archivedQuarter || 'unknown'})`)
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
+    const activityId = await logActivity('project', 'update', proj?.name || req.params.id, initiatorEmail, `Restored from archive (${proj?.archivedQuarter || 'unknown'})`)
+    await pinRecipients(activityId, await recipientsForProject(req.params.id, initiatorId))
     res.json({ success: true })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })

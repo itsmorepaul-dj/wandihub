@@ -19,6 +19,7 @@ import weeklyRouter, { startWeeklyCron } from './server/routes/weekly.js';
 import imagesRouter from './server/routes/images.js';
 import reviewItemImagesRouter from './server/routes/review-item-images.js';
 import reviewRouter, { startReviewCron } from './server/routes/review.js';
+import { startReminderCron } from './server/reminders.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -113,5 +114,6 @@ startup().then(() => {
     console.log(`Production mode: ${isProduction}`);
     startWeeklyCron();
     startReviewCron();
+    startReminderCron();
   });
 });

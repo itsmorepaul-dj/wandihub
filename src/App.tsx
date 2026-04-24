@@ -29,9 +29,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Personalized notifications — comments posted on your assigned projects now push to your notifications bell automatically, with the bell dot pulsing red/yellow until you check it. The Projects page shows a green "X comments this week" pill that respects whatever designer, business-line, or status filter you\'ve applied; click it for a grouped summary that links straight to the review.',
-  'Per-project comment threads on the public review page — authenticated users can leave comments on any project in a review. Each comment is stamped with the user\'s name and time. Edit/delete your own; admins can moderate. Comments show up live across open tabs — no refresh needed.',
-  'Gemini notes on reviews — paste Gemini-generated meeting notes from a Google Doc into the new field under the review description. Headings, bullets, bold, and links are preserved and appear on the public review page as a "Gemini notes" accordion above the project cards. Empty field = hidden.',
+  'Your bell now only shows things you actually care about. If someone edits, archives, or comments on a project you\'re on, if your allocation changes, if your PTO gets edited, or if a new holiday is added — your bell lights up. Everything else stays out of your way. Admins still see the full activity history.',
+  'Friendly reminders now land in your bell automatically: a nudge every Friday morning if you haven\'t filed your weekly update yet, a heads-up a week before any company holiday, and a three-day warning before your own PTO starts.',
 ]
 
 
