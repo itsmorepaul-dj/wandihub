@@ -274,6 +274,7 @@
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 0.5rem;
 }
 
@@ -283,6 +284,21 @@
   color: var(--color-text);
   margin: 0;
   letter-spacing: -0.01em;
+}
+
+.notif-mark-read {
+  font-size: 0.7rem;
+  font-family: inherit;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.notif-mark-read:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
 }
 
 .notif-panel-subtitle {

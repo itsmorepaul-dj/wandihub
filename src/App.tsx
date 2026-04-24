@@ -2830,6 +2830,19 @@ const [showFilters, setShowFilters] = useState(false)
                 <div className="notif-panel">
                   <div className="notif-panel-header">
                     <h3>Recent Activity</h3>
+                    {activityItems.length > 0 && (
+                      <button
+                        className="notif-mark-read"
+                        onClick={async () => {
+                          await authFetch('/api/activity/mark-read', { method: 'POST' })
+                          if (activityItems.length > 0) {
+                            const latest = activityItems[0].created_at
+                            setLastSeenActivity(latest)
+                            localStorage.setItem('dcc-last-seen-activity', latest)
+                          }
+                        }}
+                      >Mark all as read</button>
+                    )}
                   </div>
                   {activityItems.length === 0 ? (
                     <div className="notif-empty">No recent updates</div>
@@ -2860,6 +2873,16 @@ const [showFilters, setShowFilters] = useState(false)
                               let commentMeta: { review_id?: string; review_title?: string; project_name?: string; author_name?: string } | null = null
                               if (isComment && item.details) {
                                 try { commentMeta = JSON.parse(item.details) } catch { /* ignore */ }
+                              }
+                              // Quarter-rollover per-user rows carry a JSON blob too
+                              // ({ quarter, project_names, summary }). Render the
+                              // pre-built summary string instead of the raw JSON.
+                              let jsonSummary: string | null = null
+                              if (item.category === 'project' && item.details && item.details.startsWith('{')) {
+                                try {
+                                  const d = JSON.parse(item.details)
+                                  if (d?.summary) jsonSummary = d.summary
+                                } catch { /* ignore */ }
                               }
                               const verb = item.action === 'create' ? 'Created'
                                 : item.action === 'update' ? 'Updated'
@@ -2892,11 +2915,13 @@ const [showFilters, setShowFilters] = useState(false)
                                         {' on '}
                                         <em>{commentMeta.review_title || 'a review'}</em>
                                       </div>
+                                    ) : jsonSummary ? (
+                                      <div className="notif-item-detail">{jsonSummary}</div>
                                     ) : (
                                       item.details && <div className="notif-item-detail">{item.details}</div>
                                     )}
                                     <div className="notif-item-meta">
-                                      {item.user_email !== 'anonymous' ? item.user_email.split('@')[0] : 'System'} · {new Date(item.created_at + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                      {item.user_email !== 'anonymous' && item.user_email ? item.user_email.split('@')[0] : 'System'} · {new Date(item.created_at + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                                     </div>
                                   </div>
                                 </div>

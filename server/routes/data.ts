@@ -166,39 +166,60 @@ router.get('/activity', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500)
     const email = getUserEmail(req)
-    // Scope rule: comment activity is personal — only show it to the author or a
-    // declared recipient. All other categories stay global. This keeps the bell
-    // from surfacing every comment to every logged-in user.
     const user = email
-      ? await get('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
+      ? await get('SELECT id, role FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
       : null
-    const userId = user?.id ?? null
 
-    if (!userId) {
-      const rows = await all(
-        `SELECT * FROM activity_log
-         WHERE NOT (category = 'review' AND action = 'comment')
-         ORDER BY created_at DESC LIMIT ?`,
-        [limit]
-      )
+    // Admins see the full firehose — that's the "audit" view.
+    if (user?.role === 'admin') {
+      const rows = await all(`SELECT * FROM activity_log ORDER BY created_at DESC LIMIT ?`, [limit])
       return res.json(rows)
     }
 
+    // Everyone else: ONLY rows where they're a declared recipient. No more
+    // global background noise (priority reorders, other people's project
+    // edits, etc.). Users self-initiated rows are also surfaced so they see
+    // confirmation of their own actions.
+    if (!user?.id) return res.json([])
     const rows = await all(
-      `SELECT * FROM activity_log WHERE id IN (
-         SELECT id FROM activity_log
-         WHERE NOT (category = 'review' AND action = 'comment')
-         UNION
-         SELECT al.id FROM activity_log al
-         WHERE al.category = 'review' AND al.action = 'comment'
-           AND (LOWER(al.user_email) = LOWER(?) OR EXISTS (
-             SELECT 1 FROM activity_recipients ar WHERE ar.activity_id = al.id AND ar.user_id = ?
-           ))
-       )
-       ORDER BY created_at DESC LIMIT ?`,
-      [email, userId, limit]
+      `SELECT al.* FROM activity_log al
+       WHERE EXISTS (
+         SELECT 1 FROM activity_recipients ar
+         WHERE ar.activity_id = al.id AND ar.user_id = ?
+       ) OR LOWER(al.user_email) = LOWER(?)
+       ORDER BY al.created_at DESC LIMIT ?`,
+      [user.id, email, limit]
     )
     res.json(rows)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// Mark every unread activity the user can see as read. Used by the "Mark all
+// as read" button in the notifications panel.
+router.post('/activity/mark-read', async (req, res) => {
+  try {
+    const email = getUserEmail(req)
+    if (!email) return res.status(401).json({ error: 'auth required' })
+    const user = await get('SELECT id, role FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
+    if (!user?.id) return res.json({ ok: true, marked: 0 })
+    // For admins, mark everything. For others, only rows they can see.
+    let sql: string
+    let params: any[]
+    if (user.role === 'admin') {
+      sql = `INSERT OR IGNORE INTO activity_reads (user_id, activity_id)
+             SELECT ?, al.id FROM activity_log al`
+      params = [user.id]
+    } else {
+      sql = `INSERT OR IGNORE INTO activity_reads (user_id, activity_id)
+             SELECT ?, al.id FROM activity_log al
+             WHERE EXISTS (
+               SELECT 1 FROM activity_recipients ar
+               WHERE ar.activity_id = al.id AND ar.user_id = ?
+             ) OR LOWER(al.user_email) = LOWER(?)`
+      params = [user.id, user.id, email]
+    }
+    const r = await run(sql, params) as any
+    res.json({ ok: true, marked: r?.changes ?? 0 })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 

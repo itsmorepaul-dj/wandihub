@@ -5,6 +5,7 @@ import { run, get, all, IMAGES_DIR } from '../db.js';
 import { getUserEmail, sessions, getSessionIdFromRequest, setSessionCookie } from '../auth.js';
 import { broadcast } from '../sse.js';
 import { logActivity, updateDbVersion } from '../version.js';
+import { recipientsForProject, pinRecipients } from '../activity.js';
 
 // Resolve a user_id from a (possibly null) email. Returns null if no matching user.
 async function userIdForEmail(email: string | null | undefined): Promise<number | null> {
@@ -3078,7 +3079,10 @@ export const runReviewRollover = async () => {
       const proj = await get('SELECT name, status FROM projects WHERE id = ?', [projectId]) as any
       if (!proj || proj.status !== 'review') continue // race / already changed
       await run("UPDATE projects SET status = 'active', updatedAt = datetime('now') WHERE id = ?", [projectId])
-      await logActivity('project', 'update', proj.name || projectId, null, 'Auto-reverted to active after review')
+      // System-initiated → no initiator to exclude. Fan out to every assigned designer.
+      const activityId = await logActivity('project', 'update', proj.name || projectId, null, 'Auto-reverted to active after review')
+      const recipients = await recipientsForProject(projectId, null)
+      await pinRecipients(activityId, recipients)
       flipped++
     }
     if (flipped > 0) {

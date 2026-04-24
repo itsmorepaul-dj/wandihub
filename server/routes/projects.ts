@@ -2,6 +2,7 @@ import express from 'express';
 import { run, get, all, upsertProject, upsertBusinessLine } from '../db.js';
 import { updateDbVersion, logActivity } from '../version.js';
 import { getUserEmail } from '../auth.js';
+import { recipientsForProject, pinRecipients, userIdForEmail } from '../activity.js';
 
 const router = express.Router();
 
@@ -108,13 +109,45 @@ router.post('/quarter-rollover', async (req, res) => {
   try {
     const { quarter } = req.body
     if (!quarter) return res.status(400).json({ error: 'quarter is required (e.g., Q3-FY26)' })
+    const initiatorEmail = getUserEmail(req)
+    const initiatorId = await userIdForEmail(initiatorEmail)
     const doneProjects = await all("SELECT id, name FROM projects WHERE status = 'done' AND archivedQuarter IS NULL") as any[]
+
+    // Build a recipient-level rollup BEFORE mutating, so we have access to
+    // projects.designers and can collapse per user.
+    const perUser = new Map<number, { count: number; names: string[] }>()
+    for (const p of doneProjects) {
+      const recipients = await recipientsForProject(p.id, initiatorId)
+      for (const uid of recipients) {
+        const e = perUser.get(uid) || { count: 0, names: [] }
+        e.count++
+        e.names.push(p.name)
+        perUser.set(uid, e)
+      }
+    }
+
     for (const p of doneProjects) {
       await run("UPDATE projects SET status = 'archived', archivedQuarter = ?, updatedAt = datetime('now') WHERE id = ?", [quarter, p.id])
       await run('UPDATE project_assignments SET allocation_percent = 0 WHERE project_id = ?', [p.id])
     }
     await updateDbVersion()
-    await logActivity('project', 'update', `Quarter rollover: ${quarter}`, getUserEmail(req), `Archived ${doneProjects.length} done projects`)
+
+    // Summary activity row (admin-only via normal firehose rules).
+    await logActivity('project', 'update', `Quarter rollover: ${quarter}`, initiatorEmail, `Archived ${doneProjects.length} done projects`)
+
+    // One collapsed "N of your projects archived" row per affected designer.
+    for (const [uid, info] of perUser.entries()) {
+      const preview = info.names.slice(0, 3).join(', ')
+      const more = info.names.length > 3 ? ` +${info.names.length - 3} more` : ''
+      const detail = JSON.stringify({
+        quarter,
+        project_names: info.names,
+        summary: `${info.count} of your project${info.count !== 1 ? 's' : ''} archived: ${preview}${more}`,
+      })
+      const activityId = await logActivity('project', 'update', `Quarter rollover: ${quarter}`, null, detail)
+      await pinRecipients(activityId, [uid])
+    }
+
     res.json({ success: true, archived: doneProjects.length, projects: doneProjects.map((p: any) => p.name) })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
