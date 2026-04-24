@@ -731,8 +731,22 @@ function renderLinks(item: any): string {
 function markdownToHtml(text: string): string {
   if (!text) return ''
   return text.split('\n').map(line => {
+    // Match leading indent + bullet marker (- * •) — mirrors src/App.tsx
+    // rte-bullet handling so the public page renders bullets the same way
+    // as the editor, not as literal dashes.
+    const bulletMatch = line.match(/^(\s*)[-*•]\s?(.*)/)
+    if (bulletMatch) {
+      const indent = Math.min(Math.floor(bulletMatch[1].length / 2), 3)
+      let inner = bulletMatch[2].replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      inner = inner.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      inner = inner.replace(
+        /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer" class="notes-inline-link">$1</a>'
+      )
+      return `<div class="rte-bullet" data-indent="${indent}">${inner || '<br>'}</div>`
+    }
     let html = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    // Convert [name](url) markdown links to <a> tags
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     html = html.replace(
       /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
       '<a href="$2" target="_blank" rel="noopener noreferrer" class="notes-inline-link">$1</a>'
@@ -995,7 +1009,7 @@ router.get('/review/:id', async (req, res) => {
       const commentsDataTag = `<script type="application/json" class="review-comments-data" data-item-id="${escHtml(item.id)}">${JSON.stringify(item.comments || [])}</script>`
       const composerHtml = isAuthed
         ? `<div class="comment-composer" data-item-id="${escHtml(item.id)}">
-             <input class="comment-input" type="text" placeholder="Add a comment..." />
+             <textarea class="comment-input" rows="1" placeholder="Add a comment..."></textarea>
              <button class="comment-send-btn" type="button">Post</button>
            </div>`
         : ''
@@ -1370,6 +1384,15 @@ router.get('/review/:id', async (req, res) => {
         var itemId = composer.dataset.itemId;
         var input = composer.querySelector('.comment-input');
         var sendBtn = composer.querySelector('.comment-send-btn');
+        // Auto-grow: collapse to content height each input event, capped by the
+        // CSS max-height (scroll kicks in beyond the cap).
+        function autosize() {
+          input.style.height = 'auto';
+          input.style.height = Math.min(input.scrollHeight, 128) + 'px';
+        }
+        input.addEventListener('input', autosize);
+        // Initial size in case the textarea was pre-filled.
+        autosize();
         function send() {
           var body = input.value.trim();
           if (!body) return;
@@ -1383,6 +1406,7 @@ router.get('/review/:id', async (req, res) => {
             return r.json();
           }).then(function(c) {
             input.value = '';
+            autosize();
             // Append locally (SSE will also fire, but buildCommentEl dedupes by id)
             var list = composer.parentElement.querySelector('.comments-scroll');
             if (list && !list.querySelector('.comment[data-comment-id="' + c.id + '"]')) {
@@ -1398,7 +1422,8 @@ router.get('/review/:id', async (req, res) => {
         }
         sendBtn.addEventListener('click', send);
         input.addEventListener('keydown', function(e) {
-          if (e.key === 'Enter') { e.preventDefault(); send(); }
+          // Enter = submit, Shift+Enter = newline (standard chat convention).
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
         });
       });
 
@@ -2503,23 +2528,29 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       border-color: var(--rv-text-dim);
       color: var(--rv-text);
     }
-    /* Composer — pinned at the bottom of the list container, single pill with input + send */
+    /* Composer — pinned at the bottom of the list container. Input grows with
+       content so long comments wrap and the field taller instead of scrolling
+       horizontally. Post button stays flush to the bottom-right. */
     .comment-composer {
       flex: 0 0 auto;
-      display: flex; align-items: stretch; gap: 0;
+      display: flex; align-items: flex-end; gap: 0;
       padding: 0.35rem;
       border-top: 1px solid var(--rv-border);
       background: var(--rv-bg);
     }
     .comment-input {
       flex: 1 1 auto; min-width: 0;
-      height: 32px; padding: 0 0.65rem;
-      font-family: inherit; font-size: 0.82rem; line-height: 32px;
+      min-height: 32px; max-height: 8em;
+      padding: 0.4rem 0.65rem;
+      font-family: inherit; font-size: 0.82rem; line-height: 1.45;
       border: 1px solid var(--rv-border);
       border-right: none;
       border-radius: 6px 0 0 6px;
       background: var(--rv-bg); color: var(--rv-text);
       outline: none;
+      resize: none; /* height is driven by JS auto-grow */
+      overflow-y: auto;
+      box-sizing: border-box;
     }
     .comment-input:focus {
       border-color: var(--rv-accent);
@@ -2528,12 +2559,13 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     }
     .comment-send-btn {
       flex: 0 0 auto;
-      height: 32px; padding: 0 0.85rem;
+      min-height: 32px; padding: 0 0.85rem;
       background: var(--rv-accent); color: white;
       border: 1px solid var(--rv-accent);
       border-radius: 0 6px 6px 0;
       font-size: 0.78rem; font-weight: 500;
       cursor: pointer; white-space: nowrap;
+      align-self: stretch;
     }
     .comment-send-btn:hover { opacity: 0.9; }
     .comment-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -2619,6 +2651,22 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
       cursor: pointer; font-weight: 500;
     }
     .notes-inline-link:hover { opacity: 0.8; }
+
+    /* Bullet lines — mirrors .rte-bullet in src/App.css so notes/descriptions
+       render bullets the same way on the public page as in the editor. */
+    .rte-bullet { position: relative; }
+    .rte-bullet::before {
+      content: '\\2022'; position: absolute; left: 0;
+      color: var(--rv-text-dim); font-weight: 700;
+    }
+    .rte-bullet[data-indent="0"] { padding-left: 1em; }
+    .rte-bullet[data-indent="0"]::before { left: 0; }
+    .rte-bullet[data-indent="1"] { padding-left: 2.2em; }
+    .rte-bullet[data-indent="1"]::before { left: 1.2em; content: '\\25E6'; }
+    .rte-bullet[data-indent="2"] { padding-left: 3.4em; }
+    .rte-bullet[data-indent="2"]::before { left: 2.4em; content: '\\25AA'; }
+    .rte-bullet[data-indent="3"] { padding-left: 4.6em; }
+    .rte-bullet[data-indent="3"]::before { left: 3.6em; content: '\\2022'; }
 
     /* Rendered notes (readonly) */
     .notes-rendered {
