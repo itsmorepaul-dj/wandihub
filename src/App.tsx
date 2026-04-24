@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'On review pages, the comment box now grows as you type instead of scrolling sideways, and bullet points show up as real bullets instead of dashes.',
   'Your bell now only shows things you actually care about. If someone edits, archives, or comments on a project you\'re on, if your allocation changes, if your PTO gets edited, or if a new holiday is added — your bell lights up. Everything else stays out of your way. Admins still see the full activity history.',
   'Friendly reminders now land in your bell automatically: a nudge every Friday morning if you haven\'t filed your weekly update yet, a heads-up a week before any company holiday, and a three-day warning before your own PTO starts.',
 ]
