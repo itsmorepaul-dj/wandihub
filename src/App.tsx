@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
-import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe } from 'lucide-react'
+import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Attached images got a refresh. Project and review cards now have "Add images" / "Edit images" buttons that open a dedicated window for pasting, captioning, reordering, and deleting — with thumbnails in a scrollable row underneath.',
   'On review pages, the comment box now grows as you type instead of scrolling sideways, and bullet points show up as real bullets instead of dashes.',
   'Your bell now only shows things you actually care about. If someone edits, archives, or comments on a project you\'re on, if your allocation changes, if your PTO gets edited, or if a new holiday is added — your bell lights up. Everything else stays out of your way. Admins still see the full activity history.',
   'Friendly reminders now land in your bell automatically: a nudge every Friday morning if you haven\'t filed your weekly update yet, a heads-up a week before any company holiday, and a three-day warning before your own PTO starts.',
@@ -492,6 +493,112 @@ function ReviewItemRow({ item, index, project, onRemove, onCopyToReview, authFet
   )
 }
 
+function ImageManagerModal({
+  title,
+  images,
+  uploading,
+  onUpload,
+  onDelete,
+  onReorder,
+  onCaptionBlur,
+  onOpenLightbox,
+  onClose,
+}: {
+  title: string
+  images: ProjectImage[]
+  uploading: boolean
+  onUpload: (file: File, name: string) => Promise<void> | void
+  onDelete: (imageId: string) => void
+  onReorder: (reordered: ProjectImage[]) => void
+  onCaptionBlur: (id: string, caption: string) => void
+  onOpenLightbox: (images: ProjectImage[], index: number) => void
+  onClose: () => void
+}) {
+  const overlayMouseDownTarget = useRef<EventTarget | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  return (
+    <div className="modal-overlay"
+      onMouseDown={e => { overlayMouseDownTarget.current = e.target }}
+      onClick={e => {
+        if (e.target === overlayMouseDownTarget.current && (e.target as HTMLElement).classList.contains('modal-overlay')) onClose()
+      }}>
+      <div className="modal" style={{ maxWidth: 720 }}>
+        <div className="modal-header">
+          <h2>{title}</h2>
+          <button className="modal-close-btn" onClick={onClose}>&times;</button>
+        </div>
+        <div className="modal-body">
+          <div
+            className={`project-image-drop${uploading ? ' uploading' : ''}`}
+            onPaste={async (e) => {
+              const items = e.clipboardData?.items
+              if (!items) return
+              for (const item of Array.from(items)) {
+                if (item.type.startsWith('image/')) {
+                  e.preventDefault()
+                  const file = item.getAsFile()
+                  if (file) await onUpload(file, file.name || 'pasted-image.png')
+                  return
+                }
+              }
+            }}
+            onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('dragover') }}
+            onDragLeave={e => e.currentTarget.classList.remove('dragover')}
+            onDrop={async (e) => {
+              e.preventDefault()
+              e.currentTarget.classList.remove('dragover')
+              const files = e.dataTransfer?.files
+              if (!files) return
+              for (const file of Array.from(files)) {
+                if (file.type.startsWith('image/')) await onUpload(file, file.name)
+              }
+            }}
+            tabIndex={0}
+          >
+            {uploading && <div className="project-image-uploading"><Loader size={14} className="spin" /> Uploading...</div>}
+            {!uploading && images.length === 0 && (
+              <div className="project-image-placeholder">Paste or drag an image here</div>
+            )}
+            {images.length > 0 && (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(e: DragEndEvent) => {
+                  const { active, over } = e
+                  if (!over || active.id === over.id) return
+                  const oldIndex = images.findIndex(i => i.id === active.id)
+                  const newIndex = images.findIndex(i => i.id === over.id)
+                  if (oldIndex === -1 || newIndex === -1) return
+                  onReorder(arrayMove(images, oldIndex, newIndex))
+                }}
+              >
+                <SortableContext items={images.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                  <div className="project-image-grid">
+                    {images.map((img, idx) => (
+                      <SortableImageItem
+                        key={img.id}
+                        img={img}
+                        index={idx}
+                        images={images}
+                        onOpenLightbox={onOpenLightbox}
+                        onDelete={onDelete}
+                        onCaptionBlur={onCaptionBlur}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            )}
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="primary-btn" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SortableImageItem({ img, index, images, onOpenLightbox, onDelete, onCaptionBlur }: {
   img: ProjectImage
   index: number
@@ -573,10 +680,11 @@ function App() {
     estimatedHours: 0
   })
   
-  const [projectImages, setProjectImages] = useState<ProjectImage[]>([])
   const [allProjectImages, setAllProjectImages] = useState<ProjectImage[]>([])
   const [uploadingImage, setUploadingImage] = useState(false)
   const [lightbox, setLightbox] = useState<{ images: ProjectImage[]; index: number } | null>(null)
+  // { kind: 'project' | 'businessLine', id: string, name: string } — drives the Image Manager modal opened from cards
+  const [imageManager, setImageManager] = useState<{ kind: 'project' | 'businessLine'; id: string; name: string } | null>(null)
 
   // Reviews state
   const [reviews, setReviews] = useState<{ id: string; title: string; week: string | null; review_date: string | null; created_by: string | null; created_at: string; updated_at: string; itemCount: number }[]>([])
@@ -1037,7 +1145,6 @@ const [showFilters, setShowFilters] = useState(false)
   const [businessLineFormData, setBusinessLineFormData] = useState({
     name: '', customLinks: [] as { name: string; url: string }[]
   })
-  const [blImages, setBlImages] = useState<ProjectImage[]>([])
   const [uploadingBlImage, setUploadingBlImage] = useState(false)
   
   // Notes state
@@ -1717,7 +1824,6 @@ const [showFilters, setShowFilters] = useState(false)
         return
       }
       const saved = await res.json() as ProjectImage
-      setBlImages(prev => [saved, ...prev])
       setAllProjectImages(prev => [saved, ...prev])
     } catch (err) { console.error('BL image upload error:', err) }
     setUploadingBlImage(false)
@@ -1726,7 +1832,6 @@ const [showFilters, setShowFilters] = useState(false)
   const deleteBlImage = async (imageId: string) => {
     try {
       await authFetch(`/api/images/${imageId}`, { method: 'DELETE' })
-      setBlImages(prev => prev.filter(img => img.id !== imageId))
       setAllProjectImages(prev => prev.filter(img => img.id !== imageId))
     } catch (err) { console.error('BL image delete error:', err) }
   }
@@ -1739,9 +1844,22 @@ const [showFilters, setShowFilters] = useState(false)
         body: JSON.stringify({ caption }),
       })
       const saved = await res.json() as ProjectImage
-      setBlImages(prev => prev.map(img => img.id === imageId ? saved : img))
       setAllProjectImages(prev => prev.map(img => img.id === imageId ? saved : img))
     } catch (err) { console.error('BL caption update error:', err) }
+  }
+
+  const reorderBlImages = async (blId: string, reordered: ProjectImage[]) => {
+    setAllProjectImages(prev => {
+      const other = prev.filter(img => img.project_id !== blId)
+      return [...other, ...reordered]
+    })
+    try {
+      await authFetch(`/api/images/reorder`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: blId, image_ids: reordered.map(i => i.id) }),
+      })
+    } catch (err) { console.error('BL image reorder error:', err) }
   }
 
   // Handle clicking a project event in day modal - switch to projects page
@@ -1765,7 +1883,6 @@ const [showFilters, setShowFilters] = useState(false)
       estimatedHours: 0
     })
     setShowProjectModal(true)
-    setProjectImages([])
   }
 
   const handleEditProject = (project: Project) => {
@@ -1791,8 +1908,6 @@ const [showFilters, setShowFilters] = useState(false)
       estimatedHours: project.estimatedHours || 0
     })
     setShowProjectModal(true)
-    // Load images for this project
-    authFetch(`/api/images?project_id=${project.id}`).then(r => r.json()).then(setProjectImages).catch(() => setProjectImages([]))
   }
 
   const uploadProjectImage = async (projectId: string, file: Blob, originalName: string) => {
@@ -1810,7 +1925,6 @@ const [showFilters, setShowFilters] = useState(false)
         return
       }
       const saved = await res.json() as ProjectImage
-      setProjectImages(prev => [...prev, saved])
       setAllProjectImages(prev => [...prev, saved])
     } catch (err) { console.error('Image upload error:', err) }
     setUploadingImage(false)
@@ -1819,7 +1933,6 @@ const [showFilters, setShowFilters] = useState(false)
   const deleteProjectImage = async (imageId: string) => {
     try {
       await authFetch(`/api/images/${imageId}`, { method: 'DELETE' })
-      setProjectImages(prev => prev.filter(img => img.id !== imageId))
       setAllProjectImages(prev => prev.filter(img => img.id !== imageId))
     } catch (err) { console.error('Image delete error:', err) }
   }
@@ -1832,13 +1945,11 @@ const [showFilters, setShowFilters] = useState(false)
         body: JSON.stringify({ caption }),
       })
       const saved = await res.json() as ProjectImage
-      setProjectImages(prev => prev.map(img => img.id === imageId ? saved : img))
       setAllProjectImages(prev => prev.map(img => img.id === imageId ? saved : img))
     } catch (err) { console.error('Caption update error:', err) }
   }
 
   const reorderProjectImages = async (projectId: string, reordered: ProjectImage[]) => {
-    setProjectImages(reordered)
     setAllProjectImages(prev => {
       const other = prev.filter(img => img.project_id !== projectId)
       return [...other, ...reordered]
@@ -3642,18 +3753,30 @@ const [showFilters, setShowFilters] = useState(false)
                         })()}
                         {(() => {
                           const imgs = allProjectImages.filter(i => i.project_id === project.id)
-                          if (imgs.length === 0) return null
+                          const openManager = () => {
+                            setImageManager({ kind: 'project', id: project.id, name: project.name })
+                          }
+                          if (imgs.length === 0) {
+                            return (
+                              <div className="project-attached-images">
+                                <button className="project-attached-add" onClick={openManager}>
+                                  <Plus size={12} /> Add images
+                                </button>
+                              </div>
+                            )
+                          }
                           return (
                             <div className="project-attached-images">
-                              <span className="project-attached-label">Attached images</span>
+                              <button className="project-attached-label-btn" onClick={openManager} title="Manage images">
+                                <Pencil size={12} /> Edit images
+                              </button>
                               <div className="project-images-inline">
-                                {imgs.slice(0, 4).map((img, idx) => (
+                                {imgs.map((img, idx) => (
                                   <div key={img.id} className="project-image-thumb">
                                     <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
                                       onClick={() => setLightbox({ images: imgs, index: idx })} />
                                   </div>
                                 ))}
-                                {imgs.length > 4 && <span className="project-card-images">+{imgs.length - 4} more</span>}
                               </div>
                             </div>
                           )
@@ -6963,7 +7086,6 @@ const [showFilters, setShowFilters] = useState(false)
               <button className="primary-btn" onClick={() => {
                 setEditingBusinessLine(null)
                 setBusinessLineFormData({ name: '', customLinks: [] })
-                setBlImages([])
                 setShowBusinessLineModal(true)
               }}>
                 + Add Business Line
@@ -6985,7 +7107,6 @@ const [showFilters, setShowFilters] = useState(false)
                             name: line.name,
                             customLinks: line.customLinks || []
                           })
-                          authFetch(`/api/images?project_id=${line.id}`).then(r => r.json()).then(setBlImages).catch(() => setBlImages([]))
                           setShowBusinessLineModal(true)
                         }}>
                           <Pencil size={14} />
@@ -7008,18 +7129,30 @@ const [showFilters, setShowFilters] = useState(false)
                     </div>
                     {(() => {
                       const imgs = allProjectImages.filter(i => i.project_id === line.id)
-                      if (imgs.length === 0) return null
+                      const openManager = () => {
+                        setImageManager({ kind: 'businessLine', id: line.id, name: line.name })
+                      }
+                      if (imgs.length === 0) {
+                        return (
+                          <div className="project-attached-images">
+                            <button className="project-attached-add" onClick={openManager}>
+                              <Plus size={12} /> Add images
+                            </button>
+                          </div>
+                        )
+                      }
                       return (
                         <div className="project-attached-images">
-                          <span className="project-attached-label">Attached images</span>
+                          <button className="project-attached-label-btn" onClick={openManager} title="Manage images">
+                            <Pencil size={12} /> Edit images
+                          </button>
                           <div className="project-images-inline">
-                            {imgs.slice(0, 4).map((img, idx) => (
+                            {imgs.map((img, idx) => (
                               <div key={img.id} className="project-image-thumb">
                                 <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
                                   onClick={() => setLightbox({ images: imgs, index: idx })} />
                               </div>
                             ))}
-                            {imgs.length > 4 && <span className="project-card-images">+{imgs.length - 4} more</span>}
                           </div>
                         </div>
                       )
@@ -7593,81 +7726,6 @@ const [showFilters, setShowFilters] = useState(false)
                 )}
               </div>
 
-              {/* Images */}
-              {editingProject && (
-                <div className="form-section">
-                  <div className="form-section-title">Images</div>
-                  <div
-                    className={`project-image-drop${uploadingImage ? ' uploading' : ''}`}
-                    onPaste={async (e) => {
-                      const items = e.clipboardData?.items
-                      if (!items) return
-                      for (const item of Array.from(items)) {
-                        if (item.type.startsWith('image/')) {
-                          e.preventDefault()
-                          const file = item.getAsFile()
-                          if (file) await uploadProjectImage(editingProject.id, file, file.name || 'pasted-image.png')
-                          return
-                        }
-                      }
-                    }}
-                    onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('dragover') }}
-                    onDragLeave={e => e.currentTarget.classList.remove('dragover')}
-                    onDrop={async (e) => {
-                      e.preventDefault()
-                      e.currentTarget.classList.remove('dragover')
-                      const files = e.dataTransfer?.files
-                      if (!files) return
-                      for (const file of Array.from(files)) {
-                        if (file.type.startsWith('image/')) {
-                          await uploadProjectImage(editingProject.id, file, file.name)
-                        }
-                      }
-                    }}
-                    tabIndex={0}
-                  >
-                    {uploadingImage && <div className="project-image-uploading"><Loader size={14} className="spin" /> Uploading...</div>}
-                    {!uploadingImage && projectImages.length === 0 && (
-                      <div className="project-image-placeholder">Paste or drag an image here</div>
-                    )}
-                    {projectImages.length > 0 && (
-                      <DndContext
-                        sensors={prioritySensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={(e: DragEndEvent) => {
-                          const { active, over } = e
-                          if (!over || active.id === over.id) return
-                          const oldIndex = projectImages.findIndex(i => i.id === active.id)
-                          const newIndex = projectImages.findIndex(i => i.id === over.id)
-                          if (oldIndex === -1 || newIndex === -1) return
-                          const reordered = arrayMove(projectImages, oldIndex, newIndex)
-                          reorderProjectImages(editingProject.id, reordered)
-                        }}
-                      >
-                        <SortableContext items={projectImages.map(i => i.id)} strategy={verticalListSortingStrategy}>
-                          <div className="project-image-grid">
-                            {projectImages.map((img, idx) => (
-                              <SortableImageItem
-                                key={img.id}
-                                img={img}
-                                index={idx}
-                                images={projectImages}
-                                onOpenLightbox={(imgs, i) => setLightbox({ images: imgs, index: i })}
-                                onDelete={(imageId) => openConfirmModal(
-                                  'Delete image?',
-                                  'This image will be permanently removed from the project. This can\'t be undone.',
-                                  () => deleteProjectImage(imageId),
-                                )}
-                                onCaptionBlur={updateImageCaption}
-                              />
-                            ))}
-                          </div>
-                        </SortableContext>
-                      </DndContext>
-                    )}
-                  </div>
-                </div>
-              )}
 
             </div>
 
@@ -8016,7 +8074,7 @@ const [showFilters, setShowFilters] = useState(false)
       )}
 
       {confirmModal.open && (
-        <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) closeConfirmModal() }}>
+        <div className="modal-overlay" style={{ zIndex: 2000 }} onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) closeConfirmModal() }}>
           <div className="modal confirm-modal" onClick={e => e.stopPropagation()}>
             <h2>{confirmModal.title}</h2>
             <p className="confirm-message">{confirmModal.message}</p>
@@ -8404,68 +8462,6 @@ const [showFilters, setShowFilters] = useState(false)
                 )}
               </div>
 
-              {/* Images */}
-              {editingBusinessLine && (
-                <div className="form-section">
-                  <div className="form-section-title">Images</div>
-                  <div
-                    className={`project-image-drop${uploadingBlImage ? ' uploading' : ''}`}
-                    onPaste={async (e) => {
-                      const items = e.clipboardData?.items
-                      if (!items) return
-                      for (const item of Array.from(items)) {
-                        if (item.type.startsWith('image/')) {
-                          e.preventDefault()
-                          const file = item.getAsFile()
-                          if (file) await uploadBlImage(editingBusinessLine.id, file, file.name || 'pasted-image.png')
-                          return
-                        }
-                      }
-                    }}
-                    onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('dragover') }}
-                    onDragLeave={e => e.currentTarget.classList.remove('dragover')}
-                    onDrop={async (e) => {
-                      e.preventDefault()
-                      e.currentTarget.classList.remove('dragover')
-                      const files = e.dataTransfer?.files
-                      if (!files) return
-                      for (const file of Array.from(files)) {
-                        if (file.type.startsWith('image/')) {
-                          await uploadBlImage(editingBusinessLine.id, file, file.name)
-                        }
-                      }
-                    }}
-                    tabIndex={0}
-                  >
-                    {uploadingBlImage && <div className="project-image-uploading"><Loader size={14} className="spin" /> Uploading...</div>}
-                    {!uploadingBlImage && blImages.length === 0 && (
-                      <div className="project-image-placeholder">Paste or drag an image here</div>
-                    )}
-                    {blImages.length > 0 && (
-                      <div className="project-image-grid">
-                        {blImages.map((img, idx) => (
-                          <div key={img.id} className="project-image-item">
-                            <div className="project-image-thumb">
-                              <img src={`/api/images/${img.id}`} alt={img.caption || img.original_name} loading="lazy"
-                                onClick={() => setLightbox({ images: blImages, index: idx })} />
-                              <button className="project-image-delete" onClick={() => openConfirmModal(
-                                'Delete image?',
-                                'This image will be permanently removed from the business line. This can\'t be undone.',
-                                () => deleteBlImage(img.id),
-                              )} title="Delete image">
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                            <input className="project-image-caption" placeholder="Add caption..."
-                              defaultValue={img.caption || ''}
-                              onBlur={e => { if (e.target.value !== (img.caption || '')) updateBlImageCaption(img.id, e.target.value) }} />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
 
             <div className="modal-footer">
@@ -8696,6 +8692,31 @@ const [showFilters, setShowFilters] = useState(false)
         onNavigate={index => setLightbox(prev => prev ? { ...prev, index } : null)}
       />
     )}
+    {imageManager && (() => {
+      const isBl = imageManager.kind === 'businessLine'
+      const imgs = allProjectImages.filter(i => i.project_id === imageManager.id)
+      return (
+        <ImageManagerModal
+          title={`Images — ${imageManager.name}`}
+          images={imgs}
+          uploading={isBl ? uploadingBlImage : uploadingImage}
+          onUpload={(file, name) => isBl ? uploadBlImage(imageManager.id, file, name) : uploadProjectImage(imageManager.id, file, name)}
+          onDelete={(imageId) => openConfirmModal(
+            'Delete image?',
+            isBl ? 'This image will be permanently removed from the business line. This can\'t be undone.' : 'This image will be permanently removed from the project. This can\'t be undone.',
+            async () => {
+              if (isBl) await deleteBlImage(imageId)
+              else await deleteProjectImage(imageId)
+              closeConfirmModal()
+            },
+          )}
+          onReorder={(reordered) => isBl ? reorderBlImages(imageManager.id, reordered) : reorderProjectImages(imageManager.id, reordered)}
+          onCaptionBlur={isBl ? updateBlImageCaption : updateImageCaption}
+          onOpenLightbox={(images, index) => setLightbox({ images, index })}
+          onClose={() => setImageManager(null)}
+        />
+      )
+    })()}
     </>
   )
 }

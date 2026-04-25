@@ -861,6 +861,8 @@
   justify-content: center;
   z-index: 1000;
   animation: overlayFadeIn 0.15s ease;
+  contain: layout paint;
+  transform: translateZ(0);
 }
 
 @keyframes overlayFadeIn {
@@ -2738,20 +2740,13 @@
 .lightbox-prev { left: 16px; }
 .lightbox-next { right: 16px; }
 
-/* Project card image badge */
-.project-card-images {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  opacity: 0.7;
-}
-
 /* Attached images section below footer */
 .project-attached-images {
-  padding: 0.5rem 1.5rem;
+  padding: 0 0 0.85rem;
   border-top: 1px solid var(--border);
+}
+.project-attached-images .project-images-inline {
+  padding: 0 1.25rem;
 }
 .project-attached-label {
   font-size: 0.65rem;
@@ -2762,16 +2757,37 @@
   display: block;
   margin-bottom: 0.3rem;
 }
+.project-attached-label-btn,
+.project-attached-add {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.project-attached-label-btn:hover,
+.project-attached-add:hover {
+  color: var(--color-text);
+}
 /* Inline project images (expanded view) */
 .project-images-inline {
   display: flex;
   gap: 0.4rem;
-  flex-wrap: wrap;
+  overflow-x: auto;
 }
 .project-images-inline .project-image-thumb {
   width: 80px;
   height: 60px;
   aspect-ratio: auto;
+  flex-shrink: 0;
 }
 .project-images-inline .project-image-thumb img {
   cursor: pointer;
@@ -6399,6 +6415,12 @@ select:focus-visible {
 .business-line-card .project-attached-images {
   padding: 0.5rem 0 0;
   border-top: none;
+}
+.business-line-card .project-attached-label-btn,
+.business-line-card .project-attached-add,
+.business-line-card .project-images-inline {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .business-line-header {
