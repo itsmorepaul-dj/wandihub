@@ -29,10 +29,10 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Attached images got a refresh. Project and review cards now have "Add images" / "Edit images" buttons that open a dedicated window for pasting, captioning, reordering, and deleting — with thumbnails in a scrollable row underneath.',
-  'On review pages, the comment box now grows as you type instead of scrolling sideways, and bullet points show up as real bullets instead of dashes.',
-  'Your bell now only shows things you actually care about. If someone edits, archives, or comments on a project you\'re on, if your allocation changes, if your PTO gets edited, or if a new holiday is added — your bell lights up. Everything else stays out of your way. Admins still see the full activity history.',
-  'Friendly reminders now land in your bell automatically: a nudge every Friday morning if you haven\'t filed your weekly update yet, a heads-up a week before any company holiday, and a three-day warning before your own PTO starts.',
+  'Image manager — Cards now have "Add" / "Edit images" buttons that open a window for pasting, captioning, reordering, and deleting.',
+  'Comments & bullets — Review-page comment boxes grow as you type, and bullet points render as real bullets.',
+  'Smarter bell — Alerts only for projects you\'re on, your allocation changes, your PTO edits, and new holidays. Admins still see everything.',
+  'Auto reminders — Friday nudge if your weekly update is missing, a week\'s heads-up before holidays, and a three-day warning before your PTO.',
 ]
 
 
