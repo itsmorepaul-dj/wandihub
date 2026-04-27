@@ -2985,11 +2985,13 @@ const [showFilters, setShowFilters] = useState(false)
                               if (isComment && item.details) {
                                 try { commentMeta = JSON.parse(item.details) } catch { /* ignore */ }
                               }
-                              // Quarter-rollover per-user rows carry a JSON blob too
-                              // ({ quarter, project_names, summary }). Render the
-                              // pre-built summary string instead of the raw JSON.
+                              // Activity rows that carry a JSON details blob
+                              // (quarter rollover, holiday lookahead, PTO self-
+                              // reminder, weekly-update reminder) ship a pre-
+                              // built `summary` string; render that instead of
+                              // the raw JSON.
                               let jsonSummary: string | null = null
-                              if (item.category === 'project' && item.details && item.details.startsWith('{')) {
+                              if (!isComment && item.details && item.details.startsWith('{')) {
                                 try {
                                   const d = JSON.parse(item.details)
                                   if (d?.summary) jsonSummary = d.summary
