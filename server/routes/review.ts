@@ -909,7 +909,13 @@ router.get('/review/:id', async (req, res) => {
       for (const r of rows) {
         const t = reviewWeekToDate(r.week, r.created_at)
         if (t == null) continue
-        markers.push({ date: t, url: `/review/${r.id}`, label: 'Design Review' })
+        // Scope the review link to just this project so clicking the diamond
+        // lands on a filtered view (mirrors the project-page pattern).
+        markers.push({
+          date: t,
+          url: `/review/${r.id}?project=${encodeURIComponent(item.project_id)}`,
+          label: 'Design Review',
+        })
       }
       item.reviewMarkers = markers
     }
@@ -924,9 +930,19 @@ router.get('/review/:id', async (req, res) => {
     const totalMinutes = typeof review.total_minutes === 'number' ? review.total_minutes : 45
     const itemMinutes = computeItemMinutes(parsed, totalMinutes)
 
+    // ?project=<projectId> filters the page to one project's card. Used by
+    // diamond links on Gantt charts so stakeholders land on the relevant
+    // project instead of hunting through the whole review.
+    const filterProjectId = typeof req.query.project === 'string' ? req.query.project : ''
+    const filteredItem = filterProjectId ? parsed.find((p: any) => p.project_id === filterProjectId) : null
+    const visibleItems = filterProjectId && filteredItem ? [filteredItem] : parsed
+    const filterPillHtml = filterProjectId && filteredItem
+      ? `<div class="review-filter-row"><span class="review-filter-label">Showing:</span> <a class="review-filter-pill" href="/review/${escHtml(req.params.id)}" title="Show all projects">${escHtml(filteredItem.project_name || 'Project')} <span class="review-filter-pill-x">×</span></a></div>`
+      : ''
+
     let cards = ''
     let awarenessCards = ''
-    for (const item of parsed) {
+    for (const item of visibleItems) {
       const designerNames: string[] = item.designers || []
       const slackSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`
       const designers = designerNames.map((d: string) => {
@@ -1126,9 +1142,11 @@ router.get('/review/:id', async (req, res) => {
         </details>`
       : ''
 
-    const content = parsed.length > 0
-      ? `<div class="cards-stack">${cards}${awarenessSection}</div>`
-      : '<div class="empty-state">No projects in this review yet.</div>'
+    const content = filterProjectId && !filteredItem
+      ? `<div class="empty-state">That project isn't part of this review. <a href="/review/${escHtml(req.params.id)}">Show all projects</a>.</div>`
+      : parsed.length > 0
+        ? `<div class="cards-stack">${cards}${awarenessSection}</div>`
+        : '<div class="empty-state">No projects in this review yet.</div>'
 
     const title = escHtml(review.title || 'Design Review')
     const week = review.week ? ` — ${escHtml(review.week)}` : ''
@@ -1144,6 +1162,7 @@ router.get('/review/:id', async (req, res) => {
       <div class="page-meta">${createdAt} · ${parsed.length} project${parsed.length !== 1 ? 's' : ''}${timeSummary}</div>
       ${descriptionHtml}
       ${geminiNotesSection}
+      ${filterPillHtml}
     </div>`
 
     const notesScript = `<script>
@@ -2164,6 +2183,22 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     .page-header { margin-bottom: 2rem; }
     .page-header h1 { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.025em; }
     .page-meta { font-size: 0.8rem; color: var(--rv-text-muted); margin-top: 0.25rem; }
+
+    /* "Showing: <project>" filter pill — appears when the page is scoped to a
+       single project via ?project=<id> (e.g. from a Gantt-chart diamond). */
+    .review-filter-row {
+      display: flex; align-items: center; gap: 0.5rem;
+      margin-top: 0.85rem; font-size: 0.8rem; color: var(--rv-text-muted);
+    }
+    .review-filter-pill {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.25rem 0.7rem; border-radius: 99px;
+      background: var(--rv-accent); color: #fff;
+      text-decoration: none; font-size: 0.75rem; font-weight: 500;
+      transition: background 0.15s;
+    }
+    .review-filter-pill:hover { background: var(--rv-accent-hover, var(--rv-accent)); filter: brightness(1.1); }
+    .review-filter-pill-x { font-size: 0.95rem; line-height: 1; opacity: 0.8; }
     .page-description {
       font-size: 0.85rem; color: var(--rv-text-secondary); margin-top: 0.5rem;
       line-height: 1.6; max-width: 720px;
@@ -3368,7 +3403,7 @@ router.get('/p/:slug', async (req, res) => {
       .filter((m: any) => m.review_date)
       .map((m: any) => ({
         date: new Date(m.review_date + 'T12:00:00').getTime(),
-        url: `/review/${m.review_id}`,
+        url: `/review/${m.review_id}?project=${encodeURIComponent(project.id)}`,
         label: m.review_title || 'Design Review',
       }))
 
