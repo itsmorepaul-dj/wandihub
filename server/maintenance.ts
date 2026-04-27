@@ -132,7 +132,15 @@ export function maintenanceMiddleware(req: express.Request, res: express.Respons
   const isAdminLogin = req.query.admin === '1'
   const isStaticAsset = /\.(js|css|ico|svg|png|jpg|woff2?)$/i.test(req.path)
   const isImageServe = req.method === 'GET' && req.path.startsWith('/api/images/')
-  if (isMaintenanceEndpoint || isHealthEndpoint || isAuthEndpoint || isActivityEndpoint || isDbEndpoint || isLocalhost || isAdminUser || isAdminLogin || isStaticAsset || isImageServe) return next()
+  // Public read-only HTML routes (review pages, published project pages)
+  // stay live during maintenance — they're shared with stakeholders outside
+  // the team, who shouldn't see the internal lockout screen.
+  const isPublicReadOnlyPage = req.method === 'GET' && (
+    req.path === '/review' ||
+    req.path.startsWith('/review/') ||
+    req.path.startsWith('/p/')
+  )
+  if (isMaintenanceEndpoint || isHealthEndpoint || isAuthEndpoint || isActivityEndpoint || isDbEndpoint || isLocalhost || isAdminUser || isAdminLogin || isStaticAsset || isImageServe || isPublicReadOnlyPage) return next()
   if (req.path.startsWith('/api/')) {
     return res.status(503).json({ error: 'maintenance', message: maintenanceState.lockoutMessage })
   }

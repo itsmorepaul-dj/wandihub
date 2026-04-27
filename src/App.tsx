@@ -31,9 +31,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 const CHANGELOG = [
   'Published Project Pages — Share a project with stakeholders at a public, read-only URL from the Reports page. No sign-in required.',
   'Image manager — Cards now have "Add" / "Edit images" buttons that open a window for pasting, captioning, reordering, and deleting.',
-  'Comments & bullets — Review-page comment boxes grow as you type, and bullet points render as real bullets.',
   'Smarter bell — Alerts only for projects you\'re on, your allocation changes, your PTO edits, and new holidays. Admins still see everything.',
-  'Auto reminders — Friday nudge if your weekly update is missing, a week\'s heads-up before holidays, and a three-day warning before your PTO.',
 ]
 
 
