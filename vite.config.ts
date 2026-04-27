@@ -16,6 +16,10 @@ export default defineConfig({
       '/review': {
         target: 'http://localhost:3001',
         changeOrigin: true
+      },
+      '/p': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   }

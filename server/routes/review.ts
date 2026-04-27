@@ -502,7 +502,7 @@ router.delete('/api/review-item-comments/:id', async (req, res) => {
 
 // ============ PUBLIC REVIEW PAGE ============
 
-function escHtml(s: string) {
+export function escHtml(s: string) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
@@ -578,7 +578,7 @@ function reviewWeekToDate(weekStr: string | null | undefined, createdAt: string 
 
 type ReviewMarker = { date: number; url: string; label: string }
 
-function renderFullGantt(item: any, reviewMarkers: ReviewMarker[] = []): string {
+export function renderFullGantt(item: any, reviewMarkers: ReviewMarker[] = []): string {
   const dates: number[] = []
   if (item.timeline) {
     for (const t of item.timeline) {
@@ -709,7 +709,7 @@ const svgFigma = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" st
 const svgLink = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`
 const svgTicket = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>`
 
-function renderLinks(item: any): string {
+export function renderLinks(item: any): string {
   const links: string[] = []
   if (item.deckLink) links.push(`<a href="${escHtml(item.deckLink)}" target="_blank" rel="noopener">${svgPresentation}<span>Design deck: ${escHtml(item.deckName || 'Deck')}</span></a>`)
   if (item.prdLink) links.push(`<a href="${escHtml(item.prdLink)}" target="_blank" rel="noopener">${svgFileText}<span>PRD: ${escHtml(item.prdName || 'PRD')}</span></a>`)
@@ -728,7 +728,7 @@ function renderLinks(item: any): string {
   return links.join('<span class="card-link-sep">·</span>')
 }
 
-function markdownToHtml(text: string): string {
+export function markdownToHtml(text: string): string {
   if (!text) return ''
   return text.split('\n').map(line => {
     // Match leading indent + bullet marker (- * •) — mirrors src/App.tsx
@@ -796,7 +796,7 @@ function renderGeminiNotesHtml(notes: string): string {
   return html
 }
 
-function renderNotesHtml(notes: string): string {
+export function renderNotesHtml(notes: string): string {
   if (!notes || !notes.trim()) return ''
   let html = escHtml(notes)
   // Convert [name](url) markdown links
@@ -2001,7 +2001,7 @@ function getISOWeek(d: Date): number {
   return Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
 }
 
-function renderPage(title: string, body: string, reviews: any[], activeId?: string, _sessionId?: string): string {
+export function renderPage(title: string, body: string, reviews: any[], activeId?: string, _sessionId?: string, opts?: { sidebarTitle?: string; sidebarHtml?: string; hideSidebar?: boolean }): string {
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
   // Group reviews by year → month → week
@@ -2054,6 +2054,7 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
   <title>${title} — WandiHub</title>
   <style>
     :root {
@@ -2100,6 +2101,7 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
 
     /* Layout */
     .layout { display: flex; min-height: 100vh; }
+    .layout.no-sidebar .main { width: 100%; }
     .sidebar {
       width: 220px; flex-shrink: 0; background: var(--rv-bg-secondary);
       border-right: 1px solid var(--rv-border);
@@ -2912,6 +2914,74 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
     /* Empty state */
     .empty-state { text-align: center; color: var(--rv-text-dim); padding: 3rem 1rem; font-size: 0.9rem; }
 
+    /* Public project page */
+    .project-public { max-width: 960px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+    .project-public-header { border-bottom: 1px solid var(--rv-border-subtle); padding-bottom: 1.25rem; margin-bottom: 1.5rem; }
+    .project-public-status {
+      display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+      font-size: 0.75rem; color: var(--rv-text-muted); margin-bottom: 0.4rem;
+    }
+    .project-public-status .status-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    }
+    .project-public-status .status-label { font-weight: 600; color: var(--rv-text-secondary); }
+    .project-public-status .project-meta-sep { opacity: 0.5; }
+    .project-public-status .project-meta-chip {
+      display: inline-flex; align-items: center; padding: 0.12rem 0.5rem;
+      border: 1px solid var(--rv-border-subtle); border-radius: 99px;
+      font-size: 0.65rem; color: var(--rv-text-muted); background: var(--rv-bg-secondary);
+    }
+    .project-public-title {
+      font-size: 1.75rem; font-weight: 700; color: var(--rv-text);
+      margin: 0 0 0.6rem; letter-spacing: -0.02em; line-height: 1.15;
+    }
+    .project-public .card-designers {
+      display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0;
+    }
+    .project-public .designer-chip {
+      display: inline-flex; align-items: center; padding: 0.15rem 0.55rem;
+      border: 1px solid var(--rv-border-subtle); border-radius: 99px;
+      font-size: 0.7rem; color: var(--rv-text-secondary); background: var(--rv-bg-secondary);
+    }
+
+    .project-public-section { margin-bottom: 1.75rem; }
+    .project-public-section-title {
+      font-size: 0.7rem; font-weight: 700; color: var(--rv-text-muted);
+      text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 0.6rem;
+    }
+    .project-public .card-description { padding: 0; max-width: none; color: var(--rv-text-secondary); font-size: 0.9rem; }
+    .project-public .card-links { padding: 0; }
+    .project-public .project-gantt { padding: 0; background: var(--rv-bg-secondary); border: 1px solid var(--rv-border-subtle); border-radius: 6px; padding: 0.75rem; }
+
+    .project-capacity-table {
+      width: 100%; border-collapse: collapse; font-size: 0.82rem;
+      border: 1px solid var(--rv-border-subtle); border-radius: 6px; overflow: hidden;
+    }
+    .project-capacity-table th {
+      text-align: left; padding: 0.5rem 0.75rem;
+      background: var(--rv-bg-secondary); color: var(--rv-text-muted);
+      font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--rv-border-subtle);
+    }
+    .project-capacity-table td { padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--rv-border-subtle); color: var(--rv-text); }
+    .project-capacity-table tr:last-child td { border-bottom: none; }
+    .project-capacity-name { font-weight: 500; }
+    .project-capacity-name-link { color: var(--rv-text); text-decoration: none; border-bottom: 1px dotted var(--rv-border); transition: color 0.15s, border-color 0.15s; }
+    .project-capacity-name-link:hover { color: var(--rv-accent); border-bottom-color: var(--rv-accent); }
+    .project-capacity-role { color: var(--rv-text-dim); font-weight: 400; margin-left: 0.3rem; font-size: 0.75rem; }
+    .project-capacity-pct { color: var(--rv-text-secondary); font-variant-numeric: tabular-nums; }
+    .project-capacity-hrs { color: var(--rv-text-muted); font-variant-numeric: tabular-nums; }
+
+    .project-public-review-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+    .project-public-review-link {
+      display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.65rem;
+      background: var(--rv-bg-secondary); border: 1px solid var(--rv-border-subtle);
+      border-radius: 6px; color: var(--rv-text-secondary); font-size: 0.85rem;
+      text-decoration: none; transition: border-color 0.15s;
+    }
+    .project-public-review-link:hover { border-color: var(--rv-accent); color: var(--rv-accent); }
+    .project-public-review-link .project-meta-date { color: var(--rv-text-dim); font-size: 0.75rem; }
+
     /* Mobile */
     @media (max-width: 768px) {
       .layout { flex-direction: column; }
@@ -2944,11 +3014,11 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
   </script>
 </head>
 <body>
-  <div class="layout">
-    <nav class="sidebar">
-      <div class="sidebar-title">Reviews</div>
+  <div class="layout${opts?.hideSidebar ? ' no-sidebar' : ''}">
+    ${opts?.hideSidebar ? '' : `<nav class="sidebar">
+      <div class="sidebar-title">${opts?.sidebarTitle || 'Reviews'}</div>
       <div class="sidebar-nav">
-        ${navItems}
+        ${opts?.sidebarHtml !== undefined ? opts.sidebarHtml : navItems}
       </div>
       <div class="sidebar-footer">
         <span class="branding">WandiHub</span>
@@ -2956,7 +3026,7 @@ function renderPage(title: string, body: string, reviews: any[], activeId?: stri
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
       </div>
-    </nav>
+    </nav>`}
     <main class="main">
       ${body}
     </main>
@@ -3252,5 +3322,213 @@ export const startReviewCron = () => {
   }, 30_000)
   console.log('Review snapshot cron started (Tuesday 5pm ET); rollover check every 5m')
 }
+
+// ============ PUBLIC PROJECT PAGE ============
+// Auth-gated (same as /review/:id). Rendered from a published project's
+// `public_slug`. Surfaces the live project data: header, description, links,
+// gantt (with review-diamond links), attached images, and current capacity.
+
+router.get('/p/:slug', async (req, res) => {
+  try {
+    // Legacy ?sid=… support mirroring /review/:id
+    if (req.query.sid && typeof req.query.sid === 'string') {
+      if (sessions.has(req.query.sid)) setSessionCookie(res, req.query.sid)
+      return res.redirect(`/p/${req.params.slug}`)
+    }
+
+    const project = await get('SELECT * FROM projects WHERE public_slug = ? AND published = 1', [req.params.slug]) as any
+    if (!project) {
+      return res.status(404).send(renderPage('Project Not Found', '<div class="empty-state">This project page does not exist or is no longer published.</div>', [], undefined, undefined, { hideSidebar: true }))
+    }
+
+    const sessionId = getSessionIdFromRequest(req) || ''
+    // Public read-only page — anonymous visitors can view, matching the
+    // /review/:id behavior. (isAuthed would gate any future edit affordances.)
+
+    // Parse serialized columns
+    const timeline = project.timeline ? JSON.parse(project.timeline) : []
+    const customLinks = project.customLinks ? JSON.parse(project.customLinks) : []
+    const designers: string[] = project.designers ? JSON.parse(project.designers) : []
+    const businessLines: string[] = project.businessLine
+      ? (() => { try { return JSON.parse(project.businessLine); } catch { return [project.businessLine]; } })()
+      : []
+
+    // Review diamonds for this project (links into /review/:id)
+    const markers = await all(
+      `SELECT r.id as review_id, r.title as review_title, r.review_date, r.created_at,
+              ri.id as item_id
+       FROM review_items ri
+       JOIN reviews r ON r.id = ri.review_id
+       WHERE ri.project_id = ?
+       ORDER BY r.review_date DESC, r.created_at DESC`,
+      [project.id]
+    ) as any[]
+
+    const reviewMarkers: ReviewMarker[] = markers
+      .filter((m: any) => m.review_date)
+      .map((m: any) => ({
+        date: new Date(m.review_date + 'T12:00:00').getTime(),
+        url: `/review/${m.review_id}`,
+        label: m.review_title || 'Design Review',
+      }))
+
+    // Images (same shape as project_images used inside the app)
+    const images = await all(
+      `SELECT * FROM project_images WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC`,
+      [project.id]
+    ) as any[]
+
+    // Current capacity: assignments joined with team info
+    const assignments = await all(
+      `SELECT pa.allocation_percent, pa.created_at as assignment_created,
+              t.id as designer_id, t.name as designer_name, t.role as designer_role,
+              t.weekly_hours, t.excluded
+       FROM project_assignments pa
+       JOIN team t ON t.id = pa.designer_id
+       WHERE pa.project_id = ? AND (t.excluded IS NULL OR t.excluded = 0)
+       ORDER BY t.name ASC`,
+      [project.id]
+    ) as any[]
+
+    // Build page sections
+    const statusColors: Record<string, string> = {
+      active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444',
+      pending: '#94a3b8', archived: '#6b7280',
+    }
+    const statusLabels: Record<string, string> = {
+      active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked',
+      pending: 'Pending', archived: 'Archived',
+    }
+    const statusColor = statusColors[project.status] || '#6b7280'
+    const statusLabel = statusLabels[project.status] || project.status
+
+    // Designer chips — link to Slack when we have it, mirroring the /review/:id
+    // header exactly. Slack lookup spans all designers referenced by this project,
+    // so full-name tags from the project row resolve the same way.
+    const teamForDesigners = await all('SELECT name, slack FROM team') as { name: string; slack: string }[]
+    const slackByName = new Map(teamForDesigners.map(t => [t.name, t.slack]))
+    const slackSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
+    const designerPills = designers.length > 0
+      ? `<div class="card-designers">${designers.map((d: string) => {
+          const firstName = d.split(' ')[0]
+          const slack = slackByName.get(d)
+          return slack
+            ? `<a href="${escHtml(slack)}" target="_blank" rel="noopener" class="status-badge designer-badge">${slackSvg} ${escHtml(firstName)}</a>`
+            : `<span class="status-badge designer-badge">${escHtml(firstName)}</span>`
+        }).join('')}</div>`
+      : ''
+
+    const dateRange = (project.startDate && project.endDate)
+      ? `${new Date(project.startDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} → ${new Date(project.endDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+      : ''
+
+    const blChips = businessLines.length > 0
+      ? businessLines.map((bl: string) => `<span class="project-meta-chip">${escHtml(bl)}</span>`).join(' ')
+      : ''
+
+    const headerHtml = `<div class="project-public-header">
+      <div class="project-public-status">
+        <span class="status-dot" style="background:${statusColor}"></span>
+        <span class="status-label">${escHtml(statusLabel)}</span>
+        ${blChips ? `<span class="project-meta-sep">·</span>${blChips}` : ''}
+        ${dateRange ? `<span class="project-meta-sep">·</span><span class="project-meta-date">${escHtml(dateRange)}</span>` : ''}
+      </div>
+      <h1 class="project-public-title">${escHtml(project.name)}</h1>
+      ${designerPills}
+    </div>`
+
+    const descHtml = project.description
+      ? `<section class="project-public-section"><h2 class="project-public-section-title">About</h2><div class="card-description">${markdownToHtml(project.description)}</div></section>`
+      : ''
+
+    // Links: reuse review's renderLinks by adapting the shape
+    const linkItem = {
+      deckName: project.deckName, deckLink: project.deckLink,
+      prdName: project.prdName, prdLink: project.prdLink,
+      briefName: project.briefName, briefLink: project.briefLink,
+      figmaLink: project.figmaLink,
+      customLinks,
+      url: project.url,
+    }
+    const linksBody = renderLinks(linkItem)
+    const linksHtml = linksBody
+      ? `<section class="project-public-section"><h2 class="project-public-section-title">Links</h2><div class="card-links">${linksBody}</div></section>`
+      : ''
+
+    const ganttItem = { timeline, startDate: project.startDate, endDate: project.endDate }
+    const ganttHtml = `<section class="project-public-section"><h2 class="project-public-section-title">Timeline</h2>${renderFullGantt(ganttItem, reviewMarkers)}</section>`
+
+    const imagesHtml = images.length > 0
+      ? (() => {
+          const thumbs = images.map((img: any, idx: number) => `
+            <div class="review-inline-thumb">
+              <img src="/api/images/${escHtml(img.id)}" alt="${escHtml(img.caption || img.original_name || '')}" loading="lazy"
+                data-lightbox-trigger data-item-id="${escHtml(project.id)}" data-image-index="${idx}" />
+            </div>`).join('')
+          return `<section class="project-public-section">
+            <h2 class="project-public-section-title">Attached images</h2>
+            <div class="review-inline-images" data-item-id="${escHtml(project.id)}">
+              <div class="review-inline-images-row">${thumbs}</div>
+            </div>
+            <script type="application/json" class="review-images-data" data-item-id="${escHtml(project.id)}">${JSON.stringify(images.map((i: any) => ({ ...i, id: i.id })))}</script>
+          </section>`
+        })()
+      : ''
+
+    const capacityRows = assignments.map((a: any) => {
+      const pct = Number(a.allocation_percent) || 0
+      const wh = Number(a.weekly_hours) || 35
+      const hrs = Math.round((pct / 100) * wh * 10) / 10
+      return `<tr>
+        <td class="project-capacity-name">${(() => {
+          const slack = slackByName.get(a.designer_name)
+          const name = escHtml(a.designer_name)
+          return slack
+            ? `<a href="${escHtml(slack)}" target="_blank" rel="noopener" class="project-capacity-name-link">${name}</a>`
+            : name
+        })()}${a.designer_role ? ` <span class="project-capacity-role">${escHtml(a.designer_role)}</span>` : ''}</td>
+        <td class="project-capacity-pct">${pct}%</td>
+        <td class="project-capacity-hrs">${hrs} h/wk</td>
+      </tr>`
+    }).join('')
+    const capacityHtml = assignments.length > 0
+      ? `<section class="project-public-section">
+          <h2 class="project-public-section-title">Current capacity</h2>
+          <table class="project-capacity-table">
+            <thead><tr><th>Designer</th><th>Allocation</th><th>Effective this week</th></tr></thead>
+            <tbody>${capacityRows}</tbody>
+          </table>
+        </section>`
+      : ''
+
+    const reviewsListHtml = markers.length > 0
+      ? (() => {
+          const rows = markers.map((m: any) => {
+            const d = m.review_date ? new Date(m.review_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
+            return `<li><a href="/review/${escHtml(m.review_id)}" class="project-public-review-link">${escHtml(m.review_title || 'Design Review')}${d ? ` <span class="project-meta-date">· ${d}</span>` : ''}</a></li>`
+          }).join('')
+          return `<section class="project-public-section">
+            <h2 class="project-public-section-title">Reviews</h2>
+            <ul class="project-public-review-list">${rows}</ul>
+          </section>`
+        })()
+      : ''
+
+    const body = `<div class="project-public">
+      ${headerHtml}
+      ${descHtml}
+      ${linksHtml}
+      ${ganttHtml}
+      ${imagesHtml}
+      ${capacityHtml}
+      ${reviewsListHtml}
+    </div>`
+
+    res.send(renderPage(project.name, body, [], undefined, sessionId, { hideSidebar: true }))
+  } catch (e: any) {
+    console.error('Project public page error:', e)
+    res.status(500).send(renderPage('Error', `<div class="empty-state">Something went wrong: ${escHtml(e.message)}</div>`, [], undefined, undefined, { hideSidebar: true }))
+  }
+})
 
 export default router;

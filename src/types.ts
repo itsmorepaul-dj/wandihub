@@ -27,6 +27,8 @@ export interface Project {
   timeline: TimelineRange[]
   estimatedHours?: number
   archivedQuarter?: string | null
+  published?: 0 | 1
+  public_slug?: string | null
 }
 
 export interface BusinessLine {

@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import { run, get, all, upsertProject, upsertBusinessLine } from '../db.js';
 import { updateDbVersion, logActivity } from '../version.js';
 import { getUserEmail } from '../auth.js';
@@ -123,6 +124,59 @@ router.put('/projects/:id/unarchive', async (req, res) => {
     const initiatorId = await userIdForEmail(initiatorEmail)
     const activityId = await logActivity('project', 'update', proj?.name || req.params.id, initiatorEmail, `Restored from archive (${proj?.archivedQuarter || 'unknown'})`)
     await pinRecipients(activityId, await recipientsForProject(req.params.id, initiatorId))
+    res.json({ success: true })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// Slugify a project name for the human-readable part of a public URL.
+const slugifyBase = (name: string): string => {
+  return (name || 'project')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'project'
+}
+
+// Build a capability-style public slug: `<name>-<8-char-random>`. The random
+// suffix keeps the URL unguessable so anonymous visitors need the shared link
+// to find the page.
+const buildPublicSlug = async (name: string, excludeId: string): Promise<string> => {
+  const base = slugifyBase(name)
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const suffix = crypto.randomBytes(5).toString('base64url').slice(0, 8).toLowerCase()
+    const slug = `${base}-${suffix}`
+    const collision = await get('SELECT id FROM projects WHERE public_slug = ? AND id != ?', [slug, excludeId]) as any
+    if (!collision) return slug
+  }
+  throw new Error('Failed to generate unique slug after 5 attempts')
+}
+
+router.put('/projects/:id/publish', async (req, res) => {
+  try {
+    const proj = await get('SELECT name, public_slug FROM projects WHERE id = ?', [req.params.id]) as any
+    if (!proj) return res.status(404).json({ error: 'Project not found' })
+    // Reuse existing slug if already set (preserves URLs across unpublish/republish),
+    // otherwise mint a new capability-style slug.
+    const slug = proj.public_slug || await buildPublicSlug(proj.name, req.params.id)
+    await run("UPDATE projects SET published = 1, public_slug = ?, updatedAt = datetime('now') WHERE id = ?", [slug, req.params.id])
+    await updateDbVersion()
+    const initiatorEmail = getUserEmail(req)
+    await logActivity('project', 'update', proj.name || req.params.id, initiatorEmail, 'Published public project page')
+    res.json({ success: true, public_slug: slug })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.put('/projects/:id/unpublish', async (req, res) => {
+  try {
+    const proj = await get('SELECT name FROM projects WHERE id = ?', [req.params.id]) as any
+    if (!proj) return res.status(404).json({ error: 'Project not found' })
+    // Keep public_slug around so the same URL is reused if re-published later.
+    await run("UPDATE projects SET published = 0, updatedAt = datetime('now') WHERE id = ?", [req.params.id])
+    await updateDbVersion()
+    const initiatorEmail = getUserEmail(req)
+    await logActivity('project', 'update', proj.name || req.params.id, initiatorEmail, 'Unpublished public project page')
     res.json({ success: true })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })

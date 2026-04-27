@@ -57,24 +57,33 @@ export const upsertProject = async (p: any) => {
     ? p.businessLine
     : typeof p.businessLines === 'string' ? p.businessLines
     : JSON.stringify(p.businessLines || (p.businessLine ? [p.businessLine] : []))
-  // Preserve archivedQuarter if not explicitly provided (INSERT OR REPLACE would null it)
+  // Preserve fields not explicitly provided (INSERT OR REPLACE would null them).
+  // archivedQuarter is set by the archive/unarchive endpoints; published/public_slug
+  // are set by the publish/unpublish endpoint — the general project upsert must
+  // not clobber them.
   let archivedQuarter = p.archivedQuarter !== undefined ? (p.archivedQuarter || null) : undefined
-  if (archivedQuarter === undefined) {
-    const existing = await get('SELECT archivedQuarter FROM projects WHERE id = ?', [p.id]) as any
-    archivedQuarter = existing?.archivedQuarter || null
+  let published: number | undefined = p.published !== undefined ? (p.published ? 1 : 0) : undefined
+  let publicSlug: string | null | undefined = p.public_slug !== undefined ? (p.public_slug || null) : undefined
+  if (archivedQuarter === undefined || published === undefined || publicSlug === undefined) {
+    const existing = await get('SELECT archivedQuarter, published, public_slug FROM projects WHERE id = ?', [p.id]) as any
+    if (archivedQuarter === undefined) archivedQuarter = existing?.archivedQuarter || null
+    if (published === undefined) published = existing?.published ? 1 : 0
+    if (publicSlug === undefined) publicSlug = existing?.public_slug || null
   }
   await run(
     `INSERT OR REPLACE INTO projects
      (id, name, status, dueDate, assignee, url, description, businessLine,
       deckName, deckLink, prdName, prdLink, briefName, briefLink, figmaLink,
-      customLinks, designers, startDate, endDate, timeline, estimatedHours, archivedQuarter, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      customLinks, designers, startDate, endDate, timeline, estimatedHours, archivedQuarter,
+      published, public_slug, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [p.id, p.name, p.status || 'active', p.dueDate || null, p.assignee || null,
      p.url || '', p.description || '', businessLineVal,
      p.deckName || '', p.deckLink || '', p.prdName || '', p.prdLink || '',
      p.briefName || '', p.briefLink || '', p.figmaLink || '',
      customLinksVal, designersVal, p.startDate || null, p.endDate || null,
-     timelineVal, p.estimatedHours || 0, archivedQuarter]
+     timelineVal, p.estimatedHours || 0, archivedQuarter,
+     published, publicSlug]
   )
 }
 
@@ -134,7 +143,8 @@ export const upsertNote = async (n: any) => {
 const UPSERT_COLUMNS: Record<string, string[]> = {
   projects: ['id','name','status','dueDate','assignee','url','description','businessLine',
     'deckName','deckLink','prdName','prdLink','briefName','briefLink','figmaLink',
-    'customLinks','designers','startDate','endDate','timeline','estimatedHours','archivedQuarter','updatedAt'],
+    'customLinks','designers','startDate','endDate','timeline','estimatedHours','archivedQuarter',
+    'published','public_slug','updatedAt'],
   team: ['id','name','role','brands','status','slack','email','avatar','timeOff','weekly_hours','excluded','updatedAt'],
   business_lines: ['id','name','deckName','deckLink','prdName','prdLink','briefName','briefLink','figmaLink','customLinks','updatedAt'],
   project_assignments: ['id','project_id','designer_id','allocation_percent','created_at'],
@@ -197,6 +207,9 @@ export const initSchema = async () => {
 
   await run(`ALTER TABLE projects ADD COLUMN estimatedHours REAL DEFAULT 0`).catch(() => {})
   await run(`ALTER TABLE projects ADD COLUMN archivedQuarter TEXT DEFAULT NULL`).catch(() => {})
+  await run(`ALTER TABLE projects ADD COLUMN published INTEGER DEFAULT 0`).catch(() => {})
+  await run(`ALTER TABLE projects ADD COLUMN public_slug TEXT`).catch(() => {})
+  await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_public_slug ON projects(public_slug) WHERE public_slug IS NOT NULL`).catch(() => {})
   await run(`UPDATE projects SET status = 'archived' WHERE archivedQuarter IS NOT NULL AND status != 'archived'`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS team (

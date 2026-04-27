@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
-import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, BarChart3, FileBarChart, ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus } from 'lucide-react'
+import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, FileBarChart,ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Published Project Pages — Share a project with stakeholders at a public, read-only URL from the Reports page. No sign-in required.',
   'Image manager — Cards now have "Add" / "Edit images" buttons that open a window for pasting, captioning, reordering, and deleting.',
   'Comments & bullets — Review-page comment boxes grow as you type, and bullet points render as real bullets.',
   'Smarter bell — Alerts only for projects you\'re on, your allocation changes, your PTO edits, and new holidays. Admins still see everything.',
@@ -1176,10 +1177,15 @@ const [showFilters, setShowFilters] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
   const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode }>({ open: false, title: '', content: '' })
+  // Publish-project state: pickerOpen shows the project selector modal; copied
+  // flashes a brief "copied" indicator next to a URL.
+  const [publishPickerOpen, setPublishPickerOpen] = useState(false)
+  const [publishPickerQuery, setPublishPickerQuery] = useState('')
+  const [publishCopiedFor, setPublishCopiedFor] = useState<string | null>(null)
+  const [showPublishedList, setShowPublishedList] = useState(false)
   const [showArchive, setShowArchive] = useState(false)
   const [showSnapshotHistory, setShowSnapshotHistory] = useState(false)
   const [showWeeklyPending, setShowWeeklyPending] = useState(false)
-  const [openCritsSyncing, setOpenCritsSyncing] = useState(false)
   const [weeklyUpdates, setWeeklyUpdates] = useState<WeeklyUpdate[]>([])
   const [weeklyGeneral, setWeeklyGeneral] = useState<WeeklyGeneral[]>([])
   const [currentWeek, setCurrentWeek] = useState('')
@@ -2212,6 +2218,28 @@ const [showFilters, setShowFilters] = useState(false)
   const unarchiveProject = async (projectId: string) => {
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, archivedQuarter: null, status: 'active' } : p))
     await authFetch(`/api/projects/${projectId}/unarchive`, { method: 'PUT' })
+  }
+
+  const publishProject = async (projectId: string): Promise<string | null> => {
+    const res = await authFetch(`/api/projects/${projectId}/publish`, { method: 'PUT' })
+    if (!res.ok) { alert('Failed to publish'); return null }
+    const data = await res.json()
+    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, published: 1, public_slug: data.public_slug } : p))
+    return data.public_slug as string
+  }
+
+  const unpublishProject = async (projectId: string) => {
+    openConfirmModal(
+      'Unpublish project page?',
+      'The public URL will return 404 until republished. The slug is preserved, so re-publishing restores the same URL.',
+      async () => {
+        const res = await authFetch(`/api/projects/${projectId}/unpublish`, { method: 'PUT' })
+        if (!res.ok) { alert('Failed to unpublish'); return }
+        setProjects(prev => prev.map(p => p.id === projectId ? { ...p, published: 0 } : p))
+        closeConfirmModal()
+      },
+      { confirmLabel: 'Unpublish' },
+    )
   }
 
   const handleQuarterRollover = async () => {
@@ -3576,6 +3604,18 @@ const [showFilters, setShowFilters] = useState(false)
                                 <Clock size={11} /> No estimate
                               </span>
                             ) : null}
+                            {project.published === 1 && project.public_slug && (
+                              <a
+                                href={`/p/${project.public_slug}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="project-meta-chip project-meta-published"
+                                title="Open public project page"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <Globe size={11} /> Published
+                              </a>
+                            )}
                             <span className="project-meta-spacer" />
                             <span className="project-meta-chip project-meta-action" onClick={() => {
                               const url = `${window.location.origin}${window.location.pathname}#/projects?project=${encodeURIComponent(project.name)}`
@@ -5030,15 +5070,7 @@ const [showFilters, setShowFilters] = useState(false)
         const activeProjects = currentProjects.filter(p => p.status === 'active')
         const reviewProjects = currentProjects.filter(p => p.status === 'review')
         const blockedProjects = currentProjects.filter(p => p.status === 'blocked')
-        const doneProjects = currentProjects.filter(p => p.status === 'done')
         const pendingProjects = currentProjects.filter(p => p.status === 'pending')
-        const overdueProjects = currentProjects.filter(p => {
-          if (!p.endDate || p.status === 'done' || p.status === 'pending') return false
-          const end = parseLocalDate(p.endDate)
-          return end ? end < today : false
-        })
-        const noEstimate = currentProjects.filter(p => p.status !== 'done' && p.status !== 'pending' && (!p.estimatedHours || p.estimatedHours <= 0))
-        const noDesigner = currentProjects.filter(p => p.status !== 'done' && p.status !== 'pending' && (!p.designers || p.designers.length === 0))
 
         const openReport = (title: string, content: string, richContent?: React.ReactNode) => {
           setReportModal({ open: true, title, content, richContent })
@@ -5508,26 +5540,6 @@ const [showFilters, setShowFilters] = useState(false)
           } catch (err) { console.error('Error loading review snapshot:', err) }
         }
 
-        const syncOpenCritsDoc = async () => {
-          setOpenCritsSyncing(true)
-          try {
-            const resp = await authFetch('/api/reports/open-crits/sync', {
-              method: 'POST',
-              body: JSON.stringify({}),
-            })
-            const data = await resp.json()
-            if (data.success) {
-              window.open(data.docUrl, '_blank')
-            } else {
-              alert(`Sync failed: ${data.error}`)
-            }
-          } catch (e) {
-            alert(`Sync failed: ${e}`)
-          } finally {
-            setOpenCritsSyncing(false)
-          }
-        }
-
         const generateProjectReview = () => {
           const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending', archived: 'Archived' }
           const sizeMap: Record<number, string> = { 35: 'XXS', 70: 'XS', 105: 'S', 175: 'M', 280: 'L', 455: 'XL', 910: 'XXL' }
@@ -5722,140 +5734,6 @@ const [showFilters, setShowFilters] = useState(false)
           openReport('W&I Open Critiques', plainLines.join('\n'), rich)
         }
 
-        const generateCapacityStats = () => {
-          const capTeam = capacityData?.team || []
-          const capAssignments = capacityData?.assignments || []
-          const lines = [
-            `CAPACITY REPORT — ${todayStr}`,
-            '',
-            'DESIGNER UTILIZATION',
-            ...capTeam.filter(m => !excludedDesigners.has(m.id)).map(m => {
-              const available = m.weekly_hours || 35
-              const assignments = capAssignments.filter(a => a.designer_id === m.id)
-              const activeAssignments = assignments.filter(a => {
-                const proj = projects.find(p => p.name === a.project_name)
-                return !proj || (proj.status !== 'done' && proj.status !== 'blocked' && proj.status !== 'pending' && proj.status !== 'archived')
-              })
-              const allocatedHours = activeAssignments.reduce((sum, a) => {
-                return sum + parseFloat(((available * (a.allocation_percent || 0)) / 100).toFixed(1))
-              }, 0)
-              const util = available > 0 ? Math.round((allocatedHours / available) * 100) : 0
-              return `  ${m.name}: ${allocatedHours}h / ${available}h (${util}%) — ${activeAssignments.length} projects`
-            }),
-            '',
-            'PROJECT FUNDING',
-            ...(() => {
-              const totalEstimated = activeProjects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
-              const totalAllocated = capAssignments.reduce((sum, a) => {
-                const proj = projects.find(p => p.name === a.project_name)
-                if (!proj || proj.status === 'done' || proj.status === 'blocked' || proj.status === 'pending' || proj.status === 'archived') return sum
-                if (!proj.startDate || !proj.endDate) return sum
-                const designer = capTeam.find(m => m.id === a.designer_id)
-                if (!designer || excludedDesigners.has(designer.id)) return sum
-                const available = designer.weekly_hours || 35
-                const allocH = parseFloat(((available * (a.allocation_percent || 0)) / 100).toFixed(1))
-                const start = parseLocalDate(proj.startDate)
-                const end = parseLocalDate(proj.endDate)
-                if (!start || !end) return sum
-                const totalWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000)))
-                return sum + (allocH * totalWeeks)
-              }, 0)
-              const fundedPct = totalEstimated > 0 ? Math.round((totalAllocated / totalEstimated) * 100) : 0
-              return [
-                `  Estimated: ${totalEstimated} hrs across ${activeProjects.length} active projects`,
-                `  Allocated: ${Math.round(totalAllocated)} hrs (allocations × full project duration)`,
-                `  Funded: ${fundedPct}%`,
-              ]
-            })(),
-            '',
-            ...(blockedProjects.length > 0 ? [
-              'BLOCKED (capacity paused)',
-              ...blockedProjects.map(p => `  • ${p.name} — ${(p.designers || []).map(d => d.split(' ')[0]).join(', ')}`),
-              '',
-            ] : []),
-          ]
-          openReport('Capacity Report', lines.join('\n'))
-        }
-
-        const generateProjectStats = () => {
-          const totalHours = projects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
-          const avgHours = projects.filter(p => p.estimatedHours && p.estimatedHours > 0).length > 0
-            ? Math.round(totalHours / projects.filter(p => p.estimatedHours && p.estimatedHours > 0).length)
-            : 0
-          const blCounts: Record<string, number> = {}
-          for (const p of projects) {
-            for (const bl of (p.businessLines || ['Unassigned'])) {
-              blCounts[bl] = (blCounts[bl] || 0) + 1
-            }
-          }
-          const designerCounts: Record<string, number> = {}
-          for (const p of currentProjects.filter(pr => pr.status !== 'done' && pr.status !== 'pending')) {
-            for (const d of (p.designers || [])) {
-              designerCounts[d] = (designerCounts[d] || 0) + 1
-            }
-          }
-          const lines = [
-            `PROJECT STATISTICS — ${todayStr}`,
-            '',
-            'OVERVIEW',
-            `  Total: ${currentProjects.length}${archivedProjects.length > 0 ? ` (${archivedProjects.length} archived)` : ''}`,
-            `  Active: ${activeProjects.length} | Review: ${reviewProjects.length} | Blocked: ${blockedProjects.length} | Pending: ${pendingProjects.length} | Done: ${doneProjects.length}`,
-            `  Overdue: ${overdueProjects.length}`,
-            `  Missing estimates: ${noEstimate.length} | Missing designers: ${noDesigner.length}`,
-            '',
-            'HOURS',
-            `  Total estimated: ${totalHours} hrs (${Math.round(totalHours / 35 * 10) / 10} weeks)`,
-            `  Average per project: ${avgHours} hrs`,
-            '',
-            'BY BUSINESS LINE',
-            ...Object.entries(blCounts).sort((a, b) => b[1] - a[1]).map(([bl, count]) => `  ${bl}: ${count}`),
-            '',
-            'ACTIVE PROJECTS PER DESIGNER',
-            ...Object.entries(designerCounts).sort((a, b) => b[1] - a[1]).map(([d, count]) => `  ${d}: ${count}`),
-          ]
-          openReport('Project Statistics', lines.join('\n'))
-        }
-
-        const generateQuarterReview = () => {
-          const quarters = Object.keys(archivedByQuarter).sort((a, b) => b.localeCompare(a))
-          if (quarters.length === 0) {
-            openReport('Quarter Review', 'No archived quarters yet.')
-            return
-          }
-          const lines: string[] = [`QUARTERLY REVIEW — ${todayStr}`, '']
-          for (const q of quarters) {
-            const qProjects = archivedByQuarter[q]
-            const totalHours = qProjects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
-            const designerNames = [...new Set(qProjects.flatMap(p => p.designers || []))]
-            const blNames = [...new Set(qProjects.flatMap(p => p.businessLines || []))]
-            lines.push(
-              `${q} — ${qProjects.length} project${qProjects.length !== 1 ? 's' : ''} delivered`,
-              `  Hours: ${totalHours > 0 ? `${totalHours} hrs (${Math.round(totalHours / 35 * 10) / 10} weeks)` : 'no estimates'}`,
-              `  Designers: ${designerNames.length > 0 ? designerNames.join(', ') : 'none'}`,
-              `  Business Lines: ${blNames.length > 0 ? blNames.join(', ') : 'none'}`,
-              '',
-              ...qProjects.sort((a, b) => a.name.localeCompare(b.name)).map(p => {
-                const designers = (p.designers || []).map(d => d.split(' ')[0]).join(', ')
-                const hours = p.estimatedHours ? `${p.estimatedHours} hrs` : 'no estimate'
-                const bl = (p.businessLines || []).join(', ') || 'unassigned'
-                return `  • ${p.name} — ${bl} — ${designers || 'unassigned'} — ${hours}`
-              }),
-              '',
-            )
-          }
-          openReport('Quarter Review', lines.join('\n'))
-        }
-
-        const totalEstimatedHours = projects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
-        const lastQuarter = (() => {
-          const currentQ = getCurrentFiscalQuarter()
-          const quarters = Object.keys(archivedByQuarter).filter(q => q !== currentQ).sort((a, b) => b.localeCompare(a))
-          return quarters.length > 0 ? quarters[0] : null
-        })()
-        const lastQProjects = lastQuarter ? archivedByQuarter[lastQuarter] : []
-        const lastQHours = lastQProjects.reduce((sum, p) => sum + (p.estimatedHours || 0), 0)
-        const lastQDesigners = [...new Set(lastQProjects.flatMap(p => p.designers || []))]
-
         const reports = [
           {
             id: 'weekly-status',
@@ -5875,56 +5753,13 @@ const [showFilters, setShowFilters] = useState(false)
             stats: `${projects.filter(p => p.status === 'review').length} in review, ${projects.filter(p => p.status === 'active' || p.status === 'blocked').length} active`,
             generate: generateProjectReview,
           },
-          {
-            id: 'capacity-stats',
-            title: 'Capacity Report',
-            description: 'Per-designer utilization, project funding analysis (projected vs estimated hours), and blocked projects.',
-            icon: <Gauge size={24} />,
-            color: '#10b981',
-            stats: `${(capacityData?.team || []).filter(m => !excludedDesigners.has(m.id)).length} designers tracked`,
-            generate: generateCapacityStats,
-          },
-          {
-            id: 'project-stats',
-            title: 'Project Statistics',
-            description: 'Aggregate stats: totals by status, hours, business line distribution, and per-designer project counts.',
-            icon: <BarChart3 size={24} />,
-            color: '#ef4444',
-            stats: `${projects.length} total, ${totalEstimatedHours} hrs estimated`,
-            generate: generateProjectStats,
-          },
-          {
-            id: 'quarter-review',
-            title: 'Quarter Review',
-            description: lastQuarter
-              ? `Summary of delivered work by quarter. Includes projects, hours, designers, and business lines.`
-              : 'No completed quarters yet. Archive done projects at the end of a quarter to build history.',
-            icon: <Archive size={24} />,
-            color: '#6366f1',
-            stats: lastQuarter
-              ? `${lastQuarter}: ${lastQProjects.length} project${lastQProjects.length !== 1 ? 's' : ''} · ${lastQHours > 0 ? `${lastQHours}h` : 'no estimates'} · ${lastQDesigners.length} designer${lastQDesigners.length !== 1 ? 's' : ''}`
-              : `${archivedProjects.length} archived across ${Object.keys(archivedByQuarter).length} quarter${Object.keys(archivedByQuarter).length !== 1 ? 's' : ''}`,
-            generate: archivedProjects.length > 0 ? generateQuarterReview : undefined,
-          },
-          {
-            id: 'open-crits',
-            title: 'W&I Open Crits (Legacy)',
-            description: 'Creates a new dated tab in the shared Google Doc. Replaced by W&I Open Critiques.',
-            icon: <Palette size={24} />,
-            color: '#8b5cf6',
-            stats: `${projects.filter(p => p.status === 'active' || p.status === 'review').length} active projects across ${new Set(projects.flatMap(p => p.businessLines || [])).size} business lines`,
-            docUrl: `https://docs.google.com/document/d/1QTw96d8wjB4UyrPwb6gXYpwpnLOBBrZuo7xoB48Z08k/edit`,
-            syncDoc: syncOpenCritsDoc,
-            syncing: openCritsSyncing,
-            disabled: true,
-          },
         ]
 
         return (
         <div className="reports-page">
           <div className="reports-grid">
             {reports.map(report => (
-              <div key={report.id} className={`report-card${(report.id === 'weekly-status' && weeklySnapshots.length > 0) || (report.id === 'project-review' && reviewSnapshots.length > 0) ? ' report-card-has-history' : ''}${report.disabled ? ' report-card-disabled' : ''}`} style={report.disabled ? { opacity: 0.3, pointerEvents: 'none' } : undefined}>
+              <div key={report.id} className={`report-card${(report.id === 'weekly-status' && weeklySnapshots.length > 0) || (report.id === 'project-review' && reviewSnapshots.length > 0) ? ' report-card-has-history' : ''}`}>
                 <div className="report-card-icon" style={{ color: report.color }}>
                   {report.icon}
                 </div>
@@ -5933,18 +5768,7 @@ const [showFilters, setShowFilters] = useState(false)
                   <p className="report-card-desc">{report.description}</p>
                   <span className="report-card-stats">{report.stats}</span>
                 </div>
-                {report.docUrl ? (
-                  <div className="report-doc-actions">
-                    <button className="report-generate-btn" onClick={report.syncDoc} disabled={report.syncing} style={{ borderColor: report.color, color: report.color }}>
-                      {report.syncing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />}
-                      {report.syncing ? 'Syncing...' : 'Update Doc'}
-                    </button>
-                    <a className="report-generate-btn report-view-btn" href={report.docUrl} target="_blank" rel="noopener noreferrer" style={{ borderColor: report.color, color: report.color }}>
-                      <LinkIcon size={14} />
-                      View Doc
-                    </a>
-                  </div>
-                ) : report.generate ? (
+                {report.generate ? (
                   <button className="report-generate-btn" onClick={report.generate} style={{ borderColor: report.color, color: report.color }}>
                     <FileBarChart size={14} />
                     View Report
@@ -6049,6 +5873,77 @@ const [showFilters, setShowFilters] = useState(false)
           {copiedReport && (
             <div className="report-copied-toast">Report copied to clipboard — paste into Google Docs</div>
           )}
+
+          {/* Published Project Pages — card follows .report-card pattern; the
+              list of currently-published pages nests inside via .snapshot-accordion
+              so it matches the "Past Reports" history UI on the other cards. */}
+          {(() => {
+            const published = currentProjects.filter(p => p.published === 1 && p.public_slug)
+            const color = '#059669'
+            return (
+              <div className="reports-grid" style={{ marginTop: '1rem' }}>
+                <div className={`report-card${published.length > 0 ? ' report-card-has-history' : ''}`}>
+                  <div className="report-card-icon" style={{ color }}>
+                    <Globe size={24} />
+                  </div>
+                  <div className="report-card-body">
+                    <h3 className="report-card-title">Published Project Pages</h3>
+                    <p className="report-card-desc">
+                      Share a project with stakeholders via a public, read-only URL.
+                      Anyone with the link can view the project — no sign-in required.
+                      The page stays live and reflects the project's current state.
+                    </p>
+                    <span className="report-card-stats">
+                      {published.length === 0
+                        ? 'No projects published yet'
+                        : `${published.length} published`}
+                    </span>
+                  </div>
+                  <button className="report-generate-btn" style={{ borderColor: color, color }} onClick={() => { setPublishPickerQuery(''); setPublishPickerOpen(true) }}>
+                    <Globe size={14} />
+                    Publish Project
+                  </button>
+                  {published.length > 0 && (
+                    <div className="snapshot-accordion">
+                      <button className="snapshot-accordion-toggle" onClick={() => setShowPublishedList(v => !v)}>
+                        {showPublishedList ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        <Globe size={12} />
+                        <span>Published Pages ({published.length})</span>
+                      </button>
+                      {showPublishedList && (
+                        <div className="snapshot-accordion-body">
+                          {published.map(p => {
+                            const url = `${window.location.origin}/p/${p.public_slug}`
+                            return (
+                              <div key={p.id} className="published-project-item">
+                                <div className="published-project-main">
+                                  <a href={url} target="_blank" rel="noopener noreferrer" className="published-project-name">{p.name}</a>
+                                  <code className="published-project-url">{url}</code>
+                                </div>
+                                <div className="published-project-actions">
+                                  <button className="snapshot-item-btn" onClick={() => {
+                                    navigator.clipboard.writeText(url)
+                                    setPublishCopiedFor(p.id)
+                                    setTimeout(() => setPublishCopiedFor(prev => prev === p.id ? null : prev), 1500)
+                                  }}>
+                                    <Copy size={12} />
+                                    {publishCopiedFor === p.id ? 'Copied!' : 'Copy link'}
+                                  </button>
+                                  <button className="snapshot-item-btn" onClick={() => unpublishProject(p.id)}>
+                                    Unpublish
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
         </div>
         )
       })()}
@@ -7435,8 +7330,14 @@ const [showFilters, setShowFilters] = useState(false)
                 </button>
               )}
             </div>
-            
+
             <div className="modal-body">
+              {editingProject?.published === 1 && editingProject.public_slug && (
+                <div className="modal-public-banner">
+                  <Globe size={14} />
+                  <span>Public page live at <a href={`/p/${editingProject.public_slug}`} target="_blank" rel="noopener noreferrer">/p/{editingProject.public_slug}</a>. Edits here update the page immediately.</span>
+                </div>
+              )}
 
               {/* Basic Info */}
               <div className="form-section">
@@ -8096,6 +7997,54 @@ const [showFilters, setShowFilters] = useState(false)
           </div>
         </div>
       )}
+
+      {/* Publish Project Picker Modal */}
+      {publishPickerOpen && (() => {
+        const q = publishPickerQuery.trim().toLowerCase()
+        const pickable = currentProjects
+          .filter(p => p.status !== 'archived' && p.published !== 1)
+          .filter(p => !q || p.name.toLowerCase().includes(q))
+          .sort((a, b) => a.name.localeCompare(b.name))
+        return (
+          <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setPublishPickerOpen(false) }}>
+            <div className="modal" style={{ maxWidth: 520 }}>
+              <div className="modal-header">
+                <h2>Publish a project</h2>
+                <button className="modal-close-btn" onClick={() => setPublishPickerOpen(false)}>×</button>
+              </div>
+              <div className="modal-body">
+                <div className={`float-field${publishPickerQuery ? ' has-value' : ''}`} style={{ marginBottom: '0.75rem' }}>
+                  <input type="text" value={publishPickerQuery} onChange={e => setPublishPickerQuery(e.target.value)} placeholder=" " autoFocus />
+                  <label>Search projects</label>
+                </div>
+                {pickable.length === 0 ? (
+                  <div className="published-projects-empty">No matching projects to publish.</div>
+                ) : (
+                  <ul className="publish-picker-list">
+                    {pickable.map(p => (
+                      <li key={p.id}>
+                        <button className="publish-picker-item" onClick={async () => {
+                          const slug = await publishProject(p.id)
+                          setPublishPickerOpen(false)
+                          if (slug) {
+                            const url = `${window.location.origin}/p/${slug}`
+                            navigator.clipboard.writeText(url).catch(() => {})
+                            setPublishCopiedFor(p.id)
+                            setTimeout(() => setPublishCopiedFor(prev => prev === p.id ? null : prev), 1800)
+                          }
+                        }}>
+                          <span className="publish-picker-name">{p.name}</span>
+                          <span className="publish-picker-meta">{p.businessLines?.join(', ') || ''}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Report Modal */}
       {reportModal.open && (
