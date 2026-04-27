@@ -2092,7 +2092,10 @@
   transition: all 0.2s ease;
 }
 
-.gantt-bar:hover {
+a.gantt-bar {
+  cursor: pointer;
+}
+a.gantt-bar:hover {
   filter: brightness(1.1);
   box-shadow: var(--shadow-md);
   z-index: 5;

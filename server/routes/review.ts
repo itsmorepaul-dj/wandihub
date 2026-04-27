@@ -2317,7 +2317,8 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
       white-space: nowrap; text-overflow: ellipsis;
       box-shadow: 0 1px 2px rgba(0,0,0,0.1); transition: all 0.2s ease;
     }
-    .gantt-bar:hover { filter: brightness(1.1); box-shadow: 0 2px 6px rgba(0,0,0,0.15); z-index: 5; transform: scaleY(1.08); }
+    a.gantt-bar { cursor: pointer; }
+    a.gantt-bar:hover { filter: brightness(1.1); box-shadow: 0 2px 6px rgba(0,0,0,0.15); z-index: 5; transform: scaleY(1.08); }
     .gantt-bar.bar-1 { background: linear-gradient(90deg, #4f46e5 0%, rgba(99,102,241,0.8) 100%); }
     .gantt-bar.bar-2 { background: linear-gradient(90deg, #7c3aed 0%, rgba(139,92,246,0.8) 100%); }
     .gantt-bar.bar-3 { background: linear-gradient(90deg, #db2777 0%, rgba(236,72,153,0.8) 100%); }
@@ -2966,6 +2967,29 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
       border: 1px solid var(--rv-border-subtle); border-radius: 99px;
       font-size: 0.65rem; color: var(--rv-text-muted); background: var(--rv-bg-secondary);
     }
+    .project-public-status .project-meta-chip-btn {
+      gap: 0.25rem; font-family: inherit; cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .project-public-status .project-meta-chip-btn:hover {
+      border-color: var(--rv-accent); color: var(--rv-accent);
+    }
+
+    /* Design-time legend modal body */
+    .legend-intro { font-size: 0.85rem; color: var(--rv-text-secondary); margin: 0 0 0.85rem; line-height: 1.5; }
+    .legend-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .legend-table th {
+      text-align: left; padding: 0.4rem 0.6rem; background: var(--rv-bg-secondary);
+      color: var(--rv-text-muted); font-size: 0.65rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--rv-border-subtle);
+    }
+    .legend-table td {
+      padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--rv-border-subtle);
+      color: var(--rv-text); font-variant-numeric: tabular-nums;
+    }
+    .legend-table tr:last-child td { border-bottom: none; }
+    .legend-size { font-weight: 600; color: var(--rv-accent); }
     .project-public-title {
       font-size: 1.75rem; font-weight: 700; color: var(--rv-text);
       margin: 0 0 0.6rem; letter-spacing: -0.02em; line-height: 1.15;
@@ -3461,11 +3485,26 @@ router.get('/p/:slug', async (req, res) => {
       ? businessLines.map((bl: string) => `<span class="project-meta-chip">${escHtml(bl)}</span>`).join(' ')
       : ''
 
+    // Design-time estimate chip — clickable, opens a legend modal explaining
+    // the t-shirt sizing. Label clarifies this is design time, not total
+    // project time (which may span design + eng + review + handoff).
+    const estimateSizeMap: Record<number, string> = { 35: 'XXS', 70: 'XS', 105: 'S', 175: 'M', 280: 'L', 455: 'XL', 910: 'XXL' }
+    const hours = Number(project.estimatedHours) || 0
+    const estimateChip = hours > 0
+      ? (() => {
+          const size = estimateSizeMap[hours]
+          const weeks = Math.round(hours / 35 * 10) / 10
+          const clockSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+          return `<button type="button" class="project-meta-chip project-meta-chip-btn" data-open-estimate-legend title="How we size design-time estimates">${clockSvg} ${size ? `${size} · ` : ''}${hours}h (${weeks}w)</button>`
+        })()
+      : ''
+
     const headerHtml = `<div class="project-public-header">
       <div class="project-public-status">
         <span class="status-dot" style="background:${statusColor}"></span>
         <span class="status-label">${escHtml(statusLabel)}</span>
         ${blChips ? `<span class="project-meta-sep">·</span>${blChips}` : ''}
+        ${estimateChip ? `<span class="project-meta-sep">·</span>${estimateChip}` : ''}
         ${dateRange ? `<span class="project-meta-sep">·</span><span class="project-meta-date">${escHtml(dateRange)}</span>` : ''}
       </div>
       <h1 class="project-public-title">${escHtml(project.name)}</h1>
@@ -3549,6 +3588,63 @@ router.get('/p/:slug', async (req, res) => {
         })()
       : ''
 
+    // Lightweight inline script: the estimate chip opens a legend modal
+    // explaining the t-shirt sizing buckets. Kept inline so this page has no
+    // external script dependency.
+    const legendScript = `<script>
+      (function() {
+        document.addEventListener('click', function(e) {
+          var openBtn = e.target.closest && e.target.closest('[data-open-estimate-legend]');
+          if (openBtn) {
+            e.preventDefault();
+            var existing = document.getElementById('rv-estimate-legend');
+            if (existing) { existing.remove(); return; }
+            var rows = [
+              ['XXS', '35h', '1 week'],
+              ['XS',  '70h', '2 weeks'],
+              ['S',   '105h', '3 weeks'],
+              ['M',   '175h', '5 weeks'],
+              ['L',   '280h', '8 weeks'],
+              ['XL',  '455h', '13 weeks'],
+              ['XXL', '910h', '26 weeks'],
+            ];
+            var rowsHtml = rows.map(function(r) {
+              return '<tr><td class="legend-size">' + r[0] + '</td><td>' + r[1] + '</td><td>' + r[2] + '</td></tr>';
+            }).join('');
+            var overlay = document.createElement('div');
+            overlay.id = 'rv-estimate-legend';
+            overlay.className = 'rv-modal-overlay';
+            overlay.innerHTML =
+              '<div class="rv-modal" role="dialog" aria-label="Design-time estimate legend" style="max-width:480px">' +
+                '<div class="rv-modal-header">' +
+                  '<h2>Design-time estimates</h2>' +
+                  '<button class="rv-modal-close" data-close-estimate-legend aria-label="Close">&times;</button>' +
+                '</div>' +
+                '<div class="rv-modal-body">' +
+                  '<p class="legend-intro">Design estimates use a t-shirt scale sized in design-hours at a 35-hour workweek. This covers design work only — not engineering, stakeholder review, or handoff time.</p>' +
+                  '<table class="legend-table"><thead><tr><th>Size</th><th>Design hours</th><th>At 100% allocation</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>' +
+                '</div>' +
+                '<div class="rv-modal-footer">' +
+                  '<button class="rv-modal-done" data-close-estimate-legend>Got it</button>' +
+                '</div>' +
+              '</div>';
+            document.body.appendChild(overlay);
+            var downTarget = null;
+            overlay.addEventListener('mousedown', function(ev) { downTarget = ev.target; });
+            overlay.addEventListener('click', function(ev) {
+              if (ev.target === overlay && downTarget === overlay) overlay.remove();
+            });
+            return;
+          }
+          var closeBtn = e.target.closest && e.target.closest('[data-close-estimate-legend]');
+          if (closeBtn) {
+            var modal = document.getElementById('rv-estimate-legend');
+            if (modal) modal.remove();
+          }
+        });
+      })();
+    </script>`
+
     const body = `<div class="project-public">
       ${headerHtml}
       ${descHtml}
@@ -3557,7 +3653,7 @@ router.get('/p/:slug', async (req, res) => {
       ${imagesHtml}
       ${capacityHtml}
       ${reviewsListHtml}
-    </div>`
+    </div>${legendScript}`
 
     res.send(renderPage(project.name, body, [], undefined, sessionId, { hideSidebar: true }))
   } catch (e: any) {

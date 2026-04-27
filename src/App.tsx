@@ -29,10 +29,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Published Project Pages — Share a project with stakeholders at a public, read-only URL from the Reports page. No sign-in required. Includes a design-time estimate chip with a t-shirt size legend.',
   'Review diamonds filter — Clicking a Design Review diamond on any Gantt chart now opens the review scoped to that project. A pill at the top clears the filter.',
-  'Published Project Pages — Share a project with stakeholders at a public, read-only URL from the Reports page. No sign-in required.',
-  'Image manager — Cards now have "Add" / "Edit images" buttons that open a window for pasting, captioning, reordering, and deleting.',
-  'Smarter bell — Alerts only for projects you\'re on, your allocation changes, your PTO edits, and new holidays. Admins still see everything.',
 ]
 
 
