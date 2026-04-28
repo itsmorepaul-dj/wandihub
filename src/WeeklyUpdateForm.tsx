@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { TrendingUp, TrendingDown, Megaphone, UserCheck, ChevronDown, ChevronRight } from 'lucide-react'
+import { TrendingUp, TrendingDown, Megaphone, UserCheck, ChevronDown, ChevronRight, Check, Loader2 } from 'lucide-react'
 import RichTextEditor, { type RichTextEditorHandle } from './components/RichTextEditor'
 import type { Project, WeeklyUpdate, WeeklyGeneral } from './types'
+
+export interface WeeklyUpdateSavePayload {
+  highlight: string; lowlight: string; risk_reason: string; resolution: string; fyi: string; people: string
+  existingHighlight: WeeklyUpdate | null; existingLowlight: WeeklyUpdate | null
+}
 
 interface WeeklyUpdateFormProps {
   project: Project
@@ -10,10 +15,7 @@ interface WeeklyUpdateFormProps {
   designerId: string
   isExpanded: boolean
   onToggle: () => void
-  onSave: (data: {
-    highlight: string; lowlight: string; risk_reason: string; resolution: string; fyi: string; people: string
-    existingHighlight: WeeklyUpdate | null; existingLowlight: WeeklyUpdate | null
-  }) => Promise<void>
+  onSave: (data: WeeklyUpdateSavePayload, opts?: { keepalive?: boolean }) => Promise<void>
   onAddProjectLink: (name: string, url: string) => void
 }
 
@@ -34,13 +36,31 @@ export default function WeeklyUpdateForm({
   const existingLowlight = projectUpdates.find(u => u.type === 'lowlight') || null
   const hasUpdate = !!(existingHighlight || existingLowlight)
 
-  const [draft, setDraft] = useState({ highlight: '', lowlight: '', risk_reason: '', resolution: '', fyi: '', people: '' })
+  const emptyDraft = { highlight: '', lowlight: '', risk_reason: '', resolution: '', fyi: '', people: '' }
+  const [draft, setDraft] = useState(emptyDraft)
   const [activeTab, setActiveTab] = useState<TabKey>('highlight')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const editorRef = useRef<RichTextEditorHandle>(null)
   const draftRef = useRef(draft)
   const activeTabRef = useRef(activeTab)
+  const baselineRef = useRef(emptyDraft)
+  const onSaveRef = useRef(onSave)
+  const existingHighlightRef = useRef(existingHighlight)
+  const existingLowlightRef = useRef(existingLowlight)
+  const isExpandedRef = useRef(isExpanded)
   draftRef.current = draft
   activeTabRef.current = activeTab
+  onSaveRef.current = onSave
+  existingHighlightRef.current = existingHighlight
+  existingLowlightRef.current = existingLowlight
+  isExpandedRef.current = isExpanded
+
+  const isDirty = (): boolean => {
+    const b = baselineRef.current
+    const d = draftRef.current
+    return d.highlight !== b.highlight || d.lowlight !== b.lowlight || d.risk_reason !== b.risk_reason
+      || d.resolution !== b.resolution || d.fyi !== b.fyi || d.people !== b.people
+  }
 
   useEffect(() => {
     if (isExpanded) {
@@ -56,17 +76,75 @@ export default function WeeklyUpdateForm({
       }
       setDraft(newDraft)
       draftRef.current = newDraft
+      baselineRef.current = newDraft
       setActiveTab('highlight')
       activeTabRef.current = 'highlight'
+      setSaveState('idle')
     }
   }, [isExpanded])
 
+  // Last-ditch flush when the form collapses: only if still dirty (user didn't click Save).
   useEffect(() => {
     if (!isExpanded) return
     return () => {
-      onSave({ ...draftRef.current, existingHighlight, existingLowlight })
+      if (isDirty()) {
+        onSaveRef.current({
+          ...draftRef.current,
+          existingHighlight: existingHighlightRef.current,
+          existingLowlight: existingLowlightRef.current,
+        })
+      }
     }
   }, [isExpanded])
+
+  // Guard page close / tab hide: if dirty, flush with keepalive fetch; on beforeunload, warn.
+  useEffect(() => {
+    const flush = (keepalive: boolean) => {
+      if (!isExpandedRef.current || !isDirty()) return false
+      onSaveRef.current({
+        ...draftRef.current,
+        existingHighlight: existingHighlightRef.current,
+        existingLowlight: existingLowlightRef.current,
+      }, { keepalive })
+      return true
+    }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(true) }
+    const onPageHide = () => { flush(true) }
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isExpandedRef.current || !isDirty()) return
+      flush(true)
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
+  }, [])
+
+  const saveNow = async () => {
+    if (saveState === 'saving') return
+    setSaveState('saving')
+    try {
+      await onSave({
+        ...draftRef.current,
+        existingHighlight: existingHighlightRef.current,
+        existingLowlight: existingLowlightRef.current,
+      })
+      baselineRef.current = { ...draftRef.current }
+      setSaveState('saved')
+      window.setTimeout(() => {
+        setSaveState(prev => (prev === 'saved' ? 'idle' : prev))
+      }, 1800)
+    } catch (e) {
+      console.error('Weekly save failed:', e)
+      setSaveState('error')
+    }
+  }
 
   const projectLinks = [
     project.deckLink && { name: project.deckName || 'Deck', url: project.deckLink },
@@ -157,6 +235,23 @@ export default function WeeklyUpdateForm({
                 </div>
               </div>
             )}
+          </div>
+          <div className="weekly-inline-footer">
+            <span className={`weekly-save-status weekly-save-status-${saveState}${isDirty() && saveState !== 'saving' ? ' dirty' : ''}`}>
+              {saveState === 'saving' && (<><Loader2 size={11} className="weekly-save-spin" /> Saving…</>)}
+              {saveState === 'saved' && !isDirty() && (<><Check size={11} /> Saved</>)}
+              {saveState === 'error' && (<>Save failed — try again</>)}
+              {saveState === 'idle' && isDirty() && (<>Unsaved changes</>)}
+              {saveState === 'idle' && !isDirty() && <>&nbsp;</>}
+            </span>
+            <button
+              type="button"
+              className="primary-btn weekly-save-btn"
+              onClick={saveNow}
+              disabled={saveState === 'saving' || !isDirty()}
+            >
+              {saveState === 'saving' ? 'Saving…' : 'Save'}
+            </button>
           </div>
         </div>
       )}

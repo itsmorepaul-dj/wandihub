@@ -5810,6 +5810,30 @@ a.report-view-btn {
   gap: 0.35rem;
 }
 
+/* --- Footer (save button + status) --- */
+.weekly-inline-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  padding-top: 0.35rem;
+}
+.weekly-save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  transition: color 0.2s;
+}
+.weekly-save-status.dirty { color: #d97706; }
+.weekly-save-status-saved { color: #16a34a; }
+.weekly-save-status-error { color: #dc2626; }
+.weekly-save-spin { animation: weekly-save-spin 1s linear infinite; }
+@keyframes weekly-save-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.weekly-save-btn { padding: 0.35rem 0.85rem; font-size: 0.75rem; }
+.weekly-save-btn:disabled { opacity: 0.55; cursor: default; }
+
 /* === Rich Text Editor (shared) === */
 .rte-wrapper {
   position: relative;
@@ -6213,6 +6237,46 @@ a.report-view-btn {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.snapshot-status-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-secondary);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 0.25rem;
+}
+.snapshot-status-bar.needs-refresh {
+  background: color-mix(in srgb, #f59e0b 8%, var(--color-bg-secondary));
+  border-color: color-mix(in srgb, #f59e0b 40%, var(--color-border-subtle));
+  color: #a16207;
+}
+.snapshot-status-info { display: inline-flex; align-items: center; gap: 0.35rem; }
+.snapshot-regen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.25rem 0.55rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.snapshot-regen-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
 .snapshot-accordion {
   width: 100%;
   border-top: 1px solid var(--color-border-subtle);

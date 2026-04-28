@@ -29,6 +29,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Weekly updates now save explicitly — a Save button and status indicator replace the invisible auto-save, and closing the tab with unsaved changes warns you before leaving. Your FYIs and People entries are now attributed to you (the signed-in user) so nothing gets filed under a co-designer.',
+  'Weekly Status report card shows when the snapshot was last frozen and warns when live entries are newer. Admins can regenerate the current week on demand from the card.',
   'Published Project Pages — Share a project with stakeholders at a public, read-only URL from the Reports page. No sign-in required. Includes a design-time estimate chip with a t-shirt size legend.',
   'Review diamonds filter — Clicking a Design Review diamond on any Gantt chart now opens the review scoped to that project. A pill at the top clears the filter.',
 ]
@@ -1384,13 +1386,16 @@ const [showFilters, setShowFilters] = useState(false)
     loadWeekly()
   }, [currentUser])
 
-  const saveWeeklyUpdate = async (update: Partial<WeeklyUpdate>) => {
+  const saveWeeklyUpdate = async (update: Partial<WeeklyUpdate>, opts: { keepalive?: boolean } = {}) => {
     try {
       const res = await authFetch('/api/weekly-updates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(update)
+        body: JSON.stringify(update),
+        ...(opts.keepalive ? { keepalive: true } : {}),
       })
+      // Skip state updates on keepalive flushes — the page is unloading.
+      if (opts.keepalive) return null
       const saved = await res.json() as WeeklyUpdate
       setWeeklyUpdates(prev => {
         const idx = prev.findIndex(u => u.id === saved.id)
@@ -1400,18 +1405,20 @@ const [showFilters, setShowFilters] = useState(false)
     } catch (err) { console.error('Error saving weekly update:', err); return null }
   }
 
-  const deleteWeeklyUpdate = async (id: string) => {
-    await authFetch(`/api/weekly-updates/${id}`, { method: 'DELETE' })
-    setWeeklyUpdates(prev => prev.filter(u => u.id !== id))
+  const deleteWeeklyUpdate = async (id: string, opts: { keepalive?: boolean } = {}) => {
+    await authFetch(`/api/weekly-updates/${id}`, { method: 'DELETE', ...(opts.keepalive ? { keepalive: true } : {}) })
+    if (!opts.keepalive) setWeeklyUpdates(prev => prev.filter(u => u.id !== id))
   }
 
-  const saveWeeklyGeneral = async (entry: Partial<WeeklyGeneral>) => {
+  const saveWeeklyGeneral = async (entry: Partial<WeeklyGeneral>, opts: { keepalive?: boolean } = {}) => {
     try {
       const res = await authFetch('/api/weekly-general', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entry)
+        body: JSON.stringify(entry),
+        ...(opts.keepalive ? { keepalive: true } : {}),
       })
+      if (opts.keepalive) return null
       const saved = await res.json() as WeeklyGeneral
       setWeeklyGeneral(prev => {
         const idx = prev.findIndex(e => e.id === saved.id)
@@ -1421,9 +1428,9 @@ const [showFilters, setShowFilters] = useState(false)
     } catch (err) { console.error('Error saving weekly general:', err); return null }
   }
 
-  const deleteWeeklyGeneral = async (id: string) => {
-    await authFetch(`/api/weekly-general/${id}`, { method: 'DELETE' })
-    setWeeklyGeneral(prev => prev.filter(e => e.id !== id))
+  const deleteWeeklyGeneral = async (id: string, opts: { keepalive?: boolean } = {}) => {
+    await authFetch(`/api/weekly-general/${id}`, { method: 'DELETE', ...(opts.keepalive ? { keepalive: true } : {}) })
+    if (!opts.keepalive) setWeeklyGeneral(prev => prev.filter(e => e.id !== id))
   }
 
   // Reset scroll position when switching tabs (non-calendar tabs should start at top)
@@ -3753,30 +3760,42 @@ const [showFilters, setShowFilters] = useState(false)
                         {/* Weekly Update Inline */}
                         {currentWeek && (() => {
                           const projectUpdates = weeklyUpdates.filter(u => u.project_id === project.id)
+                          const myMember = findMyTeamMember()
                           const assignedDesignerNames = project.designers || []
                           const primaryDesigner = team.find(t => assignedDesignerNames.includes(t.name))
-                          const designerId = primaryDesigner?.id || project.id
+                          // FYI/People are personal — always attribute to the signed-in user.
+                          // Project highlights/lowlights fall back to the project's primary designer so
+                          // non-designers (e.g. PMs) writing on behalf of the team still attribute reasonably.
+                          const personalDesignerId = String(myMember?.id || primaryDesigner?.id || project.id)
+                          const projectDesignerId = String(myMember?.id || primaryDesigner?.id || project.id)
                           return (
                             <WeeklyUpdateForm
                               project={project}
                               projectUpdates={projectUpdates}
                               weeklyGeneral={weeklyGeneral}
-                              designerId={designerId}
+                              designerId={personalDesignerId}
                               isExpanded={weeklyExpandedProject === project.id}
                               onToggle={() => setWeeklyExpandedProject(prev => prev === project.id ? null : project.id)}
-                              onSave={async (data) => {
+                              onSave={async (data, opts) => {
                                 if (data.highlight.trim()) {
-                                  await saveWeeklyUpdate({ ...(data.existingHighlight ? { id: data.existingHighlight.id } : {}), project_id: project.id, designer_id: designerId, week: currentWeek, type: 'highlight' as const, description: data.highlight.trim() })
-                                } else if (data.existingHighlight) { await deleteWeeklyUpdate(data.existingHighlight.id) }
+                                  await saveWeeklyUpdate({ ...(data.existingHighlight ? { id: data.existingHighlight.id } : {}), project_id: project.id, designer_id: projectDesignerId, week: currentWeek, type: 'highlight' as const, description: data.highlight.trim() }, opts)
+                                } else if (data.existingHighlight) { await deleteWeeklyUpdate(data.existingHighlight.id, opts) }
                                 if (data.lowlight.trim()) {
-                                  await saveWeeklyUpdate({ ...(data.existingLowlight ? { id: data.existingLowlight.id } : {}), project_id: project.id, designer_id: designerId, week: currentWeek, type: 'lowlight' as const, description: data.lowlight.trim(), risk_reason: data.risk_reason.trim(), resolution: data.resolution.trim() })
-                                } else if (data.existingLowlight) { await deleteWeeklyUpdate(data.existingLowlight.id) }
-                                const eFYIs = weeklyGeneral.filter(e => e.category === 'fyi' && e.designer_id === designerId)
-                                for (const old of eFYIs) await deleteWeeklyGeneral(old.id)
-                                if (data.fyi.trim()) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'fyi', content: data.fyi.trim() }) }
-                                const ePeople = weeklyGeneral.filter(e => e.category === 'people' && e.designer_id === designerId)
-                                for (const old of ePeople) await deleteWeeklyGeneral(old.id)
-                                if (data.people.trim()) { await saveWeeklyGeneral({ designer_id: designerId, week: currentWeek, category: 'people', content: data.people.trim() }) }
+                                  await saveWeeklyUpdate({ ...(data.existingLowlight ? { id: data.existingLowlight.id } : {}), project_id: project.id, designer_id: projectDesignerId, week: currentWeek, type: 'lowlight' as const, description: data.lowlight.trim(), risk_reason: data.risk_reason.trim(), resolution: data.resolution.trim() }, opts)
+                                } else if (data.existingLowlight) { await deleteWeeklyUpdate(data.existingLowlight.id, opts) }
+                                // Upsert the signed-in user's single FYI row for the week; only delete if the user cleared it.
+                                const eFYI = weeklyGeneral.find(e => e.category === 'fyi' && e.designer_id === personalDesignerId)
+                                if (data.fyi.trim()) {
+                                  await saveWeeklyGeneral({ id: eFYI?.id, designer_id: personalDesignerId, week: currentWeek, category: 'fyi', content: data.fyi.trim() }, opts)
+                                } else if (eFYI) {
+                                  await deleteWeeklyGeneral(eFYI.id, opts)
+                                }
+                                const ePeople = weeklyGeneral.find(e => e.category === 'people' && e.designer_id === personalDesignerId)
+                                if (data.people.trim()) {
+                                  await saveWeeklyGeneral({ id: ePeople?.id, designer_id: personalDesignerId, week: currentWeek, category: 'people', content: data.people.trim() }, opts)
+                                } else if (ePeople) {
+                                  await deleteWeeklyGeneral(ePeople.id, opts)
+                                }
                               }}
                               onAddProjectLink={async (name, url) => {
                                 const existing = project.customLinks || []
@@ -5771,7 +5790,49 @@ const [showFilters, setShowFilters] = useState(false)
                     View Report
                   </button>
                 ) : null}
-                {report.id === 'weekly-status' && currentWeek && (
+                {report.id === 'weekly-status' && currentWeek && (() => {
+                  const currentSnap = weeklySnapshots.find(s => s.week === currentWeek)
+                  const latestWrite = (() => {
+                    let t = 0
+                    for (const u of weeklyUpdates) { const v = Date.parse((u as any).updated_at || (u as any).created_at || ''); if (v > t) t = v }
+                    for (const g of weeklyGeneral) { const v = Date.parse((g as any).updated_at || (g as any).created_at || ''); if (v > t) t = v }
+                    return t || null
+                  })()
+                  const snapTime = currentSnap ? Date.parse(currentSnap.generated_at) : 0
+                  const isStale = !!(currentSnap && latestWrite && latestWrite > snapTime + 1000)
+                  const missingSnap = !currentSnap
+                  const fmtWhen = (iso: string) => new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                  const regenerateCurrent = async () => {
+                    try {
+                      const res = await authFetch('/api/weekly-snapshots/generate', { method: 'POST', body: JSON.stringify({ week: currentWeek }) })
+                      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                      const listRes = await authFetch('/api/weekly-snapshots')
+                      setWeeklySnapshots(await listRes.json())
+                    } catch (err) { console.error('Regenerate failed:', err) }
+                  }
+                  return (
+                  <>
+                  <div className={`snapshot-status-bar${isStale || missingSnap ? ' needs-refresh' : ''}`}>
+                    <div className="snapshot-status-info">
+                      {missingSnap ? (
+                        <><AlertTriangle size={12} /> <span>No snapshot yet for {currentWeek}.</span></>
+                      ) : isStale ? (
+                        <><AlertTriangle size={12} /> <span>Snapshot is stale — live entries newer than {fmtWhen(currentSnap!.generated_at)}</span></>
+                      ) : (
+                        <><Clock size={12} /> <span>Snapshot frozen {fmtWhen(currentSnap!.generated_at)}</span></>
+                      )}
+                    </div>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className="snapshot-regen-btn"
+                        onClick={regenerateCurrent}
+                        title="Re-generate the snapshot for the current week from live data"
+                      >
+                        <RefreshCw size={11} /> {missingSnap ? 'Generate snapshot' : 'Regenerate'}
+                      </button>
+                    )}
+                  </div>
                   <div className="snapshot-accordion">
                     <button className="snapshot-accordion-toggle" onClick={() => setShowWeeklyPending(v => !v)}>
                       {showWeeklyPending ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -5807,7 +5868,9 @@ const [showFilters, setShowFilters] = useState(false)
                                 placeholder={section.placeholder}
                                 onSave={async (content) => {
                                   for (const old of allForCategory.slice(1)) await deleteWeeklyGeneral(old.id)
-                                  await saveWeeklyGeneral({ id: existing?.id, designer_id: String(currentUser?.id || 'admin'), week: currentWeek, category: section.category, content })
+                                  const myMember = findMyTeamMember()
+                                  const designerId = String(myMember?.id || currentUser?.id || 'admin')
+                                  await saveWeeklyGeneral({ id: existing?.id, designer_id: designerId, week: currentWeek, category: section.category, content })
                                 }}
                                 onDelete={async () => {
                                   openConfirmModal(
@@ -5825,7 +5888,9 @@ const [showFilters, setShowFilters] = useState(false)
                       </div>
                     )}
                   </div>
-                )}
+                  </>
+                  )
+                })()}
                 {report.id === 'weekly-status' && weeklySnapshots.length > 0 && (
                   <div className="snapshot-accordion">
                     <button className="snapshot-accordion-toggle" onClick={() => setShowSnapshotHistory(v => !v)}>
