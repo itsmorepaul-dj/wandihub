@@ -1176,7 +1176,7 @@ const [showFilters, setShowFilters] = useState(false)
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
-  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode }>({ open: false, title: '', content: '' })
+  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode; snapshotWeek?: string }>({ open: false, title: '', content: '' })
   // Publish-project state: pickerOpen shows the project selector modal; copied
   // flashes a brief "copied" indicator next to a URL.
   const [publishPickerOpen, setPublishPickerOpen] = useState(false)
@@ -5089,8 +5089,8 @@ const [showFilters, setShowFilters] = useState(false)
         const blockedProjects = currentProjects.filter(p => p.status === 'blocked')
         const pendingProjects = currentProjects.filter(p => p.status === 'pending')
 
-        const openReport = (title: string, content: string, richContent?: React.ReactNode) => {
-          setReportModal({ open: true, title, content, richContent })
+        const openReport = (title: string, content: string, richContent?: React.ReactNode, snapshotWeek?: string) => {
+          setReportModal({ open: true, title, content, richContent, snapshotWeek })
         }
 
         const generateWeeklyStatus = () => {
@@ -5440,7 +5440,7 @@ const [showFilters, setShowFilters] = useState(false)
                 ))}
               </div>
             )
-            openReport(`Weekly Snapshot — ${snap.week}`, snapData.plain_text || '', rich)
+            openReport(`Weekly Snapshot — ${snap.week}`, snapData.plain_text || '', rich, snap.week)
           } catch (err) { console.error('Error loading snapshot:', err) }
         }
 
@@ -8125,6 +8125,25 @@ const [showFilters, setShowFilters] = useState(false)
             <div className="modal-header">
               <h2>{reportModal.title}</h2>
               <div className="report-modal-actions">
+                {reportModal.snapshotWeek && (
+                  <button
+                    className="report-modal-copy-btn"
+                    title={`Regenerate the ${reportModal.snapshotWeek} snapshot from live data`}
+                    onClick={async () => {
+                      const week = reportModal.snapshotWeek!
+                      if (!window.confirm(`Regenerate the ${week} report from live data?\n\nThis replaces the current frozen copy.`)) return
+                      try {
+                        const res = await authFetch('/api/weekly-snapshots/generate', { method: 'POST', body: JSON.stringify({ week }) })
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                        const listRes = await authFetch('/api/weekly-snapshots')
+                        setWeeklySnapshots(await listRes.json())
+                        setReportModal({ open: false, title: '', content: '' })
+                      } catch (err) { console.error('Regenerate failed:', err) }
+                    }}
+                  >
+                    <RefreshCw size={14} /> Regenerate
+                  </button>
+                )}
                 <button
                   className="report-modal-copy-btn"
                   onClick={() => {
