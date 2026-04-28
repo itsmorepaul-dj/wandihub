@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { TrendingUp, TrendingDown, Megaphone, UserCheck, ChevronDown, ChevronRight, Check, Loader2 } from 'lucide-react'
 import RichTextEditor, { type RichTextEditorHandle } from './components/RichTextEditor'
-import type { Project, WeeklyUpdate, WeeklyGeneral } from './types'
+import type { WeeklyUpdate, WeeklyGeneral } from './types'
 
 export interface WeeklyUpdateSavePayload {
   highlight: string; lowlight: string; risk_reason: string; resolution: string; fyi: string; people: string
@@ -9,7 +9,6 @@ export interface WeeklyUpdateSavePayload {
 }
 
 interface WeeklyUpdateFormProps {
-  project: Project
   projectUpdates: WeeklyUpdate[]
   weeklyGeneral: WeeklyGeneral[]
   designerId: string
@@ -29,7 +28,7 @@ const PLACEHOLDERS: Record<string, string> = {
 type TabKey = 'highlight' | 'lowlight' | 'fyi' | 'people'
 
 export default function WeeklyUpdateForm({
-  project, projectUpdates, weeklyGeneral, designerId,
+  projectUpdates, weeklyGeneral, designerId,
   isExpanded, onToggle, onSave, onAddProjectLink,
 }: WeeklyUpdateFormProps) {
   const existingHighlight = projectUpdates.find(u => u.type === 'highlight') || null
@@ -146,14 +145,6 @@ export default function WeeklyUpdateForm({
     }
   }
 
-  const projectLinks = [
-    project.deckLink && { name: project.deckName || 'Deck', url: project.deckLink },
-    project.prdLink && { name: project.prdName || 'PRD', url: project.prdLink },
-    project.briefLink && { name: project.briefName || 'Brief', url: project.briefLink },
-    project.figmaLink && { name: 'Figma', url: project.figmaLink },
-    ...(project.customLinks || []),
-  ].filter(Boolean) as { name: string; url: string }[]
-
   const switchTab = (tab: TabKey) => {
     setDraft(d => ({ ...d }))
     setActiveTab(tab)
@@ -200,9 +191,7 @@ export default function WeeklyUpdateForm({
               }}
               placeholder={PLACEHOLDERS[activeTab]}
               features={['bold', 'bullets', 'links']}
-              quickLinks={projectLinks}
               onLinkInserted={onAddProjectLink}
-              resizable={true}
               minHeight="88px"
             />
             {activeTab === 'lowlight' && draft.lowlight.trim() && (
@@ -246,9 +235,9 @@ export default function WeeklyUpdateForm({
             </span>
             <button
               type="button"
-              className="primary-btn weekly-save-btn"
+              className={`weekly-save-btn${isDirty() ? ' is-dirty' : ''}${saveState === 'saving' ? ' is-saving' : ''}`}
               onClick={saveNow}
-              disabled={saveState === 'saving' || !isDirty()}
+              disabled={saveState === 'saving'}
             >
               {saveState === 'saving' ? 'Saving…' : 'Save'}
             </button>

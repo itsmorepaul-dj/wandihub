@@ -3770,7 +3770,6 @@ const [showFilters, setShowFilters] = useState(false)
                           const projectDesignerId = String(myMember?.id || primaryDesigner?.id || project.id)
                           return (
                             <WeeklyUpdateForm
-                              project={project}
                               projectUpdates={projectUpdates}
                               weeklyGeneral={weeklyGeneral}
                               designerId={personalDesignerId}
