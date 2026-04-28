@@ -165,6 +165,12 @@ router.post('/api/reviews/:id/items', async (req, res) => {
       'INSERT INTO review_items (id, review_id, project_id, rank) VALUES (?, ?, ?, ?)',
       [id, req.params.id, project_id, rank]
     )
+    // Flip project to "In Review" — but don't clobber terminal states (done/archived).
+    await run(
+      "UPDATE projects SET status = 'review', updatedAt = datetime('now') WHERE id = ? AND status NOT IN ('done', 'archived')",
+      [project_id]
+    )
+    await updateDbVersion()
     // Fan-out: tell the project's designers (except the scheduler) that their
     // project got added to a review. Use a JSON details payload so the panel
     // can render a friendly summary and link to the review.
