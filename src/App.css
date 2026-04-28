@@ -5826,8 +5826,7 @@ a.report-view-btn {
   color: var(--color-text-secondary);
   transition: color 0.2s;
 }
-.weekly-save-status.dirty { color: var(--color-text); }
-.weekly-save-status-saved { color: #16a34a; }
+.weekly-save-status.dirty { color: #dc2626; font-weight: 500; }
 .weekly-save-status-error { color: #dc2626; }
 .weekly-save-spin { animation: weekly-save-spin 1s linear infinite; }
 @keyframes weekly-save-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

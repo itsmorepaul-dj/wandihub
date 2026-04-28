@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { TrendingUp, TrendingDown, Megaphone, UserCheck, ChevronDown, ChevronRight, Check, Loader2 } from 'lucide-react'
+import { TrendingUp, TrendingDown, Megaphone, UserCheck, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import RichTextEditor, { type RichTextEditorHandle } from './components/RichTextEditor'
 import type { WeeklyUpdate, WeeklyGeneral } from './types'
 
@@ -38,7 +38,7 @@ export default function WeeklyUpdateForm({
   const emptyDraft = { highlight: '', lowlight: '', risk_reason: '', resolution: '', fyi: '', people: '' }
   const [draft, setDraft] = useState(emptyDraft)
   const [activeTab, setActiveTab] = useState<TabKey>('highlight')
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
   const editorRef = useRef<RichTextEditorHandle>(null)
   const draftRef = useRef(draft)
   const activeTabRef = useRef(activeTab)
@@ -135,10 +135,7 @@ export default function WeeklyUpdateForm({
         existingLowlight: existingLowlightRef.current,
       })
       baselineRef.current = { ...draftRef.current }
-      setSaveState('saved')
-      window.setTimeout(() => {
-        setSaveState(prev => (prev === 'saved' ? 'idle' : prev))
-      }, 1800)
+      setSaveState('idle')
     } catch (e) {
       console.error('Weekly save failed:', e)
       setSaveState('error')
@@ -226,9 +223,8 @@ export default function WeeklyUpdateForm({
             )}
           </div>
           <div className="weekly-inline-footer">
-            <span className={`weekly-save-status weekly-save-status-${saveState}${isDirty() && saveState !== 'saving' ? ' dirty' : ''}`}>
+            <span className={`weekly-save-status weekly-save-status-${saveState}${isDirty() && saveState === 'idle' ? ' dirty' : ''}`}>
               {saveState === 'saving' && (<><Loader2 size={11} className="weekly-save-spin" /> Saving…</>)}
-              {saveState === 'saved' && !isDirty() && (<><Check size={11} /> Saved</>)}
               {saveState === 'error' && (<>Save failed — try again</>)}
               {saveState === 'idle' && isDirty() && (<>Unsaved changes</>)}
               {saveState === 'idle' && !isDirty() && <>&nbsp;</>}
