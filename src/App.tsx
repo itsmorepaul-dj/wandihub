@@ -6622,6 +6622,7 @@ const [showFilters, setShowFilters] = useState(false)
                                   `This will remove "${proj?.name || 'this project'}" from the review, along with its notes and any images attached to it in this review. This can't be undone.`,
                                   async () => {
                                     await authFetch(`/api/review-items/${item.id}`, { method: 'DELETE' })
+                                    closeConfirmModal()
                                     loadReviewDetail(editingReview.id)
                                   },
                                   { confirmLabel: 'Remove' }
