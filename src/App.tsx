@@ -29,10 +29,10 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Review page polish — adding a project flips it to In Review, the confirm modal closes after removing a project, and the comments-this-week list links straight to the filtered project.',
   'Weekly updates stay yours — entries on shared projects no longer get filed under a co-designer, and FYI/People rows can\'t be wiped by a teammate\'s save.',
   'Real Save button — explicit save with status chip, tab-switch auto-save, and an unload warning if you\'d lose work.',
   'Weekly Status snapshot — status bar shows when the report was last frozen, flags newer entries, and anyone can regenerate it on demand.',
-  'Small polish — Deck/PRD/Brief/Figma chips removed from the editor toolbar, and card buttons only click on the button, not the whole row.',
 ]
 
 
