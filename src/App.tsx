@@ -715,6 +715,7 @@ function App() {
       name: string;
       detail: string;
       projectName?: string;
+      projectId?: string;
       // Optional structured fields for comment-activity rows. When present, the
       // modal renders them in a hierarchy instead of the single-line `detail`.
       reviewId?: string;
@@ -3467,6 +3468,7 @@ const [showFilters, setShowFilters] = useState(false)
                   // flooding the list.
                   type Group = {
                     projectName: string
+                    projectId?: string
                     reviewId?: string
                     reviewTitle?: string
                     byAuthor: Map<string, number>
@@ -3477,6 +3479,7 @@ const [showFilters, setShowFilters] = useState(false)
                     let d: any = {}
                     try { d = row.details ? JSON.parse(row.details) : {} } catch {}
                     const projName = d.project_name || row.target_name || 'Project'
+                    const projectId = d.project_id || ''
                     const reviewId = d.review_id || ''
                     const reviewTitle = d.review_title || 'Review'
                     const authorName = d.author_name || (row.user_email && row.user_email !== 'anonymous' ? row.user_email.split('@')[0] : 'Someone')
@@ -3484,7 +3487,7 @@ const [showFilters, setShowFilters] = useState(false)
                     const key = `${reviewId}::${projName}`
                     let g = groups.get(key)
                     if (!g) {
-                      g = { projectName: projName, reviewId, reviewTitle, byAuthor: new Map(), latestTs: 0 }
+                      g = { projectName: projName, projectId, reviewId, reviewTitle, byAuthor: new Map(), latestTs: 0 }
                       groups.set(key, g)
                     }
                     g.byAuthor.set(authorName, (g.byAuthor.get(authorName) || 0) + 1)
@@ -3517,6 +3520,7 @@ const [showFilters, setShowFilters] = useState(false)
                           name: g.projectName,
                           detail: `${authorsLine}${when ? ' · ' + when : ''}`,
                           projectName: g.projectName,
+                          projectId: g.projectId,
                           reviewId: g.reviewId,
                           reviewTitle: g.reviewTitle,
                           author: authorsLine ? `Commented by ${authorsLine}` : undefined,
@@ -7823,7 +7827,7 @@ const [showFilters, setShowFilters] = useState(false)
                       <div key={i} className="risk-detail-row risk-detail-comment">
                         <a
                           className="risk-detail-name risk-detail-link"
-                          href={`/review/${item.reviewId}`}
+                          href={`/review/${item.reviewId}${item.projectId ? `?project=${encodeURIComponent(item.projectId)}` : ''}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={() => setRiskDetail(null)}
