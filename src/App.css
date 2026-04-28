@@ -6289,6 +6289,20 @@ a.report-view-btn {
   color: #a16207;
 }
 .snapshot-status-info { display: inline-flex; align-items: center; gap: 0.35rem; }
+.snapshot-status-actions { display: inline-flex; align-items: center; gap: 0.3rem; }
+.snapshot-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0.15rem;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 0.15s, color 0.15s;
+}
+.snapshot-help-btn:hover { opacity: 1; color: var(--color-text); }
 .snapshot-regen-btn {
   display: inline-flex;
   align-items: center;

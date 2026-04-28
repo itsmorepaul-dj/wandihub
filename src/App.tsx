@@ -29,10 +29,10 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Weekly updates now save explicitly — a Save button and status indicator replace the invisible auto-save, and closing the tab with unsaved changes warns you before leaving. Your FYIs and People entries are now attributed to you (the signed-in user) so nothing gets filed under a co-designer.',
-  'Weekly Status report card shows when the snapshot was last frozen and warns when live entries are newer. Admins can regenerate the current week on demand from the card.',
-  'Published Project Pages — Share a project with stakeholders at a public, read-only URL from the Reports page. No sign-in required. Includes a design-time estimate chip with a t-shirt size legend.',
-  'Review diamonds filter — Clicking a Design Review diamond on any Gantt chart now opens the review scoped to that project. A pill at the top clears the filter.',
+  'Weekly updates stay yours — entries on shared projects no longer get filed under a co-designer, and FYI/People rows can\'t be wiped by a teammate\'s save.',
+  'Real Save button — explicit save with status chip, tab-switch auto-save, and an unload warning if you\'d lose work.',
+  'Weekly Status snapshot — status bar shows when the report was last frozen, flags newer entries, and anyone can regenerate it on demand.',
+  'Small polish — Deck/PRD/Brief/Figma chips removed from the editor toolbar, and card buttons only click on the button, not the whole row.',
 ]
 
 
@@ -794,6 +794,7 @@ const [showFilters, setShowFilters] = useState(false)
     try { localStorage.setItem('dcc_capacityDesignerFilter', JSON.stringify([...capacityDesignerFilter])) } catch {}
   }, [capacityDesignerFilter])
   const [showCapacityHelp, setShowCapacityHelp] = useState(false)
+  const [showSnapshotHelp, setShowSnapshotHelp] = useState(false)
 
   // Deep linking: sync URL hash with tab + filters
   const hashUpdateRef = useRef(false)
@@ -3048,6 +3049,7 @@ const [showFilters, setShowFilters] = useState(false)
                                     {item.category === 'holiday' && <Calendar size={14} />}
                                     {item.category === 'capacity' && <Gauge size={14} />}
                                     {item.category === 'review' && <MessageSquare size={14} />}
+                                    {item.category === 'weekly' && <FileBarChart size={14} />}
                                   </div>
                                   <div className="notif-item-content">
                                     <div className="notif-item-title">
@@ -5821,7 +5823,7 @@ const [showFilters, setShowFilters] = useState(false)
                         <><Clock size={12} /> <span>Snapshot frozen {fmtWhen(currentSnap!.generated_at)}</span></>
                       )}
                     </div>
-                    {isAdmin && (
+                    <div className="snapshot-status-actions">
                       <button
                         type="button"
                         className="snapshot-regen-btn"
@@ -5830,7 +5832,16 @@ const [showFilters, setShowFilters] = useState(false)
                       >
                         <RefreshCw size={11} /> {missingSnap ? 'Generate snapshot' : 'Regenerate'}
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        className="snapshot-help-btn"
+                        onClick={() => setShowSnapshotHelp(true)}
+                        aria-label="About the weekly snapshot"
+                        title="How weekly snapshots work"
+                      >
+                        <HelpCircle size={12} />
+                      </button>
+                    </div>
                   </div>
                   <div className="snapshot-accordion">
                     <button className="snapshot-accordion-toggle" onClick={() => setShowWeeklyPending(v => !v)}>
@@ -8188,6 +8199,37 @@ const [showFilters, setShowFilters] = useState(false)
                 <li><strong>Blocked</strong> — Hours set to 0, do not count toward utilization.</li>
                 <li><strong>Done</strong> — Completed. Hours set to 0, do not count.</li>
               </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSnapshotHelp && (
+        <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setShowSnapshotHelp(false) }}>
+          <div className="modal capacity-help-modal" onClick={e => e.stopPropagation()}>
+            <div className="capacity-help-header">
+              <h2>About the Weekly Status Snapshot</h2>
+              <button className="capacity-help-close" onClick={() => setShowSnapshotHelp(false)}>×</button>
+            </div>
+            <div className="capacity-help-content">
+              <p>The Weekly Status report is a frozen copy of everyone's highlights, lowlights, FYIs, and People updates. Freezing it keeps the report stable — the version everyone reads in the app matches the version that went out in the weekly email.</p>
+
+              <h3>When it freezes</h3>
+              <p>Automatically, every <strong>Friday at 5:00 PM ET</strong>. You can also regenerate it manually at any time.</p>
+
+              <h3>What the status bar tells you</h3>
+              <ul>
+                <li><strong>Snapshot frozen …</strong> — The last time a frozen copy was made for this week.</li>
+                <li><strong>Snapshot is stale</strong> (amber) — Someone has saved a weekly entry after the last freeze. The current report doesn't include it yet.</li>
+                <li><strong>No snapshot yet</strong> (amber) — Nothing frozen for this week. Common early in the week or if the Friday auto-freeze didn't run.</li>
+              </ul>
+
+              <h3>When to click Regenerate</h3>
+              <ul>
+                <li>You (or a teammate) added something after Friday 5pm and want it in the report.</li>
+                <li>The status bar shows amber and you want to refresh the report to match what's in the DB.</li>
+              </ul>
+              <p>Regenerating replaces the frozen copy for the current week. The action is logged in the notifications bell so the team can see who refreshed it.</p>
             </div>
           </div>
         </div>

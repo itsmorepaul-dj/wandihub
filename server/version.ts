@@ -52,7 +52,7 @@ export const initVersions = async () => {
 }
 
 export const logActivity = async (
-  category: 'project' | 'priority' | 'holiday' | 'capacity' | 'review',
+  category: 'project' | 'priority' | 'holiday' | 'capacity' | 'review' | 'weekly',
   action: 'create' | 'update' | 'delete' | 'comment',
   targetName: string,
   userEmail: string | null,
