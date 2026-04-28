@@ -2424,7 +2424,7 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     /* Notes accordion */
     .card-notes { border-top: 1px solid var(--rv-border-subtle); }
     .notes-accordion {
-      display: flex; align-items: center; gap: 0.4rem; width: 100%;
+      display: inline-flex; align-items: center; gap: 0.4rem; width: auto;
       padding: 0.6rem 1.25rem; background: none; border: none;
       font-size: 0.75rem; font-weight: 500; color: var(--rv-text-muted);
       cursor: pointer; font-family: inherit; transition: color 0.15s;
@@ -2847,7 +2847,7 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     }
     .review-inline-images-label-btn,
     .review-add-images-btn {
-      display: flex; align-items: center; gap: 0.4rem; width: 100%;
+      display: inline-flex; align-items: center; gap: 0.4rem; width: auto;
       background: transparent; border: none; padding: 0.6rem 1.25rem;
       font-family: inherit; font-size: 0.75rem; font-weight: 500;
       color: var(--rv-text-muted); cursor: pointer; transition: color 0.15s;

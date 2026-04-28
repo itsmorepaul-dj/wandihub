@@ -39,6 +39,7 @@ export default function WeeklyUpdateForm({
   const [draft, setDraft] = useState(emptyDraft)
   const [activeTab, setActiveTab] = useState<TabKey>('highlight')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
+  const [, forceRerender] = useState(0)
   const editorRef = useRef<RichTextEditorHandle>(null)
   const draftRef = useRef(draft)
   const activeTabRef = useRef(activeTab)
@@ -87,11 +88,13 @@ export default function WeeklyUpdateForm({
     if (!isExpanded) return
     return () => {
       if (isDirty()) {
+        const snapshot = { ...draftRef.current }
         onSaveRef.current({
-          ...draftRef.current,
+          ...snapshot,
           existingHighlight: existingHighlightRef.current,
           existingLowlight: existingLowlightRef.current,
         })
+        baselineRef.current = snapshot
       }
     }
   }, [isExpanded])
@@ -100,11 +103,15 @@ export default function WeeklyUpdateForm({
   useEffect(() => {
     const flush = (keepalive: boolean) => {
       if (!isExpandedRef.current || !isDirty()) return false
+      const snapshot = { ...draftRef.current }
       onSaveRef.current({
-        ...draftRef.current,
+        ...snapshot,
         existingHighlight: existingHighlightRef.current,
         existingLowlight: existingLowlightRef.current,
       }, { keepalive })
+      baselineRef.current = snapshot
+      // Force a re-render so the Save button reflects the clean state on return.
+      forceRerender(n => n + 1)
       return true
     }
     const onVisibility = () => { if (document.visibilityState === 'hidden') flush(true) }
@@ -143,7 +150,9 @@ export default function WeeklyUpdateForm({
   }
 
   const switchTab = (tab: TabKey) => {
-    setDraft(d => ({ ...d }))
+    if (isDirty() && saveState !== 'saving') {
+      saveNow()
+    }
     setActiveTab(tab)
     activeTabRef.current = tab
   }

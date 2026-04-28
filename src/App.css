@@ -2799,10 +2799,10 @@ a.gantt-bar:hover {
 }
 .project-attached-label-btn,
 .project-attached-add {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  width: 100%;
+  width: auto;
   background: none;
   border: none;
   padding: 0.6rem 1.25rem;
@@ -5741,10 +5741,10 @@ a.report-view-btn {
 }
 
 .weekly-inline-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  width: 100%;
+  width: auto;
   background: none;
   border: none;
   cursor: pointer;
@@ -5826,7 +5826,7 @@ a.report-view-btn {
   color: var(--color-text-secondary);
   transition: color 0.2s;
 }
-.weekly-save-status.dirty { color: #dc2626; font-weight: 500; }
+.weekly-save-status.dirty { color: var(--color-warning); font-weight: 500; }
 .weekly-save-status-error { color: #dc2626; }
 .weekly-save-spin { animation: weekly-save-spin 1s linear infinite; }
 @keyframes weekly-save-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
