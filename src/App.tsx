@@ -29,10 +29,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Change a project\'s status directly from the review edit page — click the status chip on any row to flip it between Active, In Review, Done, Blocked, or Pending without leaving the review.',
   'Review page polish — adding a project flips it to In Review, the confirm modal closes after removing a project, and the comments-this-week list links straight to the filtered project.',
-  'Weekly updates stay yours — entries on shared projects no longer get filed under a co-designer, and FYI/People rows can\'t be wiped by a teammate\'s save.',
-  'Real Save button — explicit save with status chip, tab-switch auto-save, and an unload warning if you\'d lose work.',
-  'Weekly Status snapshot — status bar shows when the report was last frozen, flags newer entries, and anyone can regenerate it on demand.',
 ]
 
 
@@ -371,12 +369,13 @@ function computeItemMinutes(
   return out
 }
 
-function ReviewItemRow({ item, index, project, onRemove, onCopyToReview, authFetch, computedMins, totalMinutes, onTimeChange, onExemptChange, onResetAuto }: {
+function ReviewItemRow({ item, index, project, onRemove, onCopyToReview, onStatusChange, authFetch, computedMins, totalMinutes, onTimeChange, onExemptChange, onResetAuto }: {
   item: any
   index: number
   project: any
   onRemove: () => void
   onCopyToReview: () => void
+  onStatusChange: (status: Project['status']) => void
   authFetch: (url: string, opts?: RequestInit) => Promise<Response>
   computedMins: number
   totalMinutes: number
@@ -387,9 +386,23 @@ function ReviewItemRow({ item, index, project, onRemove, onCopyToReview, authFet
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
   const [desc, setDesc] = useState(item.description || '')
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
+  const statusMenuRef = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (!statusMenuOpen) return
+    const handle = (e: MouseEvent) => {
+      if (statusMenuRef.current && !statusMenuRef.current.contains(e.target as Node)) {
+        setStatusMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [statusMenuOpen])
 
   const designers = project?.designers?.map((d: string) => d.split(' ')[0]).join(', ') || ''
   const statusInfo = REVIEW_STATUS_MAP[project?.status] || { label: project?.status || '—', color: '#6b7280' }
+  const canEditStatus = !!project && project.status !== 'archived'
   const businessLines: string[] = project?.businessLines || (project?.businessLine ? (() => { try { return JSON.parse(project.businessLine) } catch { return [project.businessLine] } })() : [])
 
   const links: { label: string; url: string }[] = []
@@ -416,7 +429,42 @@ function ReviewItemRow({ item, index, project, onRemove, onCopyToReview, authFet
         <div className="review-item-project">
           <span className="review-item-name">{project?.name || 'Unknown'}</span>
           <span className="review-item-meta">
-            <span className="review-status-pill" style={{ background: statusInfo.color }}>{statusInfo.label}</span>
+            <span className="review-status-pill-wrapper" ref={statusMenuRef}>
+              <button
+                type="button"
+                className="review-status-pill review-status-pill-btn"
+                style={{ background: statusInfo.color }}
+                onClick={() => canEditStatus && setStatusMenuOpen(o => !o)}
+                disabled={!canEditStatus}
+                title={canEditStatus ? 'Change status' : undefined}
+              >
+                {statusInfo.label}
+                {canEditStatus && <ChevronDown size={10} strokeWidth={2.5} />}
+              </button>
+              {statusMenuOpen && (
+                <div className="review-status-menu" role="menu">
+                  {(['active', 'review', 'done', 'blocked', 'pending'] as const).map(s => {
+                    const info = REVIEW_STATUS_MAP[s]
+                    const isCurrent = project?.status === s
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`review-status-menu-item${isCurrent ? ' is-current' : ''}`}
+                        onClick={() => {
+                          setStatusMenuOpen(false)
+                          if (!isCurrent) onStatusChange(s)
+                        }}
+                        role="menuitem"
+                      >
+                        <span className="review-status-menu-dot" style={{ background: info.color }} />
+                        {info.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </span>
             {designers && <span className="review-item-designers">{designers}</span>}
             {businessLines.length > 0 && <span className="review-item-bl">{businessLines.join(', ')}</span>}
           </span>
@@ -6617,6 +6665,15 @@ const [showFilters, setShowFilters] = useState(false)
                                   persistTime(item.id, { duration_minutes: m })
                                 }}
                                 onExemptChange={(excluded) => setExemptAndMaybeReorder(item.id, excluded)}
+                                onStatusChange={async (newStatus) => {
+                                  if (!proj || proj.status === newStatus) return
+                                  const updated = { ...proj, status: newStatus }
+                                  setProjects(prev => prev.map(p => p.id === proj.id ? updated : p))
+                                  const ok = await saveProject(updated)
+                                  if (!ok) {
+                                    setProjects(prev => prev.map(p => p.id === proj.id ? proj : p))
+                                  }
+                                }}
                                 onResetAuto={() => {
                                   patchItem(item.id, { duration_minutes: null })
                                   persistTime(item.id, { duration_minutes: null })

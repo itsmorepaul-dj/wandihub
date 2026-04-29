@@ -9039,6 +9039,74 @@ select:focus {
   white-space: nowrap;
 }
 
+.review-status-pill-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.review-status-pill-btn {
+  gap: 0.2rem;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter 0.12s ease;
+}
+.review-status-pill-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.review-status-pill-btn:disabled {
+  cursor: default;
+}
+.review-status-pill-btn svg {
+  opacity: 0.85;
+}
+
+.review-status-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 140px;
+  padding: 0.25rem;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.review-status-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+.review-status-menu-item:hover {
+  background: var(--color-hover-subtle);
+}
+.review-status-menu-item.is-current {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+.review-status-menu-item.is-current:hover {
+  background: transparent;
+}
+.review-status-menu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+
 .review-item-designers {
   color: var(--color-text-muted);
   font-size: 0.7rem;
