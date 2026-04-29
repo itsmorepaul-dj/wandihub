@@ -715,10 +715,18 @@ const svgFigma = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" st
 const svgLink = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`
 const svgTicket = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>`
 
+const stripPrefix = (name: string, prefix: RegExp): string => name.replace(prefix, '').trim()
+
 export function renderLinks(item: any): string {
   const links: string[] = []
-  if (item.deckLink) links.push(`<a href="${escHtml(item.deckLink)}" target="_blank" rel="noopener">${svgPresentation}<span>Design deck: ${escHtml(item.deckName || 'Deck')}</span></a>`)
-  if (item.prdLink) links.push(`<a href="${escHtml(item.prdLink)}" target="_blank" rel="noopener">${svgFileText}<span>PRD: ${escHtml(item.prdName || 'PRD')}</span></a>`)
+  if (item.deckLink) {
+    const name = stripPrefix(item.deckName || 'Deck', /^design\s*deck\s*:\s*/i)
+    links.push(`<a href="${escHtml(item.deckLink)}" target="_blank" rel="noopener">${svgPresentation}<span>Design deck: ${escHtml(name || 'Deck')}</span></a>`)
+  }
+  if (item.prdLink) {
+    const name = stripPrefix(item.prdName || 'PRD', /^prd\s*:\s*/i)
+    links.push(`<a href="${escHtml(item.prdLink)}" target="_blank" rel="noopener">${svgFileText}<span>PRD: ${escHtml(name || 'PRD')}</span></a>`)
+  }
   if (item.briefLink) links.push(`<a href="${escHtml(item.briefLink)}" target="_blank" rel="noopener">${svgFileEdit}<span>${escHtml(item.briefName || 'Brief')}</span></a>`)
   if (item.figmaLink) links.push(`<a href="${escHtml(item.figmaLink)}" target="_blank" rel="noopener">${svgFigma}<span>Figma</span></a>`)
   if (item.url) {
