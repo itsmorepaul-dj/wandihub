@@ -6987,9 +6987,6 @@ const [showFilters, setShowFilters] = useState(false)
                 </>
               )}
             </div>
-            <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)' }}>
-              <button className="secondary-btn" onClick={() => setShowTrashModal(false)}>Close</button>
-            </div>
           </div>
         </div>
       )}
