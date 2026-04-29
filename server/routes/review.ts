@@ -13,10 +13,10 @@ const router = express.Router();
 
 router.get('/api/reviews', async (_req, res) => {
   try {
-    const reviews = await all('SELECT * FROM reviews ORDER BY created_at DESC')
+    const reviews = await all('SELECT * FROM reviews WHERE deleted_at IS NULL ORDER BY created_at DESC')
     // Attach item count
     const result = await Promise.all((reviews as any[]).map(async (r: any) => {
-      const count = await get('SELECT COUNT(*) as count FROM review_items WHERE review_id = ?', [r.id])
+      const count = await get('SELECT COUNT(*) as count FROM review_items WHERE review_id = ? AND deleted_at IS NULL', [r.id])
       return { ...r, itemCount: count?.count || 0 }
     }))
     res.json(result)
@@ -28,7 +28,8 @@ router.get('/api/review-markers', async (_req, res) => {
   try {
     const rows = await all(
       `SELECT ri.project_id, r.id as review_id, r.title, r.week, r.created_at
-       FROM review_items ri JOIN reviews r ON ri.review_id = r.id`
+       FROM review_items ri JOIN reviews r ON ri.review_id = r.id
+       WHERE ri.deleted_at IS NULL AND r.deleted_at IS NULL`
     )
     res.json(rows)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
@@ -36,7 +37,7 @@ router.get('/api/review-markers', async (_req, res) => {
 
 router.get('/api/reviews/:id', async (req, res) => {
   try {
-    const review = await get('SELECT * FROM reviews WHERE id = ?', [req.params.id])
+    const review = await get('SELECT * FROM reviews WHERE id = ? AND deleted_at IS NULL', [req.params.id])
     if (!review) return res.status(404).json({ error: 'Review not found' })
     const items = await all(
       `SELECT ri.*, p.name as project_name, p.status, p.designers, p.businessLine,
@@ -45,7 +46,7 @@ router.get('/api/reviews/:id', async (req, res) => {
               p.figmaLink, p.customLinks, p.url
        FROM review_items ri
        LEFT JOIN projects p ON ri.project_id = p.id
-       WHERE ri.review_id = ?
+       WHERE ri.review_id = ? AND ri.deleted_at IS NULL
        ORDER BY ri.rank ASC`, [req.params.id]
     )
     const parsed = (items as any[]).map((item: any) => ({
@@ -131,26 +132,23 @@ router.put('/api/reviews/:id', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
+// Soft-delete: recoverable via GET /api/trash + PUT /api/reviews/:id/restore.
+// Child rows (review_items, review_item_images, comments, image files on disk)
+// are left intact so restoration brings everything back.
 router.delete('/api/reviews/:id', async (req, res) => {
   try {
-    const imgs = await all(
-      `SELECT rii.filename FROM review_item_images rii
-       JOIN review_items ri ON ri.id = rii.review_item_id
-       WHERE ri.review_id = ?`,
-      [req.params.id]
-    ) as any[]
-    for (const img of imgs) {
-      try {
-        const fp = path.join(IMAGES_DIR, img.filename)
-        if (fs.existsSync(fp)) fs.unlinkSync(fp)
-      } catch (e: any) { console.error('review image file delete error:', e.message) }
-    }
-    await run(
-      `DELETE FROM review_item_images WHERE review_item_id IN (SELECT id FROM review_items WHERE review_id = ?)`,
-      [req.params.id]
-    )
-    await run('DELETE FROM review_items WHERE review_id = ?', [req.params.id])
-    await run('DELETE FROM reviews WHERE id = ?', [req.params.id])
+    const existing = await get('SELECT id FROM reviews WHERE id = ? AND deleted_at IS NULL', [req.params.id])
+    if (!existing) return res.status(404).json({ error: 'Review not found' })
+    await run("UPDATE reviews SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?", [req.params.id])
+    res.json({ ok: true })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.put('/api/reviews/:id/restore', async (req, res) => {
+  try {
+    const existing = await get('SELECT id FROM reviews WHERE id = ? AND deleted_at IS NOT NULL', [req.params.id])
+    if (!existing) return res.status(404).json({ error: 'Review not found in trash' })
+    await run("UPDATE reviews SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?", [req.params.id])
     res.json({ ok: true })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -158,7 +156,9 @@ router.delete('/api/reviews/:id', async (req, res) => {
 router.post('/api/reviews/:id/items', async (req, res) => {
   try {
     const { project_id } = req.body
-    const maxRank = await get('SELECT MAX(rank) as max FROM review_items WHERE review_id = ?', [req.params.id])
+    const reviewExists = await get('SELECT id FROM reviews WHERE id = ? AND deleted_at IS NULL', [req.params.id])
+    if (!reviewExists) return res.status(404).json({ error: 'Review not found' })
+    const maxRank = await get('SELECT MAX(rank) as max FROM review_items WHERE review_id = ? AND deleted_at IS NULL', [req.params.id])
     const rank = (maxRank?.max ?? -1) + 1
     const id = Math.random().toString(36).substring(2) + Date.now().toString(36)
     await run(
@@ -194,19 +194,54 @@ router.post('/api/reviews/:id/items', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
+// Soft-delete: recoverable via GET /api/trash + PUT /api/review-items/:id/restore.
+// Notes, description, comments, and images all stay on disk / in the DB so a
+// restore brings the full history back.
 router.delete('/api/review-items/:id', async (req, res) => {
   try {
-    // Cascade: remove image rows + files owned by this review item
-    const images = await all('SELECT filename FROM review_item_images WHERE review_item_id = ?', [req.params.id]) as any[]
-    for (const img of images) {
-      try {
-        const fp = path.join(IMAGES_DIR, img.filename)
-        if (fs.existsSync(fp)) fs.unlinkSync(fp)
-      } catch (e: any) { console.error('review item image file delete error:', e.message) }
-    }
-    await run('DELETE FROM review_item_images WHERE review_item_id = ?', [req.params.id])
-    await run('DELETE FROM review_items WHERE id = ?', [req.params.id])
+    const existing = await get('SELECT id FROM review_items WHERE id = ? AND deleted_at IS NULL', [req.params.id])
+    if (!existing) return res.status(404).json({ error: 'Review item not found' })
+    await run("UPDATE review_items SET deleted_at = datetime('now') WHERE id = ?", [req.params.id])
     res.json({ ok: true })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+router.put('/api/review-items/:id/restore', async (req, res) => {
+  try {
+    const existing = await get('SELECT id, review_id FROM review_items WHERE id = ? AND deleted_at IS NOT NULL', [req.params.id]) as any
+    if (!existing) return res.status(404).json({ error: 'Review item not found in trash' })
+    // If the parent review is itself trashed, refuse — restore the review first.
+    const parent = await get('SELECT id FROM reviews WHERE id = ? AND deleted_at IS NULL', [existing.review_id])
+    if (!parent) return res.status(409).json({ error: 'Parent review is in trash; restore it first' })
+    await run("UPDATE review_items SET deleted_at = NULL WHERE id = ?", [req.params.id])
+    res.json({ ok: true })
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// Trash listing. Returns two sections:
+//   reviews: soft-deleted whole reviews (each with current item count at time of delete)
+//   items:   soft-deleted review items whose parent review is still live
+// Ordered newest-deleted first.
+router.get('/api/trash', async (_req, res) => {
+  try {
+    const deletedReviews = await all(
+      `SELECT r.*,
+              (SELECT COUNT(*) FROM review_items WHERE review_id = r.id) AS itemCount
+       FROM reviews r
+       WHERE r.deleted_at IS NOT NULL
+       ORDER BY r.deleted_at DESC`
+    )
+    const deletedItems = await all(
+      `SELECT ri.id, ri.review_id, ri.project_id, ri.deleted_at,
+              r.title AS review_title, r.review_date,
+              p.name AS project_name
+       FROM review_items ri
+       JOIN reviews r ON r.id = ri.review_id AND r.deleted_at IS NULL
+       LEFT JOIN projects p ON p.id = ri.project_id
+       WHERE ri.deleted_at IS NOT NULL
+       ORDER BY ri.deleted_at DESC`
+    )
+    res.json({ reviews: deletedReviews, items: deletedItems })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -228,13 +263,13 @@ router.post('/api/review-items/:id/duplicate', async (req, res) => {
     const { target_review_id } = req.body as { target_review_id?: string }
     if (!target_review_id) return res.status(400).json({ error: 'target_review_id required' })
 
-    const source = await get('SELECT * FROM review_items WHERE id = ?', [req.params.id]) as any
+    const source = await get('SELECT * FROM review_items WHERE id = ? AND deleted_at IS NULL', [req.params.id]) as any
     if (!source) return res.status(404).json({ error: 'Source review item not found' })
 
-    const target = await get('SELECT id FROM reviews WHERE id = ?', [target_review_id])
+    const target = await get('SELECT id FROM reviews WHERE id = ? AND deleted_at IS NULL', [target_review_id])
     if (!target) return res.status(404).json({ error: 'Target review not found' })
 
-    const maxRank = await get('SELECT MAX(rank) as max FROM review_items WHERE review_id = ?', [target_review_id]) as any
+    const maxRank = await get('SELECT MAX(rank) as max FROM review_items WHERE review_id = ? AND deleted_at IS NULL', [target_review_id]) as any
     const rank = (maxRank?.max ?? -1) + 1
     const newItemId = Math.random().toString(36).substring(2) + Date.now().toString(36)
 
@@ -382,7 +417,7 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
        FROM review_items ri
        LEFT JOIN projects p ON p.id = ri.project_id
        LEFT JOIN reviews r ON r.id = ri.review_id
-       WHERE ri.id = ?`,
+       WHERE ri.id = ? AND ri.deleted_at IS NULL AND (r.deleted_at IS NULL OR r.id IS NULL)`,
       [req.params.id]
     ) as any
     if (!item) return res.status(404).json({ error: 'Review item not found' })
@@ -844,7 +879,7 @@ export function renderNotesHtml(notes: string): string {
 
 router.get('/review', async (req, res) => {
   try {
-    const latest = await get('SELECT id FROM reviews ORDER BY created_at DESC LIMIT 1') as any
+    const latest = await get('SELECT id FROM reviews WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1') as any
     if (!latest) {
       return res.status(404).send(renderPage('No Reviews', '<div class="empty-state">No reviews have been published yet.</div>', []))
     }
@@ -866,7 +901,7 @@ router.get('/review/:id', async (req, res) => {
       if (sessions.has(req.query.sid)) setSessionCookie(res, req.query.sid)
       return res.redirect(`/review/${req.params.id}`)
     }
-    const review = await get('SELECT * FROM reviews WHERE id = ?', [req.params.id]) as any
+    const review = await get('SELECT * FROM reviews WHERE id = ? AND deleted_at IS NULL', [req.params.id]) as any
     if (!review) {
       return res.status(404).send(renderPage('Review Not Found', '<div class="empty-state">This review does not exist or has been deleted.</div>', []))
     }
@@ -877,7 +912,7 @@ router.get('/review/:id', async (req, res) => {
               p.figmaLink, p.customLinks, p.url
        FROM review_items ri
        LEFT JOIN projects p ON ri.project_id = p.id
-       WHERE ri.review_id = ?
+       WHERE ri.review_id = ? AND ri.deleted_at IS NULL
        ORDER BY ri.rank ASC`, [req.params.id]
     ) as any[]
 
@@ -916,7 +951,7 @@ router.get('/review/:id', async (req, res) => {
       const rows = await all(
         `SELECT r.id, r.title, r.week, r.created_at
          FROM reviews r JOIN review_items ri ON ri.review_id = r.id
-         WHERE ri.project_id = ?`,
+         WHERE ri.project_id = ? AND r.deleted_at IS NULL AND ri.deleted_at IS NULL`,
         [item.project_id]
       ) as any[]
       const markers: ReviewMarker[] = []
@@ -934,7 +969,7 @@ router.get('/review/:id', async (req, res) => {
       item.reviewMarkers = markers
     }
 
-    const allReviews = await all('SELECT id, title, week, created_at FROM reviews ORDER BY created_at DESC') as any[]
+    const allReviews = await all('SELECT id, title, week, created_at FROM reviews WHERE deleted_at IS NULL ORDER BY created_at DESC') as any[]
     const teamMembers = await all('SELECT name, slack FROM team') as { name: string; slack: string }[]
     const slackByName = new Map(teamMembers.map(t => [t.name, t.slack]))
     const sessionId = getSessionIdFromRequest(req) || ''
@@ -3132,7 +3167,7 @@ const statusLabels: Record<string, string> = { active: 'Active', review: 'In Rev
 
 const generateReviewSnapshot = async (week: string) => {
   // Get the most recent review
-  const latestReview = await get('SELECT * FROM reviews ORDER BY created_at DESC LIMIT 1') as any
+  const latestReview = await get('SELECT * FROM reviews WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1') as any
   if (!latestReview) {
     console.log('Review snapshot skipped: no reviews exist')
     return null
@@ -3146,7 +3181,7 @@ const generateReviewSnapshot = async (week: string) => {
             p.figmaLink, p.customLinks
      FROM review_items ri
      LEFT JOIN projects p ON ri.project_id = p.id
-     WHERE ri.review_id = ?
+     WHERE ri.review_id = ? AND ri.deleted_at IS NULL
      ORDER BY ri.rank ASC`, [latestReview.id]
   )
 
@@ -3324,7 +3359,8 @@ export const runReviewRollover = async () => {
        JOIN reviews r ON r.id = ri.review_id
        JOIN projects p ON p.id = ri.project_id
        WHERE p.status = 'review'
-         AND r.review_date IS NOT NULL AND r.review_date != ''`
+         AND r.review_date IS NOT NULL AND r.review_date != ''
+         AND ri.deleted_at IS NULL AND r.deleted_at IS NULL`
     ) as any[]
     if (!rows || rows.length === 0) return
     const now = Date.now()
@@ -3433,6 +3469,7 @@ router.get('/p/:slug', async (req, res) => {
        FROM review_items ri
        JOIN reviews r ON r.id = ri.review_id
        WHERE ri.project_id = ?
+         AND ri.deleted_at IS NULL AND r.deleted_at IS NULL
        ORDER BY r.review_date DESC, r.created_at DESC`,
       [project.id]
     ) as any[]

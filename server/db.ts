@@ -373,6 +373,9 @@ export const initSchema = async () => {
   await run(`UPDATE reviews SET review_date = substr(created_at, 1, 10) WHERE review_date IS NULL OR review_date = ''`).catch(() => {})
   // Migration: Gemini-generated meeting notes pasted after the review
   await run(`ALTER TABLE reviews ADD COLUMN gemini_notes TEXT DEFAULT ''`).catch(() => {})
+  // Soft-delete column (null = live, timestamp = trashed). Keeps history
+  // recoverable via the "Recently removed" list.
+  await run(`ALTER TABLE reviews ADD COLUMN deleted_at TEXT DEFAULT NULL`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS review_items (
     id TEXT PRIMARY KEY, review_id TEXT NOT NULL, project_id TEXT NOT NULL,
@@ -387,6 +390,8 @@ export const initSchema = async () => {
   await run(`ALTER TABLE reviews ADD COLUMN total_minutes INTEGER DEFAULT 45`).catch(() => {})
   // Migration: per-item optional review_date override (null = inherit from parent review)
   await run(`ALTER TABLE review_items ADD COLUMN review_date TEXT`).catch(() => {})
+  // Soft-delete column (null = live, timestamp = trashed). Paired with `reviews.deleted_at`.
+  await run(`ALTER TABLE review_items ADD COLUMN deleted_at TEXT DEFAULT NULL`).catch(() => {})
 
   // Per-user fan-out of interesting activity_log rows ("this alert applies to you").
   // Absence of rows for a given activity_id = global alert, shown to everyone.

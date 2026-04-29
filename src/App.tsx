@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Removed reviews and projects can be brought back — deleting a review or pulling a project out of a review now sends it to "Recently removed" (linked next to the review selector), where you can restore everything with its notes, comments, and images intact.',
   'Change a project\'s status directly from the review edit page — click the status chip on any row to flip it between Active, In Review, Done, Blocked, or Pending without leaving the review.',
   'Review page polish — adding a project flips it to In Review, the confirm modal closes after removing a project, and the comments-this-week list links straight to the filtered project.',
 ]
@@ -742,6 +743,11 @@ function App() {
   const [createReviewForm, setCreateReviewForm] = useState({ title: '', selectedProjectIds: [] as string[], review_date: new Date().toISOString().slice(0, 10) })
   const [reviewCopied, setReviewCopied] = useState(false)
   const [showDeleteReviewModal, setShowDeleteReviewModal] = useState(false)
+  const [showTrashModal, setShowTrashModal] = useState(false)
+  const [trash, setTrash] = useState<{
+    reviews: { id: string; title: string; review_date: string | null; deleted_at: string; itemCount: number }[];
+    items: { id: string; review_id: string; project_id: string; deleted_at: string; review_title: string; review_date: string | null; project_name: string | null }[];
+  }>({ reviews: [], items: [] })
   const [copyItemToReview, setCopyItemToReview] = useState<{ itemId: string; projectName: string } | null>(null)
 
   // Timeline editing state
@@ -1560,6 +1566,26 @@ const [showFilters, setShowFilters] = useState(false)
       const data = await res.json()
       setEditingReview(data)
     } catch (err) { console.error('Error loading review:', err) }
+  }
+
+  const loadTrash = async () => {
+    try {
+      const res = await authFetch('/api/trash')
+      const data = await res.json()
+      setTrash({ reviews: data.reviews || [], items: data.items || [] })
+    } catch (err) { console.error('Error loading trash:', err) }
+  }
+
+  const restoreReview = async (id: string) => {
+    await authFetch(`/api/reviews/${id}/restore`, { method: 'PUT' })
+    await loadTrash()
+    await loadReviews(id)
+  }
+
+  const restoreReviewItem = async (id: string, reviewId: string) => {
+    await authFetch(`/api/review-items/${id}/restore`, { method: 'PUT' })
+    await loadTrash()
+    if (editingReview?.id === reviewId) await loadReviewDetail(reviewId)
   }
 
   // Notes are loaded on-demand by settings/hidden-notes, not on tab switch
@@ -6412,6 +6438,13 @@ const [showFilters, setShowFilters] = useState(false)
                       ))
                     })()}
                   </select>
+                  <button
+                    type="button"
+                    className="review-trash-link"
+                    onClick={() => { loadTrash(); setShowTrashModal(true) }}
+                  >
+                    Recently removed
+                  </button>
                 </div>
 
                 {/* Row 2: Title + primary actions */}
@@ -6680,7 +6713,7 @@ const [showFilters, setShowFilters] = useState(false)
                                 }}
                                 onRemove={() => openConfirmModal(
                                   'Remove project from review?',
-                                  `This will remove "${proj?.name || 'this project'}" from the review, along with its notes and any images attached to it in this review. This can't be undone.`,
+                                  `"${proj?.name || 'This project'}" will be moved to Recently removed — its notes and images stay saved and can be restored from there.`,
                                   async () => {
                                     await authFetch(`/api/review-items/${item.id}`, { method: 'DELETE' })
                                     closeConfirmModal()
@@ -6876,7 +6909,7 @@ const [showFilters, setShowFilters] = useState(false)
               <button className="modal-close-btn" onClick={() => setShowDeleteReviewModal(false)}>&times;</button>
             </div>
             <div className="modal-body">
-              <p>Are you sure you want to delete <strong>{editingReview.title}</strong>? This cannot be undone.</p>
+              <p>Delete <strong>{editingReview.title}</strong>? It will be moved to Recently removed, where you can restore it along with all its notes, comments, and images.</p>
             </div>
             <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)' }}>
               <button className="secondary-btn" onClick={() => setShowDeleteReviewModal(false)}>Cancel</button>
@@ -6886,6 +6919,76 @@ const [showFilters, setShowFilters] = useState(false)
                 setEditingReview(null)
                 loadReviews()
               }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTrashModal && (
+        <div className="modal-overlay"
+          onMouseDown={e => { overlayMouseDownTarget.current = e.target }}
+          onClick={e => {
+            if (e.target === overlayMouseDownTarget.current &&
+                (e.target as HTMLElement).classList.contains('modal-overlay'))
+              setShowTrashModal(false)
+          }}>
+          <div className="modal" style={{ maxWidth: 560 }}>
+            <div className="modal-header">
+              <h2>Recently removed</h2>
+              <button className="modal-close-btn" onClick={() => setShowTrashModal(false)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              {trash.reviews.length === 0 && trash.items.length === 0 ? (
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Nothing to restore. Removed reviews and project rows will show up here.</p>
+              ) : (
+                <>
+                  {trash.reviews.length > 0 && (
+                    <div className="trash-section">
+                      <div className="trash-section-title">Reviews</div>
+                      <ul className="trash-list">
+                        {trash.reviews.map(r => (
+                          <li key={r.id} className="trash-row">
+                            <div className="trash-row-main">
+                              <span className="trash-row-name">{r.title || 'Untitled review'}</span>
+                              <span className="trash-row-meta">
+                                {r.review_date ? new Date(r.review_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                                {typeof r.itemCount === 'number' && ` · ${r.itemCount} project${r.itemCount === 1 ? '' : 's'}`}
+                              </span>
+                            </div>
+                            <button className="secondary-btn" onClick={() => restoreReview(r.id)}>
+                              <RotateCcw size={12} /> Restore
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {trash.items.length > 0 && (
+                    <div className="trash-section">
+                      <div className="trash-section-title">Projects removed from reviews</div>
+                      <ul className="trash-list">
+                        {trash.items.map(it => (
+                          <li key={it.id} className="trash-row">
+                            <div className="trash-row-main">
+                              <span className="trash-row-name">{it.project_name || 'Unknown project'}</span>
+                              <span className="trash-row-meta">
+                                {it.review_title}
+                                {it.review_date && ` · ${new Date(it.review_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
+                              </span>
+                            </div>
+                            <button className="secondary-btn" onClick={() => restoreReviewItem(it.id, it.review_id)}>
+                              <RotateCcw size={12} /> Restore
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)' }}>
+              <button className="secondary-btn" onClick={() => setShowTrashModal(false)}>Close</button>
             </div>
           </div>
         </div>
