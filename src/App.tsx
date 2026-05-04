@@ -29,9 +29,11 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Drag-and-drop images from your computer into the public review page — filenames with emoji or accents now upload cleanly, and dropping slightly off the target no longer bounces you to the image.',
+  'Public review sidebar shows each review\'s actual title (wrapping when it\'s long) instead of a generic "Week N".',
+  'Weekly-update reminders now include the designer\'s first name so admins can tell identical-looking rows apart.',
   'Removed reviews and projects can be brought back — deleting a review or pulling a project out of a review now sends it to "Recently removed" (linked next to the review selector), where you can restore everything with its notes, comments, and images intact.',
   'Change a project\'s status directly from the review edit page — click the status chip on any row to flip it between Active, In Review, Done, Blocked, or Pending without leaving the review.',
-  'Review page polish — adding a project flips it to In Review, the confirm modal closes after removing a project, and the comments-this-week list links straight to the filtered project.',
 ]
 
 
