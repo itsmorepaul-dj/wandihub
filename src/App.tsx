@@ -1900,7 +1900,7 @@ const [showFilters, setShowFilters] = useState(false)
     try {
       const res = await authFetch('/api/images', {
         method: 'POST',
-        headers: { 'Content-Type': file.type || 'image/png', 'X-Project-Id': blId, 'X-Original-Name': originalName },
+        headers: { 'Content-Type': file.type || 'image/png', 'X-Project-Id': blId, 'X-Original-Name': encodeURIComponent(originalName) },
         body: file,
       })
       if (!res.ok) {
@@ -2001,7 +2001,7 @@ const [showFilters, setShowFilters] = useState(false)
     try {
       const res = await authFetch('/api/images', {
         method: 'POST',
-        headers: { 'Content-Type': file.type || 'image/png', 'X-Project-Id': projectId, 'X-Original-Name': originalName },
+        headers: { 'Content-Type': file.type || 'image/png', 'X-Project-Id': projectId, 'X-Original-Name': encodeURIComponent(originalName) },
         body: file,
       })
       if (!res.ok) {

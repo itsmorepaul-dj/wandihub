@@ -78,10 +78,20 @@ router.post('/images', async (req, res) => {
     const maxRow = await get('SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM project_images WHERE project_id = ?', [projectId]);
     const nextOrder = (maxRow?.max_order ?? -1) + 1;
 
+    // X-Original-Name is sent percent-encoded because HTTP headers are
+    // ISO-8859-1 and filenames can contain emoji/accents. Decode back for
+    // storage; fall back to the raw value if decoding fails.
+    const rawOriginalName = req.headers['x-original-name'];
+    let originalName: string = filename;
+    if (typeof rawOriginalName === 'string' && rawOriginalName) {
+      try { originalName = decodeURIComponent(rawOriginalName); }
+      catch { originalName = rawOriginalName; }
+    }
+
     await run(
       `INSERT INTO project_images (id, project_id, filename, original_name, mime_type, size_bytes, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, projectId, filename, req.headers['x-original-name'] || filename, contentType, buffer.length, nextOrder]
+      [id, projectId, filename, originalName, contentType, buffer.length, nextOrder]
     );
 
     const saved = await get('SELECT * FROM project_images WHERE id = ?', [id]);

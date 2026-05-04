@@ -93,13 +93,17 @@ async function runWeeklyUpdateReminder() {
     const sentinel = `%"reminder":"weekly-update","week":"${week}","designer_id":"${d.id}"%`;
     if (await alreadySent('project', 'update', 'Weekly update reminder', sentinel)) continue;
 
+    // Include the designer's first name in target_name so admins (who see the
+    // full firehose) can tell the per-designer rows apart. Each row is still
+    // pinned to just that designer, so non-admins only ever see their own.
+    const firstName = (d.name || '').split(' ')[0] || d.name || 'designer';
     const details = JSON.stringify({
       reminder: 'weekly-update',
       week,
       designer_id: d.id,
       summary: `You haven't filed your weekly update for ${week}.`,
     });
-    const activityId = await logActivity('project', 'update', 'Weekly update reminder', null, details);
+    const activityId = await logActivity('project', 'update', `Weekly update reminder — ${firstName}`, null, details);
     await pinRecipients(activityId, [uid]);
   }
 }

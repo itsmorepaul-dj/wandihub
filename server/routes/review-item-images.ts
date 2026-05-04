@@ -64,10 +64,20 @@ router.post('/review-items/:id/images', async (req, res) => {
     );
     const nextOrder = (maxRow?.max_order ?? -1) + 1;
 
+    // X-Original-Name is sent percent-encoded (HTTP headers are ISO-8859-1,
+    // filenames may contain emoji/accents). Decode back to the display string;
+    // fall back to the raw value if decoding fails.
+    const rawOriginalName = req.headers['x-original-name'];
+    let originalName = filename;
+    if (typeof rawOriginalName === 'string' && rawOriginalName) {
+      try { originalName = decodeURIComponent(rawOriginalName); }
+      catch { originalName = rawOriginalName; }
+    }
+
     await run(
       `INSERT INTO review_item_images (id, review_item_id, filename, original_name, mime_type, size_bytes, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, reviewItemId, filename, req.headers['x-original-name'] || filename, contentType, buffer.length, nextOrder]
+      [id, reviewItemId, filename, originalName, contentType, buffer.length, nextOrder]
     );
 
     const saved = await get('SELECT * FROM review_item_images WHERE id = ?', [id]);

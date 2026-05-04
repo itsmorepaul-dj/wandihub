@@ -1851,11 +1851,14 @@ router.get('/review/:id', async (req, res) => {
         var dropZone = document.querySelector('.review-image-drop[data-item-id="' + itemId + '"]');
         if (!dropZone) return;
         dropZone.classList.add('uploading');
+        // HTTP headers must be ISO-8859-1. Filenames from the OS can contain
+        // emoji, smart quotes, or accented chars — percent-encode before
+        // sending and decode on the server.
         fetch('/api/review-items/' + itemId + '/images', {
           method: 'POST',
           headers: {
             'Content-Type': file.type || 'image/png',
-            'X-Original-Name': originalName || 'image.png'
+            'X-Original-Name': encodeURIComponent(originalName || 'image.png')
           },
           body: file
         }).then(function(r) { return r.json(); })
@@ -1914,11 +1917,29 @@ router.get('/review/:id', async (req, res) => {
           }
         }
       });
+      // Detect whether the drag payload is from the OS (file drop) vs. an
+      // internal image-reorder drag started on a draggable .review-image-item.
+      function isFileDrag(e) {
+        if (!e.dataTransfer) return false;
+        var types = e.dataTransfer.types;
+        if (!types) return false;
+        for (var i = 0; i < types.length; i++) {
+          if (types[i] === 'Files' || types[i] === 'application/x-moz-file') return true;
+        }
+        return false;
+      }
+      // Swallow file drags outside drop zones so the browser doesn't open/
+      // navigate to the dropped file if the user slightly misses the target.
       document.addEventListener('dragover', function(e) {
-        var drop = e.target.closest && e.target.closest('.review-image-drop');
-        if (!drop) return;
+        if (!isFileDrag(e)) return;
         e.preventDefault();
-        drop.classList.add('dragover');
+        var drop = e.target.closest && e.target.closest('.review-image-drop');
+        if (drop) {
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+          drop.classList.add('dragover');
+        } else {
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+        }
       });
       document.addEventListener('dragleave', function(e) {
         var drop = e.target.closest && e.target.closest('.review-image-drop');
@@ -1927,11 +1948,12 @@ router.get('/review/:id', async (req, res) => {
         drop.classList.remove('dragover');
       });
       document.addEventListener('drop', function(e) {
+        if (!isFileDrag(e)) return;
+        // A file drop is always ours to consume — even if dropped outside a
+        // drop zone — otherwise the browser navigates away from the review.
+        e.preventDefault();
         var drop = e.target.closest && e.target.closest('.review-image-drop');
         if (!drop) return;
-        // Ignore drops that are reordering existing items (handled below)
-        if (rvDragState.el) return;
-        e.preventDefault();
         drop.classList.remove('dragover');
         var files = e.dataTransfer && e.dataTransfer.files;
         if (!files) return;
@@ -1996,6 +2018,7 @@ router.get('/review/:id', async (req, res) => {
       });
       document.addEventListener('dragover', function(e) {
         if (!rvDragState.el) return;
+        if (isFileDrag(e)) return; // let the file-drop handler above deal with it
         var target = e.target.closest && e.target.closest('.review-image-item');
         if (!target || target === rvDragState.el) return;
         if (target.parentElement !== rvDragState.grid) return;
@@ -2008,6 +2031,7 @@ router.get('/review/:id', async (req, res) => {
       });
       document.addEventListener('drop', function(e) {
         if (!rvDragState.grid) return;
+        if (isFileDrag(e)) return; // not an internal reorder drop
         e.preventDefault();
         var grid = rvDragState.grid;
         var drop = grid.closest('.review-image-drop');
@@ -2111,7 +2135,8 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
       navItems += `<div class="nav-month-items" style="display:${isOpen ? 'block' : 'none'}">`
       for (const { week, review: r } of entries) {
         const isActive = r.id === activeId
-        navItems += `<a href="/review/${r.id}" class="nav-item${isActive ? ' active' : ''}">Week ${week}</a>`
+        const label = (r.title && String(r.title).trim()) || `Week ${week}`
+        navItems += `<a href="/review/${r.id}" class="nav-item${isActive ? ' active' : ''}" title="${escHtml(label)}">${escHtml(label)}</a>`
       }
       navItems += `</div>`
     }
@@ -2203,12 +2228,20 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     .nav-month-toggle.open .nav-month-chevron { transform: rotate(90deg); }
     .nav-month-items { padding-left: 0.35rem; }
     .nav-item {
-      display: block; padding: 0.3rem 0.5rem 0.3rem 0.75rem; border-radius: 6px; font-size: 0.75rem;
+      display: block; padding: 0.4rem 0.5rem 0.4rem 0.75rem; border-radius: 6px; font-size: 0.75rem;
       color: var(--rv-text-secondary); text-decoration: none; transition: background 0.15s, color 0.15s;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
+      line-height: 1.35; word-break: break-word; flex-shrink: 0;
+    }
+    .nav-item + .nav-item {
+      border-top: 1px solid var(--rv-border-subtle);
+      border-top-left-radius: 0; border-top-right-radius: 0;
+    }
+    .nav-item:has(+ .nav-item) {
+      border-bottom-left-radius: 0; border-bottom-right-radius: 0;
     }
     .nav-item:hover { background: var(--rv-hover); color: var(--rv-text); }
     .nav-item.active { background: var(--rv-accent); color: #fff; }
+    .nav-item.active + .nav-item, .nav-item + .nav-item.active { border-top-color: transparent; }
     .nav-review-title { opacity: 0.6; font-weight: 400; }
     .nav-item.active .nav-review-title { opacity: 0.8; }
     .sidebar-footer {
