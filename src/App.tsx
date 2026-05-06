@@ -29,9 +29,11 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Reviews tab polish — the review selector and public sidebar now show each review\'s actual title, the Gemini-notes field is tucked in a collapsed accordion so it can\'t be mistaken for the description, and meta controls (date, time, copy link, delete) sit right under the title row.',
+  'Mark one formal "Weekly Crit" per week — a new checkbox on the review edit page pins that review to the top of the public review sidebar (in bold) under "Weekly Crit", with any others that week listed below under "Quick Crits". One per week, enforced.',
+  'Add-to-review picker is now a searchable modal (same pattern as Reports → Publish a project) instead of a long dropdown.',
+  'Public review sidebar gets Week subsections with thin dividers between weeks.',
   'Drag-and-drop images from your computer into the public review page — filenames with emoji or accents now upload cleanly, and dropping slightly off the target no longer bounces you to the image.',
-  'Public review sidebar shows each review\'s actual title (wrapping when it\'s long) instead of a generic "Week N".',
-  'Weekly-update reminders now include the designer\'s first name so admins can tell identical-looking rows apart.',
   'Removed reviews and projects can be brought back — deleting a review or pulling a project out of a review now sends it to "Recently removed" (linked next to the review selector), where you can restore everything with its notes, comments, and images intact.',
   'Change a project\'s status directly from the review edit page — click the status chip on any row to flip it between Active, In Review, Done, Blocked, or Pending without leaving the review.',
 ]
@@ -1238,6 +1240,8 @@ const [showFilters, setShowFilters] = useState(false)
   // flashes a brief "copied" indicator next to a URL.
   const [publishPickerOpen, setPublishPickerOpen] = useState(false)
   const [publishPickerQuery, setPublishPickerQuery] = useState('')
+  const [addToReviewPickerOpen, setAddToReviewPickerOpen] = useState(false)
+  const [addToReviewPickerQuery, setAddToReviewPickerQuery] = useState('')
   const [publishCopiedFor, setPublishCopiedFor] = useState<string | null>(null)
   const [showPublishedList, setShowPublishedList] = useState(false)
   const [showArchive, setShowArchive] = useState(false)
@@ -6433,8 +6437,8 @@ const [showFilters, setShowFilters] = useState(false)
                           {items.map(r => {
                             const d = dateFor(r)
                             const wk = getWeek(d)
-                            const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-                            return <option key={r.id} value={r.id}>Week {wk} — {day}</option>
+                            const optionLabel = (r.title && String(r.title).trim()) || `Week ${wk}`
+                            return <option key={r.id} value={r.id}>{optionLabel}</option>
                           })}
                         </optgroup>
                       ))
@@ -6481,55 +6485,7 @@ const [showFilters, setShowFilters] = useState(false)
                   </div>
                 </div>
 
-                {/* Row 2b: Description */}
-                <RichTextEditor
-                  className="review-description-rte"
-                  value={editingReview.description || ''}
-                  onChange={(md) => setEditingReview({ ...editingReview, description: md })}
-                  onBlur={async () => {
-                    await authFetch(`/api/reviews/${editingReview.id}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ description: editingReview.description || '' })
-                    })
-                  }}
-                  placeholder="Add a review description or summary..."
-                  features={['bold', 'bullets', 'links']}
-                  minHeight="40px"
-                />
-
-                {/* Row 2c: Gemini notes paste target */}
-                <div className="gemini-notes-field">
-                  <label className="gemini-notes-label">
-                    Gemini notes
-                    <span className="gemini-notes-hint">Paste from the Google Doc after the meeting.</span>
-                  </label>
-                  <textarea
-                    className="gemini-notes-textarea"
-                    value={editingReview.gemini_notes || ''}
-                    onChange={e => setEditingReview({ ...editingReview, gemini_notes: e.target.value })}
-                    onBlur={async () => {
-                      await authFetch(`/api/reviews/${editingReview.id}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ gemini_notes: editingReview.gemini_notes || '' })
-                      })
-                    }}
-                    onPaste={e => {
-                      const html = e.clipboardData.getData('text/html')
-                      if (!html) return
-                      e.preventDefault()
-                      const md = convertHtmlToMarkdown(html)
-                      const existing = editingReview.gemini_notes || ''
-                      const separator = existing && !existing.endsWith('\n\n') ? '\n\n' : ''
-                      setEditingReview({ ...editingReview, gemini_notes: existing + separator + md })
-                    }}
-                    placeholder="Paste the Gemini-generated notes here..."
-                    rows={8}
-                  />
-                </div>
-
-                {/* Row 3: Meta + actions inline */}
+                {/* Meta + actions inline — positioned right below the title row */}
                 <div className="review-edit-meta-row">
                   <span className="review-edit-meta">
                     {editingReview.items?.length || 0} project{(editingReview.items?.length || 0) !== 1 ? 's' : ''}
@@ -6573,6 +6529,38 @@ const [showFilters, setShowFilters] = useState(false)
                     />
                     min total
                   </label>
+                  <label
+                    className="review-weekly-crit-toggle"
+                    title="Mark as the formal W&I Open Critique for this week. Pins to top of the public review nav."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!editingReview.is_weekly_crit}
+                      onChange={async (e) => {
+                        const wantOn = e.target.checked
+                        const prev = !!editingReview.is_weekly_crit
+                        setEditingReview({ ...editingReview, is_weekly_crit: wantOn ? 1 : 0 })
+                        const res = await authFetch(`/api/reviews/${editingReview.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ is_weekly_crit: wantOn })
+                        })
+                        if (res.status === 409) {
+                          const err = await res.json().catch(() => ({ error: 'Another review is already the Weekly Crit for this week.' }))
+                          setEditingReview({ ...editingReview, is_weekly_crit: prev ? 1 : 0 })
+                          alert(err.error || 'Another review is already the Weekly Crit for this week.')
+                          return
+                        }
+                        if (!res.ok) {
+                          setEditingReview({ ...editingReview, is_weekly_crit: prev ? 1 : 0 })
+                          alert('Failed to update Weekly Crit flag.')
+                          return
+                        }
+                        loadReviews(editingReview.id)
+                      }}
+                    />
+                    Weekly Crit
+                  </label>
                   <span className="project-meta-chip project-meta-action" style={{ opacity: 1 }} onClick={() => {
                     navigator.clipboard.writeText(`${window.location.origin}/review/${editingReview.id}`)
                     setReviewCopied(true)
@@ -6584,32 +6572,71 @@ const [showFilters, setShowFilters] = useState(false)
                     <Trash2 size={11} /> Delete
                   </span>
                 </div>
+
+                {/* Row 2b: Description */}
+                <RichTextEditor
+                  className="review-description-rte"
+                  value={editingReview.description || ''}
+                  onChange={(md) => setEditingReview({ ...editingReview, description: md })}
+                  onBlur={async () => {
+                    await authFetch(`/api/reviews/${editingReview.id}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ description: editingReview.description || '' })
+                    })
+                  }}
+                  placeholder="Add a review description or summary..."
+                  features={['bold', 'bullets', 'links']}
+                  minHeight="40px"
+                />
+
+                {/* Row 2c: Gemini notes paste target — collapsed by default so
+                    people don't accidentally type the review description here. */}
+                <details className="gemini-notes-accordion">
+                  <summary className="gemini-notes-summary">
+                    Gemini notes
+                    {(editingReview.gemini_notes || '').trim() && (
+                      <span className="gemini-notes-badge">saved</span>
+                    )}
+                  </summary>
+                  <div className="gemini-notes-field">
+                    <span className="gemini-notes-hint">Paste from the Google Doc after the meeting.</span>
+                    <textarea
+                      className="gemini-notes-textarea"
+                      value={editingReview.gemini_notes || ''}
+                      onChange={e => setEditingReview({ ...editingReview, gemini_notes: e.target.value })}
+                      onBlur={async () => {
+                        await authFetch(`/api/reviews/${editingReview.id}`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ gemini_notes: editingReview.gemini_notes || '' })
+                        })
+                      }}
+                      onPaste={e => {
+                        const html = e.clipboardData.getData('text/html')
+                        if (!html) return
+                        e.preventDefault()
+                        const md = convertHtmlToMarkdown(html)
+                        const existing = editingReview.gemini_notes || ''
+                        const separator = existing && !existing.endsWith('\n\n') ? '\n\n' : ''
+                        setEditingReview({ ...editingReview, gemini_notes: existing + separator + md })
+                      }}
+                      placeholder="Paste the Gemini-generated notes here..."
+                      rows={8}
+                    />
+                  </div>
+                </details>
               </div>
 
               {/* Add project picker */}
               <div className="review-add-project">
-                <select
-                  className="review-project-select"
-                  value=""
-                  onChange={async (e) => {
-                    const projectId = e.target.value
-                    if (!projectId) return
-                    await authFetch(`/api/reviews/${editingReview.id}/items`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ project_id: projectId })
-                    })
-                    loadReviewDetail(editingReview.id)
-                  }}
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => { setAddToReviewPickerQuery(''); setAddToReviewPickerOpen(true) }}
                 >
-                  <option value="">Add a project...</option>
-                  {currentProjects
-                    .filter(p => !editingReview.items?.some((ri: any) => ri.project_id === p.id))
-                    .sort((a, b) => a.name.localeCompare(b.name))
-                    .map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                </select>
+                  <Plus size={13} /> Add a project
+                </button>
               </div>
 
               {/* Review items table */}
@@ -8268,6 +8295,54 @@ const [showFilters, setShowFilters] = useState(false)
                             setPublishCopiedFor(p.id)
                             setTimeout(() => setPublishCopiedFor(prev => prev === p.id ? null : prev), 1800)
                           }
+                        }}>
+                          <span className="publish-picker-name">{p.name}</span>
+                          <span className="publish-picker-meta">{p.businessLines?.join(', ') || ''}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Add-to-Review Picker Modal — same pattern as the Publish picker. */}
+      {addToReviewPickerOpen && editingReview && (() => {
+        const q = addToReviewPickerQuery.trim().toLowerCase()
+        const existingIds = new Set((editingReview.items || []).map((ri: any) => ri.project_id))
+        const pickable = currentProjects
+          .filter(p => p.status !== 'archived' && !existingIds.has(p.id))
+          .filter(p => !q || p.name.toLowerCase().includes(q))
+          .sort((a, b) => a.name.localeCompare(b.name))
+        return (
+          <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setAddToReviewPickerOpen(false) }}>
+            <div className="modal" style={{ maxWidth: 520 }}>
+              <div className="modal-header">
+                <h2>Add a project to this review</h2>
+                <button className="modal-close-btn" onClick={() => setAddToReviewPickerOpen(false)}>×</button>
+              </div>
+              <div className="modal-body">
+                <div className={`float-field${addToReviewPickerQuery ? ' has-value' : ''}`} style={{ marginBottom: '0.75rem' }}>
+                  <input type="text" value={addToReviewPickerQuery} onChange={e => setAddToReviewPickerQuery(e.target.value)} placeholder=" " autoFocus />
+                  <label>Search projects</label>
+                </div>
+                {pickable.length === 0 ? (
+                  <div className="published-projects-empty">No matching projects to add.</div>
+                ) : (
+                  <ul className="publish-picker-list">
+                    {pickable.map(p => (
+                      <li key={p.id}>
+                        <button className="publish-picker-item" onClick={async () => {
+                          await authFetch(`/api/reviews/${editingReview.id}/items`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ project_id: p.id })
+                          })
+                          setAddToReviewPickerOpen(false)
+                          loadReviewDetail(editingReview.id)
                         }}>
                           <span className="publish-picker-name">{p.name}</span>
                           <span className="publish-picker-meta">{p.businessLines?.join(', ') || ''}</span>

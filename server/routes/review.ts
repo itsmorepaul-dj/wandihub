@@ -100,9 +100,23 @@ router.post('/api/reviews', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
+// Compute ISO-week key ("YYYY-Www") from a YYYY-MM-DD or datetime string.
+function isoWeekKey(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null
+  const base = dateStr.length >= 10 ? dateStr.slice(0, 10) : dateStr
+  const m = base.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return null
+  const d = new Date(Date.UTC(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3])))
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7))
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+  const week = Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+  return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
 router.put('/api/reviews/:id', async (req, res) => {
   try {
-    const { title, week, description, item_order, total_minutes, review_date } = req.body
+    const { title, week, description, item_order, total_minutes, review_date, is_weekly_crit } = req.body
     if (title !== undefined) {
       await run('UPDATE reviews SET title = ?, updated_at = datetime(\'now\') WHERE id = ?', [title, req.params.id])
     }
@@ -122,6 +136,42 @@ router.put('/api/reviews/:id', async (req, res) => {
     }
     if (req.body.gemini_notes !== undefined) {
       await run('UPDATE reviews SET gemini_notes = ?, updated_at = datetime(\'now\') WHERE id = ?', [req.body.gemini_notes || '', req.params.id])
+    }
+    // Weekly-crit toggle. At most one per ISO week — reject if another review in
+    // the same week already holds the flag.
+    if (is_weekly_crit !== undefined) {
+      const wantOn = !!is_weekly_crit
+      if (wantOn) {
+        const self = await get(
+          'SELECT id, review_date, created_at FROM reviews WHERE id = ? AND deleted_at IS NULL',
+          [req.params.id]
+        ) as any
+        if (!self) return res.status(404).json({ error: 'Review not found' })
+        const key = isoWeekKey(self.review_date) || isoWeekKey(self.created_at)
+        if (!key) return res.status(400).json({ error: 'Cannot determine ISO week for this review' })
+        // SQLite lacks a native ISO-week function, so pull all current
+        // weekly-crit rows and filter in JS. At most a handful in practice.
+        const candidates = await all(
+          `SELECT id, title, review_date, created_at FROM reviews
+           WHERE is_weekly_crit = 1 AND deleted_at IS NULL AND id != ?`,
+          [req.params.id]
+        ) as any[]
+        const conflictRow = candidates.find(c => {
+          const ck = isoWeekKey(c.review_date) || isoWeekKey(c.created_at)
+          return ck === key
+        })
+        if (conflictRow) {
+          return res.status(409).json({
+            error: `"${conflictRow.title || 'Another review'}" is already the Weekly Crit for ${key}. Unmark it first.`,
+            conflict_review_id: conflictRow.id,
+            week: key,
+          })
+        }
+      }
+      await run(
+        'UPDATE reviews SET is_weekly_crit = ?, updated_at = datetime(\'now\') WHERE id = ?',
+        [wantOn ? 1 : 0, req.params.id]
+      )
     }
     if (item_order && Array.isArray(item_order)) {
       for (let i = 0; i < item_order.length; i++) {
@@ -969,7 +1019,7 @@ router.get('/review/:id', async (req, res) => {
       item.reviewMarkers = markers
     }
 
-    const allReviews = await all('SELECT id, title, week, created_at FROM reviews WHERE deleted_at IS NULL ORDER BY created_at DESC') as any[]
+    const allReviews = await all('SELECT id, title, week, created_at, is_weekly_crit FROM reviews WHERE deleted_at IS NULL ORDER BY created_at DESC') as any[]
     const teamMembers = await all('SELECT name, slack FROM team') as { name: string; slack: string }[]
     const slackByName = new Map(teamMembers.map(t => [t.name, t.slack]))
     const sessionId = getSessionIdFromRequest(req) || ''
@@ -2133,10 +2183,33 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
         ${months[month]}
       </button>`
       navItems += `<div class="nav-month-items" style="display:${isOpen ? 'block' : 'none'}">`
-      for (const { week, review: r } of entries) {
-        const isActive = r.id === activeId
-        const label = (r.title && String(r.title).trim()) || `Week ${week}`
-        navItems += `<a href="/review/${r.id}" class="nav-item${isActive ? ' active' : ''}" title="${escHtml(label)}">${escHtml(label)}</a>`
+      // Inside each month, group by ISO week and split into Weekly Crit +
+      // Quick Crits. Weekly Crit (if present) pins to the top.
+      const byWeek = new Map<number, { week: number; review: any }[]>()
+      for (const entry of entries) {
+        if (!byWeek.has(entry.week)) byWeek.set(entry.week, [])
+        byWeek.get(entry.week)!.push(entry)
+      }
+      const sortedWeeks = Array.from(byWeek.keys()).sort((a, b) => b - a)
+      for (const wk of sortedWeeks) {
+        const weekEntries = byWeek.get(wk)!
+        const weekly = weekEntries.find(e => !!e.review.is_weekly_crit)
+        const quick = weekEntries.filter(e => !e.review.is_weekly_crit)
+        navItems += `<div class="nav-week-label">Week ${wk}</div>`
+        if (weekly) {
+          navItems += `<div class="nav-subsection-label">Weekly Crit</div>`
+          const isActive = weekly.review.id === activeId
+          const label = (weekly.review.title && String(weekly.review.title).trim()) || `Week ${wk}`
+          navItems += `<a href="/review/${weekly.review.id}" class="nav-item nav-item-weekly-crit${isActive ? ' active' : ''}" title="${escHtml(label)}">${escHtml(label)}</a>`
+        }
+        if (quick.length > 0) {
+          navItems += `<div class="nav-subsection-label">Quick Crits</div>`
+          for (const { review: r } of quick) {
+            const isActive = r.id === activeId
+            const label = (r.title && String(r.title).trim()) || `Week ${wk}`
+            navItems += `<a href="/review/${r.id}" class="nav-item${isActive ? ' active' : ''}" title="${escHtml(label)}">${escHtml(label)}</a>`
+          }
+        }
       }
       navItems += `</div>`
     }
@@ -2227,6 +2300,20 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     .nav-month-chevron { transition: transform 0.15s; flex-shrink: 0; }
     .nav-month-toggle.open .nav-month-chevron { transform: rotate(90deg); }
     .nav-month-items { padding-left: 0.35rem; }
+    .nav-week-label {
+      font-size: 0.7rem; font-weight: 600; color: var(--rv-text-muted);
+      padding: 0.5rem 0.5rem 0.25rem 0.75rem;
+    }
+    .nav-month-items > .nav-week-label:not(:first-child) {
+      margin-top: 0.35rem;
+      border-top: 1px solid var(--rv-border-subtle);
+      padding-top: 0.55rem;
+    }
+    .nav-subsection-label {
+      font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--rv-text-dim);
+      padding: 0.3rem 0.5rem 0.15rem 0.75rem;
+    }
     .nav-item {
       display: block; padding: 0.4rem 0.5rem 0.4rem 0.75rem; border-radius: 6px; font-size: 0.75rem;
       color: var(--rv-text-secondary); text-decoration: none; transition: background 0.15s, color 0.15s;
@@ -2242,6 +2329,7 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     .nav-item:hover { background: var(--rv-hover); color: var(--rv-text); }
     .nav-item.active { background: var(--rv-accent); color: #fff; }
     .nav-item.active + .nav-item, .nav-item + .nav-item.active { border-top-color: transparent; }
+    .nav-item-weekly-crit { font-weight: 600; color: var(--rv-text); }
     .nav-review-title { opacity: 0.6; font-weight: 400; }
     .nav-item.active .nav-review-title { opacity: 0.8; }
     .sidebar-footer {

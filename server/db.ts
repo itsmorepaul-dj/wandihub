@@ -376,6 +376,10 @@ export const initSchema = async () => {
   // Soft-delete column (null = live, timestamp = trashed). Keeps history
   // recoverable via the "Recently removed" list.
   await run(`ALTER TABLE reviews ADD COLUMN deleted_at TEXT DEFAULT NULL`).catch(() => {})
+  // Flag that marks a review as the formal "W&I Open Critique" for its ISO
+  // week. At most one per week (enforced at the API layer). Used to pin the
+  // Weekly Crit to the top of the public review nav.
+  await run(`ALTER TABLE reviews ADD COLUMN is_weekly_crit INTEGER DEFAULT 0`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS review_items (
     id TEXT PRIMARY KEY, review_id TEXT NOT NULL, project_id TEXT NOT NULL,
