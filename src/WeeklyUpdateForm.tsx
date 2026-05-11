@@ -12,6 +12,7 @@ interface WeeklyUpdateFormProps {
   projectUpdates: WeeklyUpdate[]
   weeklyGeneral: WeeklyGeneral[]
   designerId: string
+  projectId: string
   isExpanded: boolean
   onToggle: () => void
   onSave: (data: WeeklyUpdateSavePayload, opts?: { keepalive?: boolean }) => Promise<void>
@@ -28,7 +29,7 @@ const PLACEHOLDERS: Record<string, string> = {
 type TabKey = 'highlight' | 'lowlight' | 'fyi' | 'people'
 
 export default function WeeklyUpdateForm({
-  projectUpdates, weeklyGeneral, designerId,
+  projectUpdates, weeklyGeneral, designerId, projectId,
   isExpanded, onToggle, onSave, onAddProjectLink,
 }: WeeklyUpdateFormProps) {
   const existingHighlight = projectUpdates.find(u => u.type === 'highlight') || null
@@ -64,8 +65,11 @@ export default function WeeklyUpdateForm({
 
   useEffect(() => {
     if (isExpanded) {
-      const fyis = weeklyGeneral.filter(e => e.category === 'fyi' && e.designer_id === designerId)
-      const people = weeklyGeneral.filter(e => e.category === 'people' && e.designer_id === designerId)
+      // Scope to this project + designer so each project card only prefills its
+      // own FYI/People entries. Entries saved outside any project (from the
+      // Reports tab) stay out of the card form.
+      const fyis = weeklyGeneral.filter(e => e.category === 'fyi' && e.designer_id === designerId && e.project_id === projectId)
+      const people = weeklyGeneral.filter(e => e.category === 'people' && e.designer_id === designerId && e.project_id === projectId)
       const newDraft = {
         highlight: existingHighlight?.description || '',
         lowlight: existingLowlight?.description || '',

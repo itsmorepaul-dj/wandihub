@@ -9510,3 +9510,353 @@ select:focus {
 .secondary-btn:hover {
   background: var(--color-hover-subtle);
 }
+
+/* ============================================================
+   Weekly Snapshot report v2 — BL-grouped, jump nav, project cards
+   ============================================================ */
+.rr-v2 {
+  padding: 1.75rem 2rem 3rem;
+  gap: 2rem;
+  max-width: 920px;
+  margin: 0 auto;
+}
+.rr-v2 .rr-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 1rem;
+}
+.rr-v2 .rr-week {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.rr-v2 .rr-date {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+}
+.rr-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  position: sticky;
+  top: 0;
+  background: var(--color-bg-elevated);
+  z-index: 2;
+}
+.rr-nav a {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  padding: 0.25rem 0.625rem;
+  border-radius: 99px;
+  border: 1px solid var(--color-border);
+  text-decoration: none;
+  transition: all 0.12s;
+}
+.rr-nav a:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.rr-bl-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  scroll-margin-top: 4rem;
+}
+.rr-bl-title {
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--color-text);
+  padding-bottom: 0.375rem;
+  border-bottom: 2px solid var(--color-text);
+  margin: 0;
+}
+.rr-general-section .rr-bl-title {
+  border-bottom-color: var(--color-accent);
+}
+
+.rr-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.rr-subsection-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin: 0.5rem 0 0.25rem;
+}
+.rr-subsection-title.rr-subsection-highlight { color: var(--color-success); }
+.rr-subsection-title.rr-subsection-lowlight  { color: var(--color-danger); }
+.rr-subsection-title.rr-subsection-fyi       { color: var(--color-warning); }
+.rr-subsection-title.rr-subsection-people    { color: #8b5cf6; }
+
+.rr-project-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.875rem;
+}
+.rr-project-card {
+  padding: 0.25rem 0 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.rr-project-card:last-child {
+  border-bottom: none;
+}
+.rr-project-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+  display: block;
+}
+.rr-project-name:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+.rr-project-designers {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+.rr-project-also-in {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+.rr-project-also-in a {
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+.rr-project-also-in a:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+.rr-project-links {
+  font-size: 0.78rem;
+  color: var(--color-text-link);
+}
+.rr-project-links a {
+  color: var(--color-text-link);
+  text-decoration: none;
+}
+.rr-project-links a:hover { text-decoration: underline; }
+.rr-project-links .rr-link-sep {
+  color: var(--color-text-dim);
+  margin: 0 0.375rem;
+}
+
+.rr-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.25rem 0;
+}
+.rr-block-lowlight {
+  border-left: 2px solid var(--color-danger);
+  padding-left: 0.625rem;
+}
+.rr-block-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.rr-block-highlight .rr-block-label { color: var(--color-success); }
+.rr-block-lowlight  .rr-block-label { color: var(--color-danger); }
+.rr-block-fyi       .rr-block-label { color: var(--color-warning); }
+.rr-block-people    .rr-block-label { color: #8b5cf6; }
+.rr-block-body {
+  font-size: 0.875rem;
+  color: var(--color-text);
+  line-height: 1.55;
+}
+.rr-block-body div + div {
+  margin-top: 0.9em;
+}
+.rr-block-body div:empty {
+  min-height: 0.75em;
+}
+.rr-block-sub {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-top: 0.375rem;
+}
+.rr-block-sub div + div {
+  margin-top: 0.75em;
+}
+
+/* Reserve space on the right of general-notes items so the hover-reveal
+   copy button never overlaps the body content. */
+.rr-v2 .rr-general-item {
+  padding-right: 2.5rem;
+  background: transparent;
+  display: block;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+.rr-general-text {
+  display: inline;
+}
+.rr-general-text > div {
+  display: inline;
+}
+
+.rr-project-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.rr-project-thumb {
+  display: block;
+  width: 88px;
+  height: 88px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-subtle);
+}
+.rr-project-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.rr-project-thumb:hover {
+  border-color: var(--color-border-hover);
+}
+
+.rr-project-reviews {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  padding-top: 0.25rem;
+  border-top: 1px dashed var(--color-border-subtle);
+}
+.rr-project-reviews-label {
+  color: var(--color-text-muted);
+  margin-right: 0.375rem;
+  font-weight: 600;
+}
+.rr-project-reviews a {
+  color: var(--color-text-link);
+  text-decoration: none;
+}
+.rr-project-reviews a:hover { text-decoration: underline; }
+.rr-project-reviews .rr-link-sep {
+  color: var(--color-text-dim);
+  margin: 0 0.375rem;
+}
+
+/* Admin edit mode */
+.rr-v2 .rr-header {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.rr-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.rr-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+.rr-edited-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  padding: 0.15rem 0.5rem;
+  border-radius: 99px;
+  margin-top: 0.25rem;
+  letter-spacing: 0.01em;
+}
+.rr-admin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  padding: 0.3rem 0.625rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.rr-admin-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+.rr-admin-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.rr-admin-btn-primary {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.rr-admin-btn-primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  color: #fff;
+}
+.rr-admin-error {
+  font-size: 0.72rem;
+  color: var(--color-danger);
+}
+.rr-edit-textarea {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.375rem 0.5rem;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 2.25rem;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.rr-edit-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-glow);
+}
+
+/* RichTextEditor instances inside snapshot admin-edit mode */
+.rr-admin-rte {
+  margin-top: 0.25rem;
+  width: 100%;
+}
+.rr-admin-rte .rte-content {
+  font-size: 0.875rem;
+  line-height: 1.55;
+}

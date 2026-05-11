@@ -294,18 +294,44 @@ export const initSchema = async () => {
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
   )`).catch(e => console.error('weekly_updates init error:', e.message))
 
+  // One row per (project, designer, type) — the form edits this single row
+  // in place; the `week` column just reflects the most recent save. The frozen
+  // weekly_snapshots table captures history, not the live table.
+  await run(`DROP INDEX IF EXISTS idx_weekly_updates_unique_old`).catch(() => {})
+  // Detect the old week-scoped index and drop it before creating the new one.
+  const wuIdxCols = await all(`PRAGMA index_info(idx_weekly_updates_unique)`).catch(() => [] as any[])
+  if (Array.isArray(wuIdxCols) && wuIdxCols.some((c: any) => c.name === 'week')) {
+    await run(`DROP INDEX idx_weekly_updates_unique`).catch(() => {})
+  }
   await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_weekly_updates_unique
-    ON weekly_updates (week, project_id, designer_id, type)`).catch(e => console.error('weekly_updates unique idx error:', e.message))
+    ON weekly_updates (project_id, designer_id, type)`).catch(e => console.error('weekly_updates unique idx error:', e.message))
 
   await run(`CREATE TABLE IF NOT EXISTS weekly_general (
     id TEXT PRIMARY KEY, designer_id TEXT NOT NULL,
     week TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'fyi',
     content TEXT DEFAULT '',
+    project_id TEXT,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
   )`).catch(e => console.error('weekly_general init error:', e.message))
 
+  // Migration: add project_id for existing deployments. A weekly_general row
+  // with project_id = NULL is a true "general note" (entered on the Reports
+  // tab); a non-null project_id means the entry was saved from that project's
+  // card and should appear under the project in the snapshot.
+  await run(`ALTER TABLE weekly_general ADD COLUMN project_id TEXT`).catch(() => {})
+
+  // One row per (designer, category, project) — truly general entries
+  // (project_id NULL) are one row per (designer, category). Editing in place
+  // across weeks replaces `week` and `content`. Detect any prior index shape
+  // (with `week` or `content` in the key) and rebuild.
+  const wgIdxCols = await all(`PRAGMA index_info(idx_weekly_general_unique)`).catch(() => [] as any[])
+  const wgCols = Array.isArray(wgIdxCols) ? wgIdxCols.map((c: any) => c.name) : []
+  const wgNeedsRebuild = wgCols.includes('week') || wgCols.includes('content')
+  if (wgNeedsRebuild) {
+    await run(`DROP INDEX idx_weekly_general_unique`).catch(() => {})
+  }
   await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_weekly_general_unique
-    ON weekly_general (week, designer_id, category, content)`).catch(e => console.error('weekly_general unique idx error:', e.message))
+    ON weekly_general (designer_id, category, COALESCE(project_id, ''))`).catch(e => console.error('weekly_general unique idx error:', e.message))
 
   await run(`CREATE TABLE IF NOT EXISTS weekly_snapshots (
     id TEXT PRIMARY KEY, week TEXT NOT NULL UNIQUE,
@@ -313,6 +339,11 @@ export const initSchema = async () => {
     plain_text TEXT DEFAULT '',
     data_json TEXT DEFAULT '{}'
   )`).catch(e => console.error('weekly_snapshots init error:', e.message))
+  // Admin-edit provenance. Both null while the snapshot is untouched; set to
+  // the admin's email + timestamp on any PATCH. Reads of the snapshot surface
+  // this in the report header so readers know the text was revised.
+  await run(`ALTER TABLE weekly_snapshots ADD COLUMN edited_by TEXT`).catch(() => {})
+  await run(`ALTER TABLE weekly_snapshots ADD COLUMN edited_at TEXT`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS review_snapshots (
     id TEXT PRIMARY KEY, week TEXT NOT NULL UNIQUE,

@@ -1,13 +1,13 @@
 import express from 'express';
 import { run, get, all } from '../db.js';
-import { getUserEmail } from '../auth.js';
+import { getUserEmail, requireAdmin } from '../auth.js';
 import { logActivity } from '../version.js';
 import { userIdForEmail, recipientsForAllActiveDesigners, pinRecipients } from '../activity.js';
 
 const router = express.Router();
 
 // Weekly deadline config (single source of truth)
-const WEEKLY_DEADLINE = { day: 5, hour: 17, minute: 0 } // Friday 5pm ET
+const WEEKLY_DEADLINE = { day: 5, hour: 20, minute: 0 } // Friday 8pm ET
 
 
 
@@ -20,25 +20,47 @@ const getISOWeek = (d: Date = new Date()) => {
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`
 }
 
+// "Active week" for form saves: before Monday noon ET, the just-completed
+// ISO week (so late edits Sat/Sun/Mon-morning still belong to last Friday's
+// report and can be regenerated into it). From Monday noon ET onward, the
+// current ISO week (forward-dated to next Friday's report).
+const getActiveWeek = (d: Date = new Date()): string => {
+  const et = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+  const day = et.getDay() // 0=Sun, 1=Mon
+  const hour = et.getHours()
+  const inGrace = day === 0 || day === 6 || (day === 1 && hour < 12)
+  if (!inGrace) return getISOWeek(d)
+  // Walk back to the most recent Friday and take that date's ISO week.
+  const back = new Date(d)
+  for (let i = 0; i < 7; i++) {
+    const t = new Date(back.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    if (t.getDay() === 5) break
+    back.setDate(back.getDate() - 1)
+  }
+  return getISOWeek(back)
+}
+
 // ============ PROJECT WEEKLY UPDATES ============
 
-// Get updates for a specific week (defaults to current week)
+// Live weekly_updates: one row per (project, designer, type). The `week`
+// column is "last saved during this ISO week" — not a filter. Return all rows
+// so forms can show the current state regardless of when it was last edited.
+// Snapshots freeze a point-in-time copy, so historical weeks stay intact even
+// though rows mutate in place going forward.
 router.get('/weekly-updates', async (req, res) => {
   try {
-    const week = (req.query.week as string) || getISOWeek()
     const projectId = req.query.project_id as string
     let sql = `SELECT wu.*, t.name as designer_name, p.name as project_name,
                p.businessLine as business_lines
                FROM weekly_updates wu
                LEFT JOIN team t ON wu.designer_id = t.id
-               JOIN projects p ON wu.project_id = p.id
-               WHERE wu.week = ?`
-    const params: any[] = [week]
+               JOIN projects p ON wu.project_id = p.id`
+    const params: any[] = []
     if (projectId) {
-      sql += ' AND wu.project_id = ?'
+      sql += ' WHERE wu.project_id = ?'
       params.push(projectId)
     }
-    sql += ' ORDER BY wu.created_at DESC'
+    sql += ' ORDER BY wu.updated_at DESC'
     const updates = await all(sql, params)
     res.json(updates)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
@@ -59,32 +81,34 @@ router.get('/weekly-updates/history/:projectId', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
-// Create or update a weekly update
+// Create or update a weekly update. The active week is computed server-side
+// so late edits (Fri 8pm → Mon noon ET) still belong to the just-closed
+// reporting week and can be picked up by a Regenerate on its snapshot.
 router.post('/weekly-updates', async (req, res) => {
   try {
-    const { id, project_id, designer_id, week, type, description, risk_reason, resolution } = req.body
+    const { id, project_id, designer_id, type, description, risk_reason, resolution } = req.body
     const updateId = id || `wu_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    const updateWeek = week || getISOWeek()
+    const activeWeek = getActiveWeek()
 
     if (id) {
       await run(
-        `UPDATE weekly_updates SET type = ?, description = ?, risk_reason = ?, resolution = ?, updated_at = datetime('now')
+        `UPDATE weekly_updates SET type = ?, description = ?, risk_reason = ?, resolution = ?, week = ?, updated_at = datetime('now')
          WHERE id = ?`,
-        [type, description || '', risk_reason || '', resolution || '', id]
+        [type, description || '', risk_reason || '', resolution || '', activeWeek, id]
       )
     } else {
-      // Idempotent insert: the unique index on (week, project_id, designer_id, type)
-      // means a retried submit for the same key updates the existing row instead
-      // of duplicating. The RETURNING clause gives us the surviving row's id.
+      // One row per (project, designer, type). On conflict, update in place
+      // and stamp the new active week so a later regenerate picks it up.
       await run(
         `INSERT INTO weekly_updates (id, project_id, designer_id, week, type, description, risk_reason, resolution)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(week, project_id, designer_id, type) DO UPDATE SET
+         ON CONFLICT(project_id, designer_id, type) DO UPDATE SET
            description = excluded.description,
            risk_reason = excluded.risk_reason,
            resolution = excluded.resolution,
+           week = excluded.week,
            updated_at = datetime('now')`,
-        [updateId, project_id, designer_id, updateWeek, type || 'highlight', description || '', risk_reason || '', resolution || '']
+        [updateId, project_id, designer_id, activeWeek, type || 'highlight', description || '', risk_reason || '', resolution || '']
       )
     }
 
@@ -96,7 +120,7 @@ router.post('/weekly-updates', async (req, res) => {
        LEFT JOIN projects p ON wu.project_id = p.id
        WHERE wu.id = ?`, [lookupId]
     )
-    // On conflict, the pre-existing row kept its original id — fall back to
+    // On conflict the pre-existing row kept its original id — fall back to
     // the logical key so the client still gets the saved row.
     if (!saved && !id) {
       saved = await get(
@@ -104,8 +128,8 @@ router.post('/weekly-updates', async (req, res) => {
          FROM weekly_updates wu
          LEFT JOIN team t ON wu.designer_id = t.id
          LEFT JOIN projects p ON wu.project_id = p.id
-         WHERE wu.week = ? AND wu.project_id = ? AND wu.designer_id = ? AND wu.type = ?`,
-        [updateWeek, project_id, designer_id, type || 'highlight']
+         WHERE wu.project_id = ? AND wu.designer_id = ? AND wu.type = ?`,
+        [project_id, designer_id, type || 'highlight']
       )
     }
     res.json(saved)
@@ -124,14 +148,11 @@ router.delete('/weekly-updates/:id', async (req, res) => {
 
 router.get('/weekly-general', async (req, res) => {
   try {
-    const week = (req.query.week as string) || getISOWeek()
     const updates = await all(
       `SELECT wg.*, t.name as designer_name
        FROM weekly_general wg
        LEFT JOIN team t ON wg.designer_id = t.id
-       WHERE wg.week = ?
-       ORDER BY wg.category, wg.created_at DESC`,
-      [week]
+       ORDER BY wg.category, wg.updated_at DESC`
     )
     res.json(updates)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
@@ -139,24 +160,27 @@ router.get('/weekly-general', async (req, res) => {
 
 router.post('/weekly-general', async (req, res) => {
   try {
-    const { id, designer_id, week, category, content } = req.body
+    const { id, designer_id, category, content, project_id } = req.body
     const entryId = id || `wg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    const entryWeek = week || getISOWeek()
+    const activeWeek = getActiveWeek()
+    const projectId = project_id || null
 
     if (id) {
       await run(
-        `UPDATE weekly_general SET content = ?, updated_at = datetime('now') WHERE id = ?`,
-        [content || '', id]
+        `UPDATE weekly_general SET content = ?, project_id = ?, week = ?, updated_at = datetime('now') WHERE id = ?`,
+        [content || '', projectId, activeWeek, id]
       )
     } else {
-      // Idempotent: unique index on (week, designer_id, category, content)
-      // means duplicate submissions are a no-op update on the existing row.
+      // One row per (designer, category, project) — updates in place, week
+      // shifts to whichever reporting week the edit belongs to.
       await run(
-        `INSERT INTO weekly_general (id, designer_id, week, category, content)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(week, designer_id, category, content) DO UPDATE SET
+        `INSERT INTO weekly_general (id, designer_id, week, category, content, project_id)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(designer_id, category, COALESCE(project_id, '')) DO UPDATE SET
+           content = excluded.content,
+           week = excluded.week,
            updated_at = datetime('now')`,
-        [entryId, designer_id, entryWeek, category || 'fyi', content || '']
+        [entryId, designer_id, activeWeek, category || 'fyi', content || '', projectId]
       )
     }
 
@@ -164,8 +188,8 @@ router.post('/weekly-general', async (req, res) => {
     let saved = await get('SELECT * FROM weekly_general WHERE id = ?', [lookupId])
     if (!saved && !id) {
       saved = await get(
-        `SELECT * FROM weekly_general WHERE week = ? AND designer_id = ? AND category = ? AND content = ?`,
-        [entryWeek, designer_id, category || 'fyi', content || '']
+        `SELECT * FROM weekly_general WHERE designer_id = ? AND category = ? AND COALESCE(project_id, '') = COALESCE(?, '')`,
+        [designer_id, category || 'fyi', projectId]
       )
     }
     res.json(saved)
@@ -179,27 +203,33 @@ router.delete('/weekly-general/:id', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
-// ============ CURRENT WEEK HELPER ============
+// ============ CURRENT WEEK HELPERS ============
 
 router.get('/current-week', (_req, res) => {
-  res.json({ week: getISOWeek() })
+  res.json({ week: getISOWeek(), activeWeek: getActiveWeek() })
 })
 
 // ============ SNAPSHOT GENERATION ============
 
-const generateSnapshot = async (week: string) => {
+// The live weekly_* tables hold one row per logical key; `week` is just the
+// stamp of the last reporting window it was saved into. Snapshot generation
+// therefore reads ALL current rows and freezes them into data_json tagged
+// with the snapshot's week — regardless of each row's `week` column.
+const generateSnapshot = async (_week: string) => {
+  const week = _week
   const updatesRaw = await all(
     `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
      FROM weekly_updates wu
      LEFT JOIN team t ON wu.designer_id = t.id
      JOIN projects p ON wu.project_id = p.id
-     WHERE wu.week = ? ORDER BY wu.created_at DESC`, [week]
+     ORDER BY wu.updated_at DESC`
   )
   const generalRaw = await all(
-    `SELECT wg.*, t.name as designer_name
+    `SELECT wg.*, t.name as designer_name, p.name as project_name
      FROM weekly_general wg
      LEFT JOIN team t ON wg.designer_id = t.id
-     WHERE wg.week = ? ORDER BY wg.category, wg.created_at DESC`, [week]
+     LEFT JOIN projects p ON wg.project_id = p.id
+     ORDER BY wg.category, wg.updated_at DESC`
   )
   const projects = await all(`SELECT id, name, status, businessLine, startDate, endDate, estimatedHours, designers, deckLink, prdLink, briefLink, figmaLink, customLinks FROM projects WHERE status != 'archived'`)
 
@@ -219,24 +249,85 @@ const generateSnapshot = async (week: string) => {
     return out
   }
   const updates = dedupBy(updatesRaw, (u: any) => `${u.project_id}|${u.designer_id}|${u.type}`)
-  const general = dedupBy(generalRaw, (e: any) => `${e.designer_id}|${e.category}|${e.content}`)
+  const general = dedupBy(generalRaw, (e: any) => `${e.designer_id}|${e.category}|${e.content}|${e.project_id || ''}`)
 
-  const highlights = updates.filter((u: any) => u.type === 'highlight')
-  const lowlights = updates.filter((u: any) => u.type === 'lowlight')
-  const generalHighlights = general.filter((e: any) => e.category === 'highlight')
-  const generalLowlights = general.filter((e: any) => e.category === 'lowlight')
-  const fyis = general.filter((e: any) => e.category === 'fyi')
-  const peopleUpdates = general.filter((e: any) => e.category === 'people')
-
-  const getBrand = (u: any) => {
-    if (u.business_lines) {
-      try { const p = JSON.parse(u.business_lines); return Array.isArray(p) ? p[0] : u.business_lines } catch { return u.business_lines }
+  // Fetch thumbnails + past reviews for every project referenced in this week's
+  // updates OR project-scoped general entries, so the snapshot is a self-
+  // contained historical record. We cap both lists to keep data_json small.
+  const referencedProjectIds = Array.from(new Set([
+    ...updates.map((u: any) => u.project_id),
+    ...general.map((e: any) => e.project_id),
+  ].filter(Boolean)))
+  const thumbnailsByProject: Record<string, Array<{ id: string; filename: string; caption: string }>> = {}
+  const reviewsByProject: Record<string, Array<{ reviewId: string; title: string; review_date: string }>> = {}
+  if (referencedProjectIds.length > 0) {
+    const placeholders = referencedProjectIds.map(() => '?').join(',')
+    const imageRows = await all(
+      `SELECT id, project_id, filename, caption, sort_order, created_at
+       FROM project_images
+       WHERE project_id IN (${placeholders})
+       ORDER BY project_id, sort_order ASC, created_at ASC`,
+      referencedProjectIds
+    )
+    for (const row of imageRows as any[]) {
+      if (!thumbnailsByProject[row.project_id]) thumbnailsByProject[row.project_id] = []
+      if (thumbnailsByProject[row.project_id].length < 4) {
+        thumbnailsByProject[row.project_id].push({ id: row.id, filename: row.filename, caption: row.caption || '' })
+      }
     }
-    return 'General'
+    const reviewRows = await all(
+      `SELECT ri.project_id, ri.review_id, r.title, COALESCE(ri.review_date, r.review_date) AS review_date
+       FROM review_items ri
+       JOIN reviews r ON ri.review_id = r.id
+       WHERE ri.project_id IN (${placeholders})
+         AND (ri.deleted_at IS NULL) AND (r.deleted_at IS NULL)
+       ORDER BY ri.project_id, COALESCE(ri.review_date, r.review_date) DESC`,
+      referencedProjectIds
+    )
+    for (const row of reviewRows as any[]) {
+      if (!reviewsByProject[row.project_id]) reviewsByProject[row.project_id] = []
+      if (reviewsByProject[row.project_id].length < 5) {
+        reviewsByProject[row.project_id].push({ reviewId: row.review_id, title: row.title || 'Review', review_date: row.review_date || '' })
+      }
+    }
   }
 
+  // Parse the BL JSON array once per update so the UI can group on the first
+  // BL and still show "Also in:" for multi-BL projects without re-parsing.
+  const parseBLs = (raw: string | null | undefined): string[] => {
+    if (!raw) return []
+    try {
+      const p = JSON.parse(raw)
+      return Array.isArray(p) ? p.filter(Boolean) : (raw ? [String(raw)] : [])
+    } catch {
+      return raw ? [String(raw)] : []
+    }
+  }
+
+  const enrich = (u: any) => {
+    const bls = parseBLs(u.business_lines)
+    return {
+      ...u,
+      business_lines_parsed: bls,
+      primary_business_line: bls[0] || 'General',
+      thumbnails: thumbnailsByProject[u.project_id] || [],
+      past_reviews: reviewsByProject[u.project_id] || [],
+    }
+  }
+
+  const highlights = updates.filter((u: any) => u.type === 'highlight').map(enrich)
+  const lowlights = updates.filter((u: any) => u.type === 'lowlight').map(enrich)
+  // Split general entries: project_id=null → true general (Reports-tab forms);
+  // project_id set → project-scoped (entered from that project's card).
+  const generalHighlights = general.filter((e: any) => e.category === 'highlight' && !e.project_id)
+  const generalLowlights = general.filter((e: any) => e.category === 'lowlight' && !e.project_id)
+  const fyis = general.filter((e: any) => e.category === 'fyi' && !e.project_id)
+  const peopleUpdates = general.filter((e: any) => e.category === 'people' && !e.project_id)
+  const projectFyis = general.filter((e: any) => e.category === 'fyi' && e.project_id)
+  const projectPeople = general.filter((e: any) => e.category === 'people' && e.project_id)
+
   const highlightsText = (() => {
-    const projectLines = highlights.map((u: any) => `    \u2022    ${getBrand(u)}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}`)
+    const projectLines = highlights.map((u: any) => `    \u2022    ${u.primary_business_line}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}`)
     const splitLines = (text: string) => text.split('\n').map(l => l.trim()).filter(Boolean)
     const generalLines = generalHighlights.flatMap((e: any) => splitLines(e.content).map(l => `    \u2022    General: ${l}`))
     const all = [...generalLines, ...projectLines]
@@ -245,7 +336,7 @@ const generateSnapshot = async (week: string) => {
 
   const lowlightsText = (() => {
     const projectLines = lowlights.map((u: any) => {
-      const lines = [`    \u2022    ${getBrand(u)}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
+      const lines = [`    \u2022    ${u.primary_business_line}: ${u.project_name || 'Unknown'}`, `    \u25E6    ${u.description}`]
       if (u.risk_reason) lines.push(`    \u25E6    At risk: ${u.risk_reason}`)
       if (u.resolution) lines.push(`    \u25E6    Path to resolution: ${u.resolution}`)
       return lines.join('\n')
@@ -257,10 +348,14 @@ const generateSnapshot = async (week: string) => {
   })()
 
   const splitLines = (text: string) => text.split('\n').map(l => l.trim()).filter(Boolean)
-  const fyiLines = fyis.flatMap((e: any) => splitLines(e.content))
-  const peopleLines = peopleUpdates.flatMap((e: any) => splitLines(e.content))
-  const fyisText = fyiLines.length > 0 ? fyiLines.map(l => `    \u2022    General: ${l}`).join('\n') : '    \u2022    TK'
-  const peopleText = peopleLines.length > 0 ? peopleLines.map(l => `    \u2022    General: ${l}`).join('\n') : '    \u2022    TK'
+  const fyiGeneralLines = fyis.flatMap((e: any) => splitLines(e.content).map(l => `    \u2022    General: ${l}`))
+  const fyiProjectLines = projectFyis.flatMap((e: any) => splitLines(e.content).map(l => `    \u2022    ${e.project_name || 'Project'}: ${l}`))
+  const fyiAllLines = [...fyiGeneralLines, ...fyiProjectLines]
+  const peopleGeneralLines = peopleUpdates.flatMap((e: any) => splitLines(e.content).map(l => `    \u2022    General: ${l}`))
+  const peopleProjectLines = projectPeople.flatMap((e: any) => splitLines(e.content).map(l => `    \u2022    ${e.project_name || 'Project'}: ${l}`))
+  const peopleAllLines = [...peopleGeneralLines, ...peopleProjectLines]
+  const fyisText = fyiAllLines.length > 0 ? fyiAllLines.join('\n') : '    \u2022    TK'
+  const peopleText = peopleAllLines.length > 0 ? peopleAllLines.join('\n') : '    \u2022    TK'
 
   const plainText = `Design\nHighlights\n${highlightsText}\n\nLowlights\n${lowlightsText}\n\nUpcoming FYIs\n${fyisText}\n\nPeople Updates\n${peopleText}`
 
@@ -272,6 +367,8 @@ const generateSnapshot = async (week: string) => {
     generalLowlights: generalLowlights.map((e: any) => ({ ...e })),
     fyis: fyis.map((e: any) => ({ ...e })),
     peopleUpdates: peopleUpdates.map((e: any) => ({ ...e })),
+    projectFyis: projectFyis.map((e: any) => ({ ...e })),
+    projectPeople: projectPeople.map((e: any) => ({ ...e })),
     projectCount: projects.length,
   })
 
@@ -288,7 +385,7 @@ const generateSnapshot = async (week: string) => {
 
 router.get('/weekly-snapshots', async (_req, res) => {
   try {
-    const snapshots = await all('SELECT id, week, generated_at FROM weekly_snapshots ORDER BY week DESC')
+    const snapshots = await all('SELECT id, week, generated_at, edited_by, edited_at FROM weekly_snapshots ORDER BY week DESC')
     res.json(snapshots)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -328,6 +425,43 @@ router.post('/weekly-snapshots/generate', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
+// Admin-edit: patch the frozen data_json directly without touching live forms.
+// Accepts a sparse object; merges onto existing data_json, stamps edited_by +
+// edited_at. Does NOT update plain_text — consumers re-render rich from data_json.
+router.patch('/weekly-snapshots/:week', requireAdmin, async (req, res) => {
+  try {
+    const week = req.params.week
+    const patch = req.body?.data_json ?? {}
+    const editorEmail = getUserEmail(req) || null
+
+    const existing = await get('SELECT data_json FROM weekly_snapshots WHERE week = ?', [week])
+    if (!existing) return res.status(404).json({ error: 'Snapshot not found' })
+
+    let current: any = {}
+    try { current = JSON.parse(existing.data_json || '{}') } catch { current = {} }
+
+    // Shallow merge: the admin editor always sends full top-level arrays
+    // (highlights/lowlights/generalHighlights/generalLowlights/fyis/peopleUpdates/
+    //  projectFyis/projectPeople) so a shallow merge is correct and avoids
+    // stale nested references.
+    const merged = { ...current, ...patch }
+
+    await run(
+      `UPDATE weekly_snapshots SET data_json = ?, edited_by = ?, edited_at = datetime('now') WHERE week = ?`,
+      [JSON.stringify(merged), editorEmail, week]
+    )
+
+    try {
+      await logActivity('weekly', 'update', `Weekly Status snapshot — ${week} (admin edit)`, editorEmail, JSON.stringify({ week, summary: `Snapshot ${week} edited by ${editorEmail?.split('@')[0] || 'admin'}` }))
+    } catch (logErr: any) {
+      console.error('Snapshot admin-edit activity log failed:', logErr.message)
+    }
+
+    const updated = await get('SELECT * FROM weekly_snapshots WHERE week = ?', [week])
+    res.json(updated)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
 // ============ MISSING UPDATES CHECK ============
 
 router.get('/weekly-updates/missing', async (req, res) => {
@@ -363,7 +497,7 @@ export const startWeeklyCron = () => {
       generateSnapshot(week).catch(e => console.error('Auto-snapshot failed:', e))
     }
   }, 30_000) // check every 30 seconds
-  console.log('Weekly snapshot cron started (Friday 5pm ET)')
+  console.log('Weekly snapshot cron started (Friday 8pm ET)')
 }
 
 export default router;

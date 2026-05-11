@@ -139,6 +139,9 @@ export interface ActivityItem {
   created_at: string
 }
 
+export interface SnapshotThumbnail { id: string; filename: string; caption: string }
+export interface SnapshotPastReview { reviewId: string; title: string; review_date: string }
+
 export interface WeeklyUpdate {
   id: string
   project_id: string
@@ -153,6 +156,10 @@ export interface WeeklyUpdate {
   designer_name?: string
   project_name?: string
   business_lines?: string
+  business_lines_parsed?: string[]
+  primary_business_line?: string
+  thumbnails?: SnapshotThumbnail[]
+  past_reviews?: SnapshotPastReview[]
 }
 
 export interface WeeklyGeneral {
@@ -161,6 +168,8 @@ export interface WeeklyGeneral {
   week: string
   category: 'fyi' | 'people' | 'highlight' | 'lowlight'
   content: string
+  project_id?: string | null
+  project_name?: string
   created_at?: string
   updated_at?: string
   designer_name?: string

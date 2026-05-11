@@ -18,8 +18,11 @@ import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
 import WeeklyUpdateForm from './WeeklyUpdateForm'
+import WeeklyGeneralForm from './WeeklyGeneralForm'
+import SnapshotReportView from './SnapshotReportView'
 import RichTextEditor from './components/RichTextEditor'
 import { copyRichText } from './utils/richtext'
+import { snapshotToDocsHtml, copySnapshotToDocs } from './utils/snapshotDocsHtml'
 import ImageLightbox from './ImageLightbox'
 import { defaultHolidays, getTodayStr, getDjFiscalLabel, DAY_MS, parseLocalDate, formatShortDate, formatFullDate, calcRangeHours, getClosestTimeOff, formatDateRange, formatMonthDay, formatMonthDayFromDate, getTodayFormatted, formatVersionDisplay } from './utils'
 import { authFetch, setClientVersion, getClientVersion, defaultBrandOptions, loadDataFromAPI } from './api'
@@ -30,13 +33,6 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 // Recent updates shown on login screen
 const CHANGELOG = [
   'Weekly snapshot no longer shows duplicated highlights, lowlights, or FYIs. Duplicate submissions are now prevented at the database layer, the snapshot generator dedupes defensively, and existing duplicate rows were cleaned up.',
-  'Reviews tab polish — the review selector and public sidebar now show each review\'s actual title, the Gemini-notes field is tucked in a collapsed accordion so it can\'t be mistaken for the description, and meta controls (date, time, copy link, delete) sit right under the title row.',
-  'Mark one formal "Weekly Crit" per week — a new checkbox on the review edit page pins that review to the top of the public review sidebar (in bold) under "Weekly Crit", with any others that week listed below under "Quick Crits". One per week, enforced.',
-  'Add-to-review picker is now a searchable modal (same pattern as Reports → Publish a project) instead of a long dropdown.',
-  'Public review sidebar gets Week subsections with thin dividers between weeks.',
-  'Drag-and-drop images from your computer into the public review page — filenames with emoji or accents now upload cleanly, and dropping slightly off the target no longer bounces you to the image.',
-  'Removed reviews and projects can be brought back — deleting a review or pulling a project out of a review now sends it to "Recently removed" (linked next to the review selector), where you can restore everything with its notes, comments, and images intact.',
-  'Change a project\'s status directly from the review edit page — click the status chip on any row to flip it between Active, In Review, Done, Blocked, or Pending without leaving the review.',
 ]
 
 
@@ -316,35 +312,6 @@ const REVIEW_STATUS_MAP: Record<string, { label: string; color: string }> = {
   done: { label: 'Done', color: '#22c55e' },
   blocked: { label: 'Blocked', color: '#ef4444' },
   pending: { label: 'Pending', color: '#94a3b8' },
-}
-
-function WeeklyPendingEditor({ existing, placeholder, onSave, onDelete }: {
-  existing: { id?: string; content: string } | undefined
-  placeholder: string
-  onSave: (content: string) => Promise<void>
-  onDelete: (id: string) => Promise<void>
-}) {
-  const [value, setValue] = useState(existing?.content || '')
-  const valueRef = useRef(value)
-  valueRef.current = value
-  useEffect(() => { setValue(existing?.content || '') }, [existing?.id])
-  return (
-    <RichTextEditor
-      className="weekly-pending-rte"
-      value={value}
-      onChange={setValue}
-      onBlur={async () => {
-        const val = valueRef.current.trim()
-        if (!val && !existing) return
-        if (val === (existing?.content || '')) return
-        if (!val && existing?.id) { await onDelete(existing.id); return }
-        await onSave(val)
-      }}
-      placeholder={placeholder}
-      features={['bold', 'bullets', 'links']}
-      minHeight="calc(0.75rem * 1.45 * 3 + 0.6rem)"
-    />
-  )
 }
 
 // Compute per-item review minutes. Excluded=0; items with explicit duration keep it;
@@ -1236,7 +1203,7 @@ const [showFilters, setShowFilters] = useState(false)
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
-  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode; snapshotWeek?: string }>({ open: false, title: '', content: '' })
+  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode; snapshotWeek?: string; docsHtml?: string }>({ open: false, title: '', content: '' })
   // Publish-project state: pickerOpen shows the project selector modal; copied
   // flashes a brief "copied" indicator next to a URL.
   const [publishPickerOpen, setPublishPickerOpen] = useState(false)
@@ -1432,8 +1399,8 @@ const [showFilters, setShowFilters] = useState(false)
         const { week } = await weekRes.json()
         setCurrentWeek(week)
         const [updatesRes, generalRes, snapshotsRes, missingRes, reviewSnapshotsRes] = await Promise.all([
-          authFetch(`/api/weekly-updates?week=${week}`),
-          authFetch(`/api/weekly-general?week=${week}`),
+          authFetch('/api/weekly-updates'),
+          authFetch('/api/weekly-general'),
           authFetch('/api/weekly-snapshots'),
           authFetch(`/api/weekly-updates/missing?week=${week}`),
           authFetch('/api/review-snapshots'),
@@ -3860,6 +3827,7 @@ const [showFilters, setShowFilters] = useState(false)
                               projectUpdates={projectUpdates}
                               weeklyGeneral={weeklyGeneral}
                               designerId={personalDesignerId}
+                              projectId={project.id}
                               isExpanded={weeklyExpandedProject === project.id}
                               onToggle={() => setWeeklyExpandedProject(prev => prev === project.id ? null : project.id)}
                               onSave={async (data, opts) => {
@@ -3869,16 +3837,19 @@ const [showFilters, setShowFilters] = useState(false)
                                 if (data.lowlight.trim()) {
                                   await saveWeeklyUpdate({ ...(data.existingLowlight ? { id: data.existingLowlight.id } : {}), project_id: project.id, designer_id: projectDesignerId, week: currentWeek, type: 'lowlight' as const, description: data.lowlight.trim(), risk_reason: data.risk_reason.trim(), resolution: data.resolution.trim() }, opts)
                                 } else if (data.existingLowlight) { await deleteWeeklyUpdate(data.existingLowlight.id, opts) }
-                                // Upsert the signed-in user's single FYI row for the week; only delete if the user cleared it.
-                                const eFYI = weeklyGeneral.find(e => e.category === 'fyi' && e.designer_id === personalDesignerId)
+                                // FYI/People from a project card are scoped to this project so the
+                                // snapshot can surface them under the project instead of General notes.
+                                // Match existing rows by (category, designer, project) so each project's
+                                // entries are independent.
+                                const eFYI = weeklyGeneral.find(e => e.category === 'fyi' && e.designer_id === personalDesignerId && e.project_id === project.id)
                                 if (data.fyi.trim()) {
-                                  await saveWeeklyGeneral({ id: eFYI?.id, designer_id: personalDesignerId, week: currentWeek, category: 'fyi', content: data.fyi.trim() }, opts)
+                                  await saveWeeklyGeneral({ id: eFYI?.id, designer_id: personalDesignerId, week: currentWeek, category: 'fyi', content: data.fyi.trim(), project_id: project.id }, opts)
                                 } else if (eFYI) {
                                   await deleteWeeklyGeneral(eFYI.id, opts)
                                 }
-                                const ePeople = weeklyGeneral.find(e => e.category === 'people' && e.designer_id === personalDesignerId)
+                                const ePeople = weeklyGeneral.find(e => e.category === 'people' && e.designer_id === personalDesignerId && e.project_id === project.id)
                                 if (data.people.trim()) {
-                                  await saveWeeklyGeneral({ id: ePeople?.id, designer_id: personalDesignerId, week: currentWeek, category: 'people', content: data.people.trim() }, opts)
+                                  await saveWeeklyGeneral({ id: ePeople?.id, designer_id: personalDesignerId, week: currentWeek, category: 'people', content: data.people.trim(), project_id: project.id }, opts)
                                 } else if (ePeople) {
                                   await deleteWeeklyGeneral(ePeople.id, opts)
                                 }
@@ -5174,8 +5145,8 @@ const [showFilters, setShowFilters] = useState(false)
         const blockedProjects = currentProjects.filter(p => p.status === 'blocked')
         const pendingProjects = currentProjects.filter(p => p.status === 'pending')
 
-        const openReport = (title: string, content: string, richContent?: React.ReactNode, snapshotWeek?: string) => {
-          setReportModal({ open: true, title, content, richContent, snapshotWeek })
+        const openReport = (title: string, content: string, richContent?: React.ReactNode, snapshotWeek?: string, docsHtml?: string) => {
+          setReportModal({ open: true, title, content, richContent, snapshotWeek, docsHtml })
         }
 
         const generateWeeklyStatus = () => {
@@ -5406,126 +5377,57 @@ const [showFilters, setShowFilters] = useState(false)
           openReport('Weekly Status', fullText, rich)
         }
 
-        const viewSnapshot = async (snap: { id: string; week: string; generated_at: string }) => {
+        const viewSnapshot = async (snap: { id: string; week: string; generated_at: string; edited_by?: string | null; edited_at?: string | null }) => {
           try {
             const res = await authFetch(`/api/weekly-snapshots/${snap.week}`)
             const snapData = await res.json()
             const parsed = JSON.parse(snapData.data_json || '{}')
-            const hl = (parsed.highlights || []) as WeeklyUpdate[]
-            const ll = (parsed.lowlights || []) as WeeklyUpdate[]
-            const fi = (parsed.fyis || []) as WeeklyGeneral[]
-            const pu = (parsed.peopleUpdates || []) as WeeklyGeneral[]
-
-            const snapGetBrand = (u: WeeklyUpdate) => {
-              if (u.business_lines) {
-                try { const p = JSON.parse(u.business_lines); return Array.isArray(p) ? p[0] : u.business_lines } catch { return u.business_lines }
-              }
-              return 'General'
-            }
-
-            const snapEntryText = (u: WeeklyUpdate, brand: string) => {
-              const proj = currentProjects.find(p => p.id === u.project_id)
-              const linksMd = [
-                proj?.deckLink && `[${proj.deckName || 'Deck'}](${proj.deckLink})`,
-                proj?.prdLink && `[${proj.prdName || 'PRD'}](${proj.prdLink})`,
-                proj?.briefLink && `[${proj.briefName || 'Brief'}](${proj.briefLink})`,
-                proj?.figmaLink && `[Figma](${proj.figmaLink})`,
-              ].filter(Boolean) as string[]
-              const lines = [`**${brand}: ${u.project_name || 'Unknown'}**`, u.description]
-              if (linksMd.length > 0) lines.push(`Related: ${linksMd.join(', ')}`)
-              if (u.risk_reason) lines.push(`At risk: ${u.risk_reason}`)
-              if (u.resolution) lines.push(`Path to resolution: ${u.resolution}`)
-              return lines.join('\n')
-            }
-
             const snapSectionCopy = (text: string) => {
               copyRichText(text).then(() => {
                 setCopiedReport(Date.now())
                 setTimeout(() => setCopiedReport(null), 2000)
               })
             }
-
-            const snapRenderEntry = (u: WeeklyUpdate, type: 'highlight' | 'lowlight') => {
-              const brand = snapGetBrand(u)
-              const proj = currentProjects.find(p => p.id === u.project_id)
-              const links = [
-                proj?.deckLink && { name: proj.deckName || 'Deck', url: proj.deckLink },
-                proj?.prdLink && { name: proj.prdName || 'PRD', url: proj.prdLink },
-                proj?.briefLink && { name: proj.briefName || 'Brief', url: proj.briefLink },
-                proj?.figmaLink && { name: 'Figma', url: proj.figmaLink },
-                ...(proj?.customLinks || []),
-              ].filter(Boolean) as { name: string; url: string }[]
-              return (
-                <div key={u.id} className={`rr-update-card rr-update-${type}`}>
-                  <button className="rr-copy-entry" onClick={() => snapSectionCopy(snapEntryText(u, brand))} title="Copy entry"><ClipboardCopy size={11} /></button>
-                  <div className="rr-update-brand">{brand}</div>
-                  <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
-                  {links.length > 0 && (
-                    <div className="rr-update-links">
-                      {links.map((l, i) => <span key={i}><span className="rr-link-sep">·</span><a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
-                    </div>
-                  )}
-                  <div className="rr-update-desc">{renderMarkdownLinks(u.description)}</div>
-                  {type === 'lowlight' && u.risk_reason && (
-                    <div className="rr-update-risk"><strong>Risk:</strong> {renderMarkdownLinks(u.risk_reason)}</div>
-                  )}
-                  {type === 'lowlight' && u.resolution && (
-                    <div className="rr-update-resolution"><strong>Resolution:</strong> {renderMarkdownLinks(u.resolution)}</div>
-                  )}
-                  <div className="rr-update-author">{proj?.designers && proj.designers.length > 0 ? proj.designers.map(d => d.split(' ')[0]).join(', ') : (u.designer_name || '').split(' ')[0]}</div>
-                </div>
-              )
+            const meta = {
+              week: snap.week,
+              generated_at: snapData.generated_at || snap.generated_at,
+              edited_by: snapData.edited_by ?? null,
+              edited_at: snapData.edited_at ?? null,
             }
-
-            const genDate = new Date(snapData.generated_at)
-            const dateStr = genDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-
+            const docsHtml = snapshotToDocsHtml(parsed, currentProjects, {
+              week: meta.week,
+              generatedAt: meta.generated_at,
+              editedBy: meta.edited_by,
+              editedAt: meta.edited_at,
+            })
             const rich = (
-              <div className="rr">
-                <div className="rr-date">{dateStr} · {snap.week}</div>
-                {([
-                  { items: hl, label: 'Highlights', color: '#22c55e', type: 'highlight' as const },
-                  { items: ll, label: 'Lowlights', color: '#ef4444', type: 'lowlight' as const },
-                ] as const).map(section => (
-                  <div key={section.label} className="rr-section">
-                    <div className="rr-section-header-row">
-                      <div className="rr-section-header" style={{ color: section.color }}>
-                        <span className="rr-section-dot" style={{ background: section.color }} />
-                        <span>{section.label}</span>
-                        <span className="rr-section-count">{section.items.length}</span>
-                      </div>
-                    </div>
-                    {section.items.length > 0 ? (
-                      <div className="rr-update-list">{section.items.map(u => snapRenderEntry(u, section.type))}</div>
-                    ) : <div className="rr-empty">No {section.label.toLowerCase()} this week.</div>}
-                  </div>
-                ))}
-                {([
-                  { items: fi, label: 'Upcoming FYIs', color: '#f59e0b' },
-                  { items: pu, label: 'People Updates', color: '#8b5cf6' },
-                ] as const).map(section => (
-                  <div key={section.label} className="rr-section">
-                    <div className="rr-section-header-row">
-                      <div className="rr-section-header" style={{ color: section.color }}>
-                        <span className="rr-section-dot" style={{ background: section.color }} />
-                        <span>{section.label}</span>
-                        <span className="rr-section-count">{section.items.length}</span>
-                      </div>
-                    </div>
-                    {section.items.length > 0 ? (
-                      <div className="rr-general-list">{section.items.map((e: WeeklyGeneral) => (
-                        <div key={e.id} className="rr-general-item">
-                          <button className="rr-copy-entry" onClick={() => snapSectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
-                          <span>{renderMarkdownLinks(e.content)}</span>
-                          <span className="rr-general-author">{(e.designer_name || '').split(' ')[0]}</span>
-                        </div>
-                      ))}</div>
-                    ) : <div className="rr-empty">No {section.label.toLowerCase()} this week.</div>}
-                  </div>
-                ))}
-              </div>
+              <SnapshotReportView
+                meta={meta}
+                initialData={parsed}
+                currentProjects={currentProjects}
+                isAdmin={isAdmin}
+                onSectionCopy={snapSectionCopy}
+                renderMarkdownLinks={renderMarkdownLinks}
+                onAdminSave={async (dataJson) => {
+                  const patchRes = await authFetch(`/api/weekly-snapshots/${snap.week}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ data_json: dataJson }),
+                  })
+                  if (!patchRes.ok) throw new Error(`HTTP ${patchRes.status}`)
+                  const saved = await patchRes.json()
+                  // Refresh the list so the header chip appears elsewhere too.
+                  const listRes = await authFetch('/api/weekly-snapshots')
+                  setWeeklySnapshots(await listRes.json())
+                  return {
+                    week: saved.week,
+                    generated_at: saved.generated_at,
+                    edited_by: saved.edited_by ?? null,
+                    edited_at: saved.edited_at ?? null,
+                  }
+                }}
+              />
             )
-            openReport(`Weekly Snapshot — ${snap.week}`, snapData.plain_text || '', rich, snap.week)
+            openReport(`Weekly Snapshot — ${snap.week}`, snapData.plain_text || '', rich, snap.week, docsHtml)
           } catch (err) { console.error('Error loading snapshot:', err) }
         }
 
@@ -5876,116 +5778,46 @@ const [showFilters, setShowFilters] = useState(false)
                     View Report
                   </button>
                 ) : null}
-                {report.id === 'weekly-status' && currentWeek && (() => {
-                  const currentSnap = weeklySnapshots.find(s => s.week === currentWeek)
-                  const latestWrite = (() => {
-                    let t = 0
-                    for (const u of weeklyUpdates) { const v = Date.parse((u as any).updated_at || (u as any).created_at || ''); if (v > t) t = v }
-                    for (const g of weeklyGeneral) { const v = Date.parse((g as any).updated_at || (g as any).created_at || ''); if (v > t) t = v }
-                    return t || null
-                  })()
-                  const snapTime = currentSnap ? Date.parse(currentSnap.generated_at) : 0
-                  const isStale = !!(currentSnap && latestWrite && latestWrite > snapTime + 1000)
-                  const missingSnap = !currentSnap
-                  const fmtWhen = (iso: string) => new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-                  const regenerateCurrent = async () => {
-                    try {
-                      const res = await authFetch('/api/weekly-snapshots/generate', { method: 'POST', body: JSON.stringify({ week: currentWeek }) })
-                      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-                      const listRes = await authFetch('/api/weekly-snapshots')
-                      setWeeklySnapshots(await listRes.json())
-                    } catch (err) { console.error('Regenerate failed:', err) }
-                  }
-                  return (
-                  <>
-                  <div className={`snapshot-status-bar${isStale || missingSnap ? ' needs-refresh' : ''}`}>
-                    <div className="snapshot-status-info">
-                      {missingSnap ? (
-                        <><AlertTriangle size={12} /> <span>No snapshot yet for {currentWeek}.</span></>
-                      ) : isStale ? (
-                        <><AlertTriangle size={12} /> <span>Snapshot is stale — live entries newer than {fmtWhen(currentSnap!.generated_at)}</span></>
-                      ) : (
-                        <><Clock size={12} /> <span>Snapshot frozen {fmtWhen(currentSnap!.generated_at)}</span></>
-                      )}
-                    </div>
-                    <div className="snapshot-status-actions">
-                      <button
-                        type="button"
-                        className="snapshot-regen-btn"
-                        onClick={regenerateCurrent}
-                        title="Re-generate the snapshot for the current week from live data"
-                      >
-                        <RefreshCw size={11} /> {missingSnap ? 'Generate snapshot' : 'Regenerate'}
-                      </button>
-                      <button
-                        type="button"
-                        className="snapshot-help-btn"
-                        onClick={() => setShowSnapshotHelp(true)}
-                        aria-label="About the weekly snapshot"
-                        title="How weekly snapshots work"
-                      >
-                        <HelpCircle size={12} />
-                      </button>
-                    </div>
-                  </div>
+                {report.id === 'weekly-status' && currentWeek && (
                   <div className="snapshot-accordion">
                     <button className="snapshot-accordion-toggle" onClick={() => setShowWeeklyPending(v => !v)}>
                       {showWeeklyPending ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                      <Edit2 size={12} />
-                      <span>Current Week ({currentWeek})</span>
-                      {(() => {
-                        const filledCategories = weeklyGeneral.filter(e => ['highlight', 'lowlight', 'fyi', 'people'].includes(e.category) && e.content.trim()).length
-                        const count = filledCategories + weeklyUpdates.length
-                        return count > 0 ? <span className="rr-section-count" style={{ marginLeft: 4 }}>{count}</span> : null
-                      })()}
+                      <FileText size={12} />
+                      <span>Optional General Notes ({currentWeek})</span>
                     </button>
-                    {showWeeklyPending && (
-                      <div className="weekly-pending-panel">
-                        {([
-                          { category: 'highlight' as const, label: 'Highlights', color: '#22c55e', placeholder: 'General highlights (one per line)...' },
-                          { category: 'lowlight' as const, label: 'Lowlights', color: '#ef4444', placeholder: 'General lowlights (one per line)...' },
-                          { category: 'fyi' as const, label: 'Upcoming FYIs', color: '#f59e0b', placeholder: 'Upcoming FYIs (one per line)...' },
-                          { category: 'people' as const, label: 'People Updates', color: '#8b5cf6', placeholder: 'People updates (one per line)...' },
-                        ]).map(section => {
-                          const allForCategory = weeklyGeneral.filter(e => e.category === section.category)
-                          const existing = allForCategory[0]
-                          const combinedContent = allForCategory.map(e => e.content).join('\n')
-                          const merged = existing ? { ...existing, content: combinedContent } : undefined
-                          return (
-                            <div key={section.category} className="weekly-pending-section">
-                              <div className="weekly-pending-header" style={{ color: section.color }}>
-                                <span className="rr-section-dot" style={{ background: section.color }} />
-                                <span>{section.label}</span>
-                              </div>
-                              <WeeklyPendingEditor
-                                key={merged?.id || section.category}
-                                existing={merged}
-                                placeholder={section.placeholder}
-                                onSave={async (content) => {
-                                  for (const old of allForCategory.slice(1)) await deleteWeeklyGeneral(old.id)
-                                  const myMember = findMyTeamMember()
-                                  const designerId = String(myMember?.id || currentUser?.id || 'admin')
-                                  await saveWeeklyGeneral({ id: existing?.id, designer_id: designerId, week: currentWeek, category: section.category, content })
-                                }}
-                                onDelete={async () => {
-                                  openConfirmModal(
-                                    `Delete ${section.label.toLowerCase()}?`,
-                                    `This will permanently remove your "${section.label}" entries for this week. This can't be undone.`,
-                                    async () => {
-                                      for (const old of allForCategory) await deleteWeeklyGeneral(old.id)
-                                    },
-                                  )
-                                }}
-                              />
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
+                    {(() => {
+                      const myMember = findMyTeamMember()
+                      const designerId = String(myMember?.id || currentUser?.id || 'admin')
+                      const sectionLabels: Record<'highlight' | 'lowlight' | 'fyi' | 'people', string> = {
+                        highlight: 'Highlights', lowlight: 'Lowlights', fyi: 'FYIs', people: 'People',
+                      }
+                      return (
+                        <WeeklyGeneralForm
+                          weeklyGeneral={weeklyGeneral}
+                          designerId={designerId}
+                          week={currentWeek}
+                          isExpanded={showWeeklyPending}
+                          onSave={async (category, content, existingId) => {
+                            await saveWeeklyGeneral({ id: existingId, designer_id: designerId, week: currentWeek, category, content })
+                          }}
+                          onDelete={async (category) => {
+                            const entry = weeklyGeneral.find(e => e.category === category && e.designer_id === designerId && !e.project_id)
+                            if (!entry) return
+                            return new Promise<void>((resolve) => {
+                              openConfirmModal(
+                                `Delete ${sectionLabels[category].toLowerCase()}?`,
+                                `This will permanently remove your general "${sectionLabels[category]}" entry for ${currentWeek}. This can't be undone.`,
+                                async () => {
+                                  try { await deleteWeeklyGeneral(entry.id) } finally { closeConfirmModal(); resolve() }
+                                },
+                              )
+                            })
+                          }}
+                        />
+                      )
+                    })()}
                   </div>
-                  </>
-                  )
-                })()}
+                )}
                 {report.id === 'weekly-status' && weeklySnapshots.length > 0 && (
                   <div className="snapshot-accordion">
                     <button className="snapshot-accordion-toggle" onClick={() => setShowSnapshotHistory(v => !v)}>
@@ -8365,32 +8197,54 @@ const [showFilters, setShowFilters] = useState(false)
             <div className="modal-header">
               <h2>{reportModal.title}</h2>
               <div className="report-modal-actions">
-                {reportModal.snapshotWeek && (
-                  <button
-                    className="report-modal-copy-btn"
-                    title={`Regenerate the ${reportModal.snapshotWeek} snapshot from live data`}
-                    onClick={async () => {
-                      const week = reportModal.snapshotWeek!
-                      if (!window.confirm(`Regenerate the ${week} report from live data?\n\nThis replaces the current frozen copy.`)) return
-                      try {
-                        const res = await authFetch('/api/weekly-snapshots/generate', { method: 'POST', body: JSON.stringify({ week }) })
-                        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-                        const listRes = await authFetch('/api/weekly-snapshots')
-                        setWeeklySnapshots(await listRes.json())
-                        setReportModal({ open: false, title: '', content: '' })
-                      } catch (err) { console.error('Regenerate failed:', err) }
-                    }}
-                  >
-                    <RefreshCw size={14} /> Regenerate
-                  </button>
-                )}
+                {(() => {
+                  // Regenerate is allowed only on the MOST RECENT snapshot, and only
+                  // until the Monday noon ET following that snapshot's Friday cutoff.
+                  // After that, the report is locked to preserve history.
+                  if (!reportModal.snapshotWeek) return null
+                  const sortedSnaps = [...weeklySnapshots].sort((a, b) => b.week.localeCompare(a.week))
+                  const mostRecent = sortedSnaps[0]
+                  if (!mostRecent || mostRecent.week !== reportModal.snapshotWeek) return null
+                  // Rollover window: show until next Mon 12:00 ET.
+                  const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
+                  const day = nowET.getDay()
+                  const hour = nowET.getHours()
+                  const inGraceWindow = day === 5 || day === 6 || day === 0 || (day === 1 && hour < 12)
+                  if (!inGraceWindow) return null
+                  return (
+                    <button
+                      className="report-modal-copy-btn"
+                      title={`Pull late edits into the ${reportModal.snapshotWeek} snapshot`}
+                      onClick={async () => {
+                        const week = reportModal.snapshotWeek!
+                        if (!window.confirm(`Regenerate the ${week} report from live data?\n\nThis replaces the current frozen copy with anything saved to the forms since the snapshot was last created.`)) return
+                        try {
+                          const res = await authFetch('/api/weekly-snapshots/generate', { method: 'POST', body: JSON.stringify({ week }) })
+                          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                          const listRes = await authFetch('/api/weekly-snapshots')
+                          setWeeklySnapshots(await listRes.json())
+                          setReportModal({ open: false, title: '', content: '' })
+                        } catch (err) { console.error('Regenerate failed:', err) }
+                      }}
+                    >
+                      <RefreshCw size={14} /> Regenerate
+                    </button>
+                  )
+                })()}
                 <button
                   className="report-modal-copy-btn"
                   onClick={() => {
-                    copyRichText(reportModal.content).then(() => {
+                    // Snapshot reports have a pre-built Docs-ready HTML payload
+                    // (headings, nested bullets, colored labels, links). Older
+                    // non-snapshot reports (the live "View Report" flow) fall
+                    // back to the basic markdown-to-html path.
+                    const copyPromise = reportModal.docsHtml
+                      ? copySnapshotToDocs(reportModal.docsHtml)
+                      : copyRichText(reportModal.content)
+                    copyPromise.then(() => {
                       setCopiedReport(Date.now())
                       setTimeout(() => setCopiedReport(null), 2000)
-                    })
+                    }).catch(err => console.error('Copy failed:', err))
                   }}
                 >
                   <ClipboardCopy size={14} />
@@ -8474,7 +8328,7 @@ const [showFilters, setShowFilters] = useState(false)
               <p>The Weekly Status report is a frozen copy of everyone's highlights, lowlights, FYIs, and People updates. Freezing it keeps the report stable — the version everyone reads in the app matches the version that went out in the weekly email.</p>
 
               <h3>When it freezes</h3>
-              <p>Automatically, every <strong>Friday at 5:00 PM ET</strong>. You can also regenerate it manually at any time.</p>
+              <p>Automatically, every <strong>Friday at 8:00 PM ET</strong>. Until Monday noon ET you can still regenerate from the most recent report to capture late edits.</p>
 
               <h3>What the status bar tells you</h3>
               <ul>
@@ -8485,7 +8339,7 @@ const [showFilters, setShowFilters] = useState(false)
 
               <h3>When to click Regenerate</h3>
               <ul>
-                <li>You (or a teammate) added something after Friday 5pm and want it in the report.</li>
+                <li>You (or a teammate) added something after Friday 8pm and want it in the report. Allowed until the following Monday noon ET.</li>
                 <li>The status bar shows amber and you want to refresh the report to match what's in the DB.</li>
               </ul>
               <p>Regenerating replaces the frozen copy for the current week. The action is logged in the notifications bell so the team can see who refreshed it.</p>
