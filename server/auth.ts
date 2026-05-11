@@ -111,6 +111,27 @@ const removePersistedSession = async (sessionId: string) => {
   try { await run('DELETE FROM sessions WHERE id = ?', [sessionId]) } catch (err) { console.error('Session remove failed:', err) }
 }
 
+// Wipe every session for a user from both stores. Call this on any change
+// that should invalidate existing tokens: delete, role change, password
+// change. Always excludes the session passed in `keepSessionId` so an admin
+// rotating their own password stays logged in.
+export const invalidateUserSessions = async (userId: number, keepSessionId?: string) => {
+  try {
+    const rows = await all('SELECT id FROM sessions WHERE user_id = ?', [userId]) as any[]
+    for (const r of rows) {
+      if (keepSessionId && r.id === keepSessionId) continue
+      sessions.delete(r.id)
+    }
+    if (keepSessionId) {
+      await run('DELETE FROM sessions WHERE user_id = ? AND id != ?', [userId, keepSessionId])
+    } else {
+      await run('DELETE FROM sessions WHERE user_id = ?', [userId])
+    }
+  } catch (err) {
+    console.error('invalidateUserSessions failed:', err)
+  }
+}
+
 const pruneExpiredSessions = async () => {
   try {
     const removed = await run(`DELETE FROM sessions WHERE expires_at < datetime('now')`) as any
@@ -274,15 +295,37 @@ usersRouter.delete('/:id', requireAdmin, async (req, res) => {
     await run('DELETE FROM users WHERE id = ?', [id]);
     // Invalidate all of that user's active sessions so they can't keep
     // making authenticated requests after being removed.
-    try {
-      const rows = await all('SELECT id FROM sessions WHERE user_id = ?', [id]) as any[]
-      for (const r of rows) sessions.delete(r.id)
-      await run('DELETE FROM sessions WHERE user_id = ?', [id])
-    } catch (e) { /* best-effort */ }
+    await invalidateUserSessions(parseInt(id));
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting user:', err);
     res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// Admin-only role change. Any existing sessions for the target user are
+// invalidated so the new role takes effect immediately (no waiting for the
+// 30-day session TTL).
+usersRouter.put('/:id/role', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+    if (role !== 'admin' && role !== 'user') {
+      return res.status(400).json({ error: 'Role must be "admin" or "user"' });
+    }
+    const session = (req as any).session;
+    if (parseInt(id) === session.userId) {
+      return res.status(400).json({ error: 'Cannot change your own role' });
+    }
+    const existing = await get('SELECT id FROM users WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
+
+    await run('UPDATE users SET role = ? WHERE id = ?', [role, id]);
+    await invalidateUserSessions(parseInt(id));
+    res.json({ success: true, id: parseInt(id), role });
+  } catch (err) {
+    console.error('Error updating user role:', err);
+    res.status(500).json({ error: 'Failed to update role' });
   }
 });
 
@@ -299,6 +342,12 @@ usersRouter.put('/password', requireAuth, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await run('UPDATE users SET password_hash = ? WHERE id = ?', [hashedPassword, session.userId]);
+
+    // Log out every other device on password change. Keep the current
+    // session so the user isn't immediately kicked out of the app that just
+    // performed the password rotation.
+    const currentSessionId = getSessionIdFromRequest(req) || undefined;
+    await invalidateUserSessions(session.userId, currentSessionId);
 
     res.json({ success: true });
   } catch (err) {
