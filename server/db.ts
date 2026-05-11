@@ -294,12 +294,18 @@ export const initSchema = async () => {
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
   )`).catch(e => console.error('weekly_updates init error:', e.message))
 
+  await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_weekly_updates_unique
+    ON weekly_updates (week, project_id, designer_id, type)`).catch(e => console.error('weekly_updates unique idx error:', e.message))
+
   await run(`CREATE TABLE IF NOT EXISTS weekly_general (
     id TEXT PRIMARY KEY, designer_id TEXT NOT NULL,
     week TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'fyi',
     content TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
   )`).catch(e => console.error('weekly_general init error:', e.message))
+
+  await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_weekly_general_unique
+    ON weekly_general (week, designer_id, category, content)`).catch(e => console.error('weekly_general unique idx error:', e.message))
 
   await run(`CREATE TABLE IF NOT EXISTS weekly_snapshots (
     id TEXT PRIMARY KEY, week TEXT NOT NULL UNIQUE,

@@ -73,20 +73,41 @@ router.post('/weekly-updates', async (req, res) => {
         [type, description || '', risk_reason || '', resolution || '', id]
       )
     } else {
+      // Idempotent insert: the unique index on (week, project_id, designer_id, type)
+      // means a retried submit for the same key updates the existing row instead
+      // of duplicating. The RETURNING clause gives us the surviving row's id.
       await run(
         `INSERT INTO weekly_updates (id, project_id, designer_id, week, type, description, risk_reason, resolution)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(week, project_id, designer_id, type) DO UPDATE SET
+           description = excluded.description,
+           risk_reason = excluded.risk_reason,
+           resolution = excluded.resolution,
+           updated_at = datetime('now')`,
         [updateId, project_id, designer_id, updateWeek, type || 'highlight', description || '', risk_reason || '', resolution || '']
       )
     }
 
-    const saved = await get(
+    const lookupId = id || updateId
+    let saved = await get(
       `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
        FROM weekly_updates wu
        LEFT JOIN team t ON wu.designer_id = t.id
        LEFT JOIN projects p ON wu.project_id = p.id
-       WHERE wu.id = ?`, [id || updateId]
+       WHERE wu.id = ?`, [lookupId]
     )
+    // On conflict, the pre-existing row kept its original id — fall back to
+    // the logical key so the client still gets the saved row.
+    if (!saved && !id) {
+      saved = await get(
+        `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
+         FROM weekly_updates wu
+         LEFT JOIN team t ON wu.designer_id = t.id
+         LEFT JOIN projects p ON wu.project_id = p.id
+         WHERE wu.week = ? AND wu.project_id = ? AND wu.designer_id = ? AND wu.type = ?`,
+        [updateWeek, project_id, designer_id, type || 'highlight']
+      )
+    }
     res.json(saved)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -128,14 +149,25 @@ router.post('/weekly-general', async (req, res) => {
         [content || '', id]
       )
     } else {
+      // Idempotent: unique index on (week, designer_id, category, content)
+      // means duplicate submissions are a no-op update on the existing row.
       await run(
         `INSERT INTO weekly_general (id, designer_id, week, category, content)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(week, designer_id, category, content) DO UPDATE SET
+           updated_at = datetime('now')`,
         [entryId, designer_id, entryWeek, category || 'fyi', content || '']
       )
     }
 
-    const saved = await get('SELECT * FROM weekly_general WHERE id = ?', [id || entryId])
+    const lookupId = id || entryId
+    let saved = await get('SELECT * FROM weekly_general WHERE id = ?', [lookupId])
+    if (!saved && !id) {
+      saved = await get(
+        `SELECT * FROM weekly_general WHERE week = ? AND designer_id = ? AND category = ? AND content = ?`,
+        [entryWeek, designer_id, category || 'fyi', content || '']
+      )
+    }
     res.json(saved)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
@@ -156,20 +188,38 @@ router.get('/current-week', (_req, res) => {
 // ============ SNAPSHOT GENERATION ============
 
 const generateSnapshot = async (week: string) => {
-  const updates = await all(
+  const updatesRaw = await all(
     `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
      FROM weekly_updates wu
      LEFT JOIN team t ON wu.designer_id = t.id
      JOIN projects p ON wu.project_id = p.id
      WHERE wu.week = ? ORDER BY wu.created_at DESC`, [week]
   )
-  const general = await all(
+  const generalRaw = await all(
     `SELECT wg.*, t.name as designer_name
      FROM weekly_general wg
      LEFT JOIN team t ON wg.designer_id = t.id
      WHERE wg.week = ? ORDER BY wg.category, wg.created_at DESC`, [week]
   )
   const projects = await all(`SELECT id, name, status, businessLine, startDate, endDate, estimatedHours, designers, deckLink, prdLink, briefLink, figmaLink, customLinks FROM projects WHERE status != 'archived'`)
+
+  // Defensive dedup: a unique index on (week, project_id, designer_id, type)
+  // already prevents duplicate rows at the DB layer, but we also dedup here so
+  // the snapshot is clean even if the index is ever dropped or bypassed.
+  // Newer rows win (input is ordered by created_at DESC, so the first seen is newest).
+  const dedupBy = <T,>(rows: T[], keyFn: (row: T) => string): T[] => {
+    const seen = new Set<string>()
+    const out: T[] = []
+    for (const row of rows) {
+      const k = keyFn(row)
+      if (seen.has(k)) continue
+      seen.add(k)
+      out.push(row)
+    }
+    return out
+  }
+  const updates = dedupBy(updatesRaw, (u: any) => `${u.project_id}|${u.designer_id}|${u.type}`)
+  const general = dedupBy(generalRaw, (e: any) => `${e.designer_id}|${e.category}|${e.content}`)
 
   const highlights = updates.filter((u: any) => u.type === 'highlight')
   const lowlights = updates.filter((u: any) => u.type === 'lowlight')

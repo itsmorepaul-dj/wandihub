@@ -29,6 +29,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Weekly snapshot no longer shows duplicated highlights, lowlights, or FYIs. Duplicate submissions are now prevented at the database layer, the snapshot generator dedupes defensively, and existing duplicate rows were cleaned up.',
   'Reviews tab polish — the review selector and public sidebar now show each review\'s actual title, the Gemini-notes field is tucked in a collapsed accordion so it can\'t be mistaken for the description, and meta controls (date, time, copy link, delete) sit right under the title row.',
   'Mark one formal "Weekly Crit" per week — a new checkbox on the review edit page pins that review to the top of the public review sidebar (in bold) under "Weekly Crit", with any others that week listed below under "Quick Crits". One per week, enforced.',
   'Add-to-review picker is now a searchable modal (same pattern as Reports → Publish a project) instead of a long dropdown.',
