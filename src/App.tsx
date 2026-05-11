@@ -32,8 +32,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Weekly reports have a new, cleaner layout grouped by business line, and you can now copy them straight into Google Docs with full formatting.',
-  'Your weekly update text sticks around week to week — edit instead of rewriting. The snapshot now locks at Friday 8pm ET, and you have until Monday noon ET to regenerate the latest report with late edits.',
+  'Upcoming time off shows up automatically — any time off scheduled within 10 days is added to the People section of the weekly report, so you don\'t have to type it in.',
+  'Weekly report got a redesign — reports are now grouped by business line, copy straight into Google Docs with full formatting, and the "View Report" preview matches the frozen snapshot exactly.',
+  'Your weekly text sticks around — your weekly update text carries over week to week so you can edit instead of rewriting; the snapshot locks at Friday 8pm ET and you have until Monday noon ET to pull in late edits.',
 ]
 
 
@@ -5150,232 +5151,49 @@ const [showFilters, setShowFilters] = useState(false)
           setReportModal({ open: true, title, content, richContent, snapshotWeek, docsHtml })
         }
 
-        const generateWeeklyStatus = () => {
-          // Plain text for clipboard
-          // Build sections from weekly update data
-          const highlights = weeklyUpdates.filter(u => u.type === 'highlight')
-          const lowlights = weeklyUpdates.filter(u => u.type === 'lowlight')
-          const generalHighlights = weeklyGeneral.filter(e => e.category === 'highlight')
-          const generalLowlights = weeklyGeneral.filter(e => e.category === 'lowlight')
-          const fyis = weeklyGeneral.filter(e => e.category === 'fyi')
-          const peopleUpdates = weeklyGeneral.filter(e => e.category === 'people')
-
-          const getBrand = (u: WeeklyUpdate) => {
-            if (u.business_lines) {
-              try { const parsed = JSON.parse(u.business_lines); return Array.isArray(parsed) ? parsed[0] : u.business_lines } catch { return u.business_lines }
+        const generateWeeklyStatus = async () => {
+          // Fetches the same enriched payload the server produces for a frozen
+          // snapshot (thumbnails, past reviews, BL grouping) — without writing
+          // one. Guarantees the preview matches the real report format exactly.
+          try {
+            const res = await authFetch('/api/weekly-snapshots/preview')
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
+            const preview = await res.json()
+            const parsed = preview.data || JSON.parse(preview.data_json || '{}')
+            const snapSectionCopy = (text: string) => {
+              copyRichText(text).then(() => {
+                setCopiedReport(Date.now())
+                setTimeout(() => setCopiedReport(null), 2000)
+              })
             }
-            const proj = currentProjects.find(p => p.id === u.project_id)
-            return proj?.businessLines?.[0] || 'General'
-          }
-
-          const highlightsText = (() => {
-            const projectLines = highlights.map(u => {
-              const brand = getBrand(u)
-              const proj = currentProjects.find(p => p.id === u.project_id)
-              const links = [
-                proj?.deckLink && `[${proj.deckName || 'Deck'}](${proj.deckLink})`,
-                proj?.prdLink && `[${proj.prdName || 'PRD'}](${proj.prdLink})`,
-                proj?.briefLink && `[${proj.briefName || 'Brief'}](${proj.briefLink})`,
-                proj?.figmaLink && `[Figma](${proj.figmaLink})`,
-              ].filter(Boolean) as string[]
-              const lines = [`- **${brand}: ${u.project_name || 'Unknown'}**`, `  - ${u.description}`]
-              if (links.length > 0) lines.push(`  - Related: ${links.join(', ')}`)
-              return lines.join('\n')
+            const meta = {
+              week: preview.week,
+              generated_at: preview.generated_at,
+              edited_by: null,
+              edited_at: null,
+            }
+            const docsHtml = snapshotToDocsHtml(parsed, currentProjects, {
+              week: meta.week,
+              generatedAt: meta.generated_at,
+              editedBy: null,
+              editedAt: null,
             })
-            const generalLines = generalHighlights.filter(e => e.content.trim()).map(e => `- General: ${e.content.trim()}`)
-            const all = [...generalLines, ...projectLines]
-            return all.length > 0 ? all.join('\n') : '- TK'
-          })()
-
-          const lowlightsText = (() => {
-            const projectLines = lowlights.map(u => {
-              const brand = getBrand(u)
-              const lines = [`- **${brand}: ${u.project_name || 'Unknown'}**`, `  - ${u.description}`]
-              if (u.risk_reason) lines.push(`  - At risk: ${u.risk_reason}`)
-              if (u.resolution) lines.push(`  - Path to resolution: ${u.resolution}`)
-              return lines.join('\n')
-            })
-            const generalLines = generalLowlights.filter(e => e.content.trim()).map(e => `- General: ${e.content.trim()}`)
-            const all = [...generalLines, ...projectLines]
-            return all.length > 0 ? all.join('\n') : '- TK'
-          })()
-
-          const fyisText = fyis.length > 0 ? fyis.map(e => `- General: ${e.content.trim()}`).join('\n') : '- TK'
-          const peopleText = peopleUpdates.length > 0 ? peopleUpdates.map(e => `- General: ${e.content.trim()}`).join('\n') : '- TK'
-
-          const fullText = `**Design**\n**Highlights**\n${highlightsText}\n\n**Lowlights**\n${lowlightsText}\n\n**Upcoming FYIs**\n${fyisText}\n\n**People Updates**\n${peopleText}`
-
-          const sectionCopy = (text: string) => {
-            copyRichText(text).then(() => {
-              setCopiedReport(Date.now())
-              setTimeout(() => setCopiedReport(null), 2000)
-            })
-          }
-
-          const entryTextForUpdate = (u: WeeklyUpdate, brand: string) => {
-            const proj = currentProjects.find(p => p.id === u.project_id)
-            const linksMd = [
-              proj?.deckLink && `[${proj.deckName || 'Deck'}](${proj.deckLink})`,
-              proj?.prdLink && `[${proj.prdName || 'PRD'}](${proj.prdLink})`,
-              proj?.briefLink && `[${proj.briefName || 'Brief'}](${proj.briefLink})`,
-              proj?.figmaLink && `[Figma](${proj.figmaLink})`,
-            ].filter(Boolean) as string[]
-            const lines = [`**${brand}: ${u.project_name || 'Unknown'}**`, u.description]
-            if (linksMd.length > 0) lines.push(`Related: ${linksMd.join(', ')}`)
-            if (u.risk_reason) lines.push(`At risk: ${u.risk_reason}`)
-            if (u.resolution) lines.push(`Path to resolution: ${u.resolution}`)
-            return lines.join('\n')
-          }
-
-          const renderUpdateEntry = (u: WeeklyUpdate, type: 'highlight' | 'lowlight') => {
-            const brand = getBrand(u)
-            const proj = currentProjects.find(p => p.id === u.project_id)
-            const links = [
-              proj?.deckLink && { name: proj.deckName || 'Deck', url: proj.deckLink },
-              proj?.prdLink && { name: proj.prdName || 'PRD', url: proj.prdLink },
-              proj?.briefLink && { name: proj.briefName || 'Brief', url: proj.briefLink },
-              proj?.figmaLink && { name: 'Figma', url: proj.figmaLink },
-              ...(proj?.customLinks || []),
-            ].filter(Boolean) as { name: string; url: string }[]
-            return (
-              <div key={u.id} className={`rr-update-card rr-update-${type}`}>
-                <button className="rr-copy-entry" onClick={() => sectionCopy(entryTextForUpdate(u, brand))} title="Copy entry"><ClipboardCopy size={11} /></button>
-                <div className="rr-update-brand">{brand}</div>
-                <div className="rr-update-project">{u.project_name || 'Unknown'}</div>
-                {links.length > 0 && (
-                  <div className="rr-update-links">
-                    {links.map((l, i) => <span key={i}><span className="rr-link-sep">·</span><a href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a></span>)}
-                  </div>
-                )}
-                <div className="rr-update-desc">{renderMarkdownLinks(u.description)}</div>
-                {type === 'lowlight' && u.risk_reason && (
-                  <div className="rr-update-risk"><strong>Risk:</strong> {renderMarkdownLinks(u.risk_reason)}</div>
-                )}
-                {type === 'lowlight' && u.resolution && (
-                  <div className="rr-update-resolution"><strong>Resolution:</strong> {renderMarkdownLinks(u.resolution)}</div>
-                )}
-                <div className="rr-update-author">{proj?.designers && proj.designers.length > 0 ? proj.designers.map(d => d.split(' ')[0]).join(', ') : (u.designer_name || '').split(' ')[0]}</div>
-              </div>
+            const rich = (
+              <SnapshotReportView
+                meta={meta}
+                initialData={parsed}
+                currentProjects={currentProjects}
+                // Preview isn't persisted — admin edit would have nothing to
+                // save against, so we always pass false regardless of role.
+                isAdmin={false}
+                onSectionCopy={snapSectionCopy}
+                renderMarkdownLinks={renderMarkdownLinks}
+                onAdminSave={async () => { throw new Error('preview is read-only') }}
+              />
             )
-          }
-
-          const rich = (
-            <div className="rr">
-              <div className="rr-date">{todayStr} · {currentWeek}</div>
-
-              {/* Highlights */}
-              <div className="rr-section">
-                <div className="rr-section-header-row">
-                  <div className="rr-section-header" style={{ color: '#22c55e' }}>
-                    <span className="rr-section-dot" style={{ background: '#22c55e' }} />
-                    <span>Highlights</span>
-                    <span className="rr-section-count">{highlights.length + generalHighlights.filter(e => e.content.trim()).length}</span>
-                  </div>
-                  <button className="rr-copy-section" onClick={() => sectionCopy(`Highlights\n${highlightsText}`)}>
-                    <ClipboardCopy size={12} /> Copy
-                  </button>
-                </div>
-                {highlights.length > 0 || generalHighlights.some(e => e.content.trim()) ? (
-                  <div className="rr-update-list">
-                    {generalHighlights.filter(e => e.content.trim()).map(e => (
-                      <div key={e.id} className="rr-update-card rr-update-highlight">
-                        <button className="rr-copy-entry" onClick={() => sectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
-                        <div className="rr-update-brand">General</div>
-                        <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
-                      </div>
-                    ))}
-                    {highlights.map(u => renderUpdateEntry(u, 'highlight'))}
-                  </div>
-                ) : (
-                  <div className="rr-empty">No highlights this week.</div>
-                )}
-              </div>
-
-              {/* Lowlights */}
-              <div className="rr-section">
-                <div className="rr-section-header-row">
-                  <div className="rr-section-header" style={{ color: '#ef4444' }}>
-                    <span className="rr-section-dot" style={{ background: '#ef4444' }} />
-                    <span>Lowlights</span>
-                    <span className="rr-section-count">{lowlights.length + generalLowlights.filter(e => e.content.trim()).length}</span>
-                  </div>
-                  <button className="rr-copy-section" onClick={() => sectionCopy(`Lowlights\n${lowlightsText}`)}>
-                    <ClipboardCopy size={12} /> Copy
-                  </button>
-                </div>
-                {lowlights.length > 0 || generalLowlights.some(e => e.content.trim()) ? (
-                  <div className="rr-update-list">
-                    {generalLowlights.filter(e => e.content.trim()).map(e => (
-                      <div key={e.id} className="rr-update-card rr-update-lowlight">
-                        <button className="rr-copy-entry" onClick={() => sectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
-                        <div className="rr-update-brand">General</div>
-                        <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
-                      </div>
-                    ))}
-                    {lowlights.map(u => renderUpdateEntry(u, 'lowlight'))}
-                  </div>
-                ) : (
-                  <div className="rr-empty">No lowlights this week.</div>
-                )}
-              </div>
-
-              {/* Upcoming FYIs */}
-              <div className="rr-section">
-                <div className="rr-section-header-row">
-                  <div className="rr-section-header" style={{ color: '#f59e0b' }}>
-                    <span className="rr-section-dot" style={{ background: '#f59e0b' }} />
-                    <span>Upcoming FYIs</span>
-                    <span className="rr-section-count">{fyis.filter(e => e.content.trim()).length}</span>
-                  </div>
-                  <button className="rr-copy-section" onClick={() => sectionCopy(`Upcoming FYIs\n${fyisText}`)}>
-                    <ClipboardCopy size={12} /> Copy
-                  </button>
-                </div>
-                {fyis.some(e => e.content.trim()) ? (
-                  <div className="rr-update-list">
-                    {fyis.filter(e => e.content.trim()).map(e => (
-                      <div key={e.id} className="rr-update-card rr-update-fyi">
-                        <button className="rr-copy-entry" onClick={() => sectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
-                        <div className="rr-update-brand">General</div>
-                        <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rr-empty">No FYIs this week.</div>
-                )}
-              </div>
-
-              {/* People Updates */}
-              <div className="rr-section">
-                <div className="rr-section-header-row">
-                  <div className="rr-section-header" style={{ color: '#8b5cf6' }}>
-                    <span className="rr-section-dot" style={{ background: '#8b5cf6' }} />
-                    <span>People Updates</span>
-                    <span className="rr-section-count">{peopleUpdates.filter(e => e.content.trim()).length}</span>
-                  </div>
-                  <button className="rr-copy-section" onClick={() => sectionCopy(`People Updates\n${peopleText}`)}>
-                    <ClipboardCopy size={12} /> Copy
-                  </button>
-                </div>
-                {peopleUpdates.some(e => e.content.trim()) ? (
-                  <div className="rr-update-list">
-                    {peopleUpdates.filter(e => e.content.trim()).map(e => (
-                      <div key={e.id} className="rr-update-card rr-update-people">
-                        <button className="rr-copy-entry" onClick={() => sectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>
-                        <div className="rr-update-brand">General</div>
-                        <div className="rr-update-desc">{renderMarkdownLinks(e.content)}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rr-empty">No people updates this week.</div>
-                )}
-              </div>
-            </div>
-          )
-
-          openReport('Weekly Status', fullText, rich)
+            // No snapshotWeek arg → no Regenerate button; this is a live preview.
+            openReport(`Weekly Status — ${preview.week} (preview)`, preview.plain_text || '', rich, undefined, docsHtml)
+          } catch (err) { console.error('Preview failed:', err) }
         }
 
         const viewSnapshot = async (snap: { id: string; week: string; generated_at: string; edited_by?: string | null; edited_at?: string | null }) => {

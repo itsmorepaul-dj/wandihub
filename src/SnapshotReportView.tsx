@@ -325,18 +325,22 @@ export default function SnapshotReportView({
     )
   }
 
-  const renderGeneralList = (items: WeeklyGeneral[], emptyLabel: string, bucket: 'generalHighlights' | 'generalLowlights' | 'fyis' | 'peopleUpdates') => (
-    items.length > 0 ? (
+  const renderGeneralList = (items: WeeklyGeneral[], emptyLabel: string, bucket: 'generalHighlights' | 'generalLowlights' | 'fyis' | 'peopleUpdates') => {
+    // Copy per-entry only makes sense for highlights/lowlights where people
+    // paste one line into a Slack message or design doc. FYIs and People
+    // updates are consumed as a block, so the copy affordance was just noise.
+    const allowCopy = bucket === 'generalHighlights' || bucket === 'generalLowlights'
+    return items.length > 0 ? (
       <div className="rr-general-list">{items.map(e => (
         <div key={e.id} className="rr-general-item">
-          {!editMode && <button className="rr-copy-entry" onClick={() => onSectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>}
+          {!editMode && allowCopy && <button className="rr-copy-entry" onClick={() => onSectionCopy(e.content.trim())} title="Copy entry"><ClipboardCopy size={11} /></button>}
           {editMode
             ? <AdminRTE placeholder={`${bucket} entry`} value={e.content || ''} onChange={v => updateGeneralEntry(e.id, bucket, v)} />
             : <span className="rr-general-text">{renderMarkdownLinks(e.content)}</span>}
         </div>
       ))}</div>
     ) : <div className="rr-empty">No {emptyLabel} this week.</div>
-  )
+  }
 
   const generalHL = data.generalHighlights || []
   const generalLL = data.generalLowlights || []

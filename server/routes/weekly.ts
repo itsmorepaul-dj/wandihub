@@ -211,11 +211,10 @@ router.get('/current-week', (_req, res) => {
 
 // ============ SNAPSHOT GENERATION ============
 
-// The live weekly_* tables hold one row per logical key; `week` is just the
-// stamp of the last reporting window it was saved into. Snapshot generation
-// therefore reads ALL current rows and freezes them into data_json tagged
-// with the snapshot's week — regardless of each row's `week` column.
-const generateSnapshot = async (_week: string) => {
+// Read-only: produces the same payload generateSnapshot would write, but
+// without persisting. Used by the /preview endpoint so the "View Report"
+// preview matches frozen snapshots byte-for-byte.
+const generateSnapshotPayload = async (_week: string) => {
   const week = _week
   const updatesRaw = await all(
     `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
@@ -322,9 +321,67 @@ const generateSnapshot = async (_week: string) => {
   const generalHighlights = general.filter((e: any) => e.category === 'highlight' && !e.project_id)
   const generalLowlights = general.filter((e: any) => e.category === 'lowlight' && !e.project_id)
   const fyis = general.filter((e: any) => e.category === 'fyi' && !e.project_id)
-  const peopleUpdates = general.filter((e: any) => e.category === 'people' && !e.project_id)
+  const peopleUpdatesManual = general.filter((e: any) => e.category === 'people' && !e.project_id)
   const projectFyis = general.filter((e: any) => e.category === 'fyi' && e.project_id)
   const projectPeople = general.filter((e: any) => e.category === 'people' && e.project_id)
+
+  // Auto-populate upcoming OOO into the People section. Looks at every team
+  // member's timeOff entries and pulls any whose startDate is within 10 days
+  // of now. These are synthetic (not persisted in weekly_general) so the
+  // source of truth stays on the team record — editing the time-off in
+  // Settings automatically updates future snapshot regenerations.
+  const teamMembers = await all(`SELECT id, name, timeOff FROM team WHERE excluded = 0`)
+  const oooEntries: any[] = []
+  const now = new Date()
+  const tenDaysMs = 10 * 24 * 60 * 60 * 1000
+  const formatDateRange = (startISO: string, endISO: string) => {
+    const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    const s = new Date(startISO)
+    const e = new Date(endISO)
+    if (isNaN(s.getTime())) return ''
+    if (isNaN(e.getTime()) || startISO === endISO) return fmt(s)
+    return `${fmt(s)}–${fmt(e)}`
+  }
+  for (const m of teamMembers as any[]) {
+    let entries: Array<{ id: string; name: string; startDate: string; endDate: string }> = []
+    try { entries = JSON.parse(m.timeOff || '[]') || [] } catch { entries = [] }
+    for (const to of entries) {
+      if (!to?.startDate) continue
+      // Parse as UTC midnight so timezone doesn't flip the day boundary.
+      const start = new Date(to.startDate + (to.startDate.length === 10 ? 'T00:00:00Z' : ''))
+      if (isNaN(start.getTime())) continue
+      const delta = start.getTime() - now.getTime()
+      // Within the 10-day lookahead window; skip anything that already ended.
+      if (delta > tenDaysMs) continue
+      const end = new Date((to.endDate || to.startDate) + ((to.endDate || to.startDate).length === 10 ? 'T23:59:59Z' : ''))
+      if (!isNaN(end.getTime()) && end.getTime() < now.getTime()) continue
+      const title = to.name || 'Time off'
+      const range = formatDateRange(to.startDate, to.endDate || to.startDate)
+      const content = `${m.name}: ${title}, ${range}`
+      oooEntries.push({
+        id: `ooo-${m.id}-${to.id || to.startDate}`,
+        designer_id: String(m.id),
+        designer_name: m.name,
+        week,
+        category: 'people',
+        content,
+        // Sort key; not persisted.
+        _sortKey: start.getTime(),
+      })
+    }
+  }
+  // Dedup just in case (shouldn't happen — ids are unique) and sort by
+  // soonest-first so the People section reads chronologically.
+  const oooSeen = new Set<string>()
+  const oooDedup = oooEntries.filter(e => {
+    if (oooSeen.has(e.id)) return false
+    oooSeen.add(e.id)
+    return true
+  }).sort((a, b) => a._sortKey - b._sortKey)
+
+  // Manual entries go first so a designer's explicit note (e.g. "extending
+  // my PTO") appears above the auto-generated OOO block.
+  const peopleUpdates = [...peopleUpdatesManual, ...oooDedup.map(({ _sortKey, ...rest }) => rest)]
 
   const highlightsText = (() => {
     const projectLines = highlights.map((u: any) => `    \u2022    ${u.primary_business_line}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}`)
@@ -359,7 +416,7 @@ const generateSnapshot = async (_week: string) => {
 
   const plainText = `Design\nHighlights\n${highlightsText}\n\nLowlights\n${lowlightsText}\n\nUpcoming FYIs\n${fyisText}\n\nPeople Updates\n${peopleText}`
 
-  const dataJson = JSON.stringify({
+  const dataJsonObj = {
     week,
     highlights: highlights.map((u: any) => ({ ...u })),
     lowlights: lowlights.map((u: any) => ({ ...u })),
@@ -370,15 +427,21 @@ const generateSnapshot = async (_week: string) => {
     projectFyis: projectFyis.map((e: any) => ({ ...e })),
     projectPeople: projectPeople.map((e: any) => ({ ...e })),
     projectCount: projects.length,
-  })
+  }
 
+  return { week, plainText, dataJson: JSON.stringify(dataJsonObj), data: dataJsonObj }
+}
+
+// Full generate = build payload + persist. The cron and the /generate endpoint
+// both go through here; /preview uses only generateSnapshotPayload.
+const generateSnapshot = async (week: string) => {
+  const payload = await generateSnapshotPayload(week)
   await run(
     `INSERT OR REPLACE INTO weekly_snapshots (id, week, generated_at, plain_text, data_json) VALUES (?, ?, datetime('now'), ?, ?)`,
-    [week, week, plainText, dataJson]
+    [week, week, payload.plainText, payload.dataJson]
   )
-
   console.log(`Weekly snapshot generated for ${week}`)
-  return { week, plainText, dataJson }
+  return { week, plainText: payload.plainText, dataJson: payload.dataJson }
 }
 
 // ============ SNAPSHOT API ============
@@ -387,6 +450,29 @@ router.get('/weekly-snapshots', async (_req, res) => {
   try {
     const snapshots = await all('SELECT id, week, generated_at, edited_by, edited_at FROM weekly_snapshots ORDER BY week DESC')
     res.json(snapshots)
+  } catch (e: any) { res.status(500).json({ error: e.message }) }
+})
+
+// Read-only preview of what a snapshot for `week` would look like right now,
+// built from live data. Does NOT write a weekly_snapshots row. Used by the
+// "View Report" button on the Reports tab so the preview matches the real
+// frozen snapshot format exactly (same enrichment, same data_json shape).
+// Declared BEFORE the /:week route so Express matches it literally.
+router.get('/weekly-snapshots/preview', async (req, res) => {
+  try {
+    const week = (req.query.week as string) || getActiveWeek()
+    const preview = await generateSnapshotPayload(week)
+    // Shape matches /weekly-snapshots/:week so the client can reuse its view code.
+    res.json({
+      week: preview.week,
+      generated_at: new Date().toISOString(),
+      plain_text: preview.plainText,
+      data_json: preview.dataJson,
+      data: preview.data,
+      // Preview has no edited metadata — it's not a persisted row.
+      edited_by: null,
+      edited_at: null,
+    })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
