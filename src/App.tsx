@@ -32,7 +32,8 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Weekly snapshot no longer shows duplicated highlights, lowlights, or FYIs. Duplicate submissions are now prevented at the database layer, the snapshot generator dedupes defensively, and existing duplicate rows were cleaned up.',
+  'Weekly reports have a new, cleaner layout grouped by business line, and you can now copy them straight into Google Docs with full formatting.',
+  'Your weekly update text sticks around week to week — edit instead of rewriting. The snapshot now locks at Friday 8pm ET, and you have until Monday noon ET to regenerate the latest report with late edits.',
 ]
 
 
