@@ -32,6 +32,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Stay signed in across deploys — your login now survives a code push, so you won\'t get bounced to the login screen every time a new version ships.',
   'Upcoming time off shows up automatically — any time off scheduled within 10 days is added to the People section of the weekly report, so you don\'t have to type it in.',
   'Weekly report got a redesign — reports are now grouped by business line, copy straight into Google Docs with full formatting, and the "View Report" preview matches the frozen snapshot exactly.',
   'Your weekly text sticks around — your weekly update text carries over week to week so you can edit instead of rewriting; the snapshot locks at Friday 8pm ET and you have until Monday noon ET to pull in late edits.',

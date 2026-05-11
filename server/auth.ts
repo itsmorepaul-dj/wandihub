@@ -3,7 +3,14 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { run, get, all } from './db.js';
 
-// In-memory session store
+// Session store: durable in SQLite, cached in memory for synchronous reads.
+// Writes go to both stores; expired entries are pruned from both on login
+// and via a periodic cleanup interval.
+//
+// Persisting across container rebuilds (Railway wipes the in-memory state
+// every deploy) means cookies keep working, so admins don't get kicked to
+// login after every code push. The Map is kept for synchronous .has()/.get()
+// in existing middleware and review.ts callbacks.
 export const sessions: Map<string, { userId: number; email: string; role: string }> = new Map();
 
 export const SESSION_COOKIE = 'dcc_sid';
@@ -84,7 +91,41 @@ export const createVersionGuard = (getSiteVersion: () => string) => {
   }
 }
 
-// Create users table and seed admin
+// Durable session store backing the in-memory Map. Calls to persistSession /
+// removePersistedSession are best-effort — a DB write failure shouldn't kill
+// the login flow, just means that particular session won't survive a restart.
+const persistSession = async (sessionId: string, userId: number, email: string, role: string) => {
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString()
+  try {
+    await run(
+      `INSERT OR REPLACE INTO sessions (id, user_id, email, role, created_at, expires_at)
+       VALUES (?, ?, ?, ?, datetime('now'), ?)`,
+      [sessionId, userId, email, role, expiresAt]
+    )
+  } catch (err) {
+    console.error('Session persist failed:', err)
+  }
+}
+
+const removePersistedSession = async (sessionId: string) => {
+  try { await run('DELETE FROM sessions WHERE id = ?', [sessionId]) } catch (err) { console.error('Session remove failed:', err) }
+}
+
+const pruneExpiredSessions = async () => {
+  try {
+    const removed = await run(`DELETE FROM sessions WHERE expires_at < datetime('now')`) as any
+    // sqlite3 returns `.changes` on the statement; also drop any expired rows
+    // from the in-memory cache so we don't serve stale auth.
+    if (removed?.changes > 0) {
+      const live = new Set((await all('SELECT id FROM sessions') as any[]).map(r => r.id))
+      for (const id of sessions.keys()) if (!live.has(id)) sessions.delete(id)
+    }
+  } catch (err) {
+    console.error('Session prune failed:', err)
+  }
+}
+
+// Create users + sessions tables, hydrate in-memory cache, seed admin.
 export const initUsers = async () => {
   await run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,6 +134,32 @@ export const initUsers = async () => {
     role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    email TEXT NOT NULL,
+    role TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+  )`)
+  await run(`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`).catch(() => {})
+
+  // Drop anything already expired before loading; then hydrate the Map so
+  // existing cookies keep working across server restarts.
+  await run(`DELETE FROM sessions WHERE expires_at < datetime('now')`).catch(() => {})
+  try {
+    const rows = await all('SELECT id, user_id, email, role FROM sessions') as any[]
+    sessions.clear()
+    for (const r of rows) sessions.set(r.id, { userId: r.user_id, email: r.email, role: r.role })
+    if (rows.length > 0) console.log(`Hydrated ${rows.length} session(s) from disk`)
+  } catch (err) {
+    console.error('Session hydration failed:', err)
+  }
+
+  // Periodic cleanup (hourly). One interval per process; tsx watch restarts
+  // create a new one but the old one is GC'd with the module.
+  setInterval(() => { pruneExpiredSessions() }, 60 * 60 * 1000)
 
   try {
     const existingAdmin = await get('SELECT id FROM users WHERE email = ?', ['paul.more@dowjones.com']);
@@ -131,6 +198,8 @@ authRouter.post('/login', async (req, res) => {
 
     const sessionId = generateSessionId();
     sessions.set(sessionId, { userId: user.id, email: user.email, role: user.role });
+    // Best-effort persist so the session survives container restarts.
+    persistSession(sessionId, user.id, user.email, user.role).catch(() => {})
     setSessionCookie(res, sessionId);
 
     res.json({
@@ -147,6 +216,7 @@ authRouter.post('/logout', (req, res) => {
   const sessionId = getSessionIdFromRequest(req);
   if (sessionId) {
     sessions.delete(sessionId);
+    removePersistedSession(sessionId).catch(() => {})
   }
   clearSessionCookie(res);
   res.json({ success: true });
@@ -202,6 +272,13 @@ usersRouter.delete('/:id', requireAdmin, async (req, res) => {
     }
 
     await run('DELETE FROM users WHERE id = ?', [id]);
+    // Invalidate all of that user's active sessions so they can't keep
+    // making authenticated requests after being removed.
+    try {
+      const rows = await all('SELECT id FROM sessions WHERE user_id = ?', [id]) as any[]
+      for (const r of rows) sessions.delete(r.id)
+      await run('DELETE FROM sessions WHERE user_id = ?', [id])
+    } catch (e) { /* best-effort */ }
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting user:', err);
