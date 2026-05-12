@@ -21,7 +21,7 @@ import WeeklyUpdateForm from './WeeklyUpdateForm'
 import WeeklyGeneralForm from './WeeklyGeneralForm'
 import SnapshotReportView from './SnapshotReportView'
 import RichTextEditor from './components/RichTextEditor'
-import { copyRichText } from './utils/richtext'
+import { copyRichText, markdownToHtml } from './utils/richtext'
 import { snapshotToDocsHtml, copySnapshotToDocs } from './utils/snapshotDocsHtml'
 import ImageLightbox from './ImageLightbox'
 import { defaultHolidays, getTodayStr, getDjFiscalLabel, DAY_MS, parseLocalDate, formatShortDate, formatFullDate, calcRangeHours, getClosestTimeOff, formatDateRange, formatMonthDay, formatMonthDayFromDate, getTodayFormatted, formatVersionDisplay } from './utils'
@@ -32,6 +32,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Project descriptions now render formatting — bold, bullets, and links from the description editor toolbar display properly in the project list instead of showing raw markdown.',
   'Upcoming time off shows up automatically — any time off scheduled within 10 days is added to the People section of the weekly report, so you don\'t have to type it in.',
   'Weekly report got a redesign — reports are now grouped by business line, copy straight into Google Docs with full formatting, and the "View Report" preview matches the frozen snapshot exactly.',
   'Your weekly text sticks around — your weekly update text carries over week to week so you can edit instead of rewriting; the snapshot locks at Friday 8pm ET and you have until Monday noon ET to pull in late edits.',
@@ -3636,7 +3637,7 @@ const [showFilters, setShowFilters] = useState(false)
                             </span>
                           </div>
                           {project.description && (
-                            <div className="project-description">{project.description}</div>
+                            <div className="project-description" dangerouslySetInnerHTML={{ __html: markdownToHtml(project.description) }} />
                           )}
                           <div className="project-meta">
                             {(project.designers || []).length > 0 ? (
