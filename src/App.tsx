@@ -32,9 +32,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Weekly Status report overhaul — "View Report" opens faster and only shows the current reporting week\'s content (archived-project and older-week leftovers are cleaned out, including a one-time sweep of pre-existing orphans). Deleting a project now cascades through weekly updates, images, notes, and review history so nothing can orphan again. Jump-nav links stay inside the modal instead of pulling up a project page behind it. Optional General Notes now has a one-click "Upcoming OOO" suggester on the People tab, Risk and Resolution fields on the Lowlights tab (rendered with the same vertical red bar as project lowlights in the report and Docs export), and editing a field clears/saves it directly (no separate Delete button or confirm modal). Report thumbnails open the standard in-app lightbox.',
-  'Fixed lightbox on public project pages — clicking an attached image on a Published project\'s public URL now opens the full-size lightbox with caption, counter, and keyboard navigation, matching behavior on review pages.',
-  'Publishing controls moved to the project card — every project now has a "Make public" chip that publishes + copies the URL in one click, and the green "Published" chip opens a dropdown to either open the public page or unpublish. The separate "Published Project Pages" card on the Reports tab has been removed.',
+  'Weekly Status report overhaul — "View Report" opens faster, is scoped to only the current week\'s non-archived work, and jump-nav links now stay inside the modal. Optional General Notes gains a one-click "Upcoming OOO" suggester on People and Risk/Resolution fields on Lowlights (with the same vertical red bar as project lowlights). Report thumbnails open the standard lightbox.',
 ]
 
 
