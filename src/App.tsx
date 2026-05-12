@@ -32,6 +32,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Publishing controls moved to the project card — every project now has a "Make public" chip that publishes + copies the URL in one click, and the green "Published" chip opens a dropdown to either open the public page or unpublish. The separate "Published Project Pages" card on the Reports tab has been removed.',
   'Project descriptions now render formatting — bold, bullets, and links from the description editor toolbar display properly in the project list instead of showing raw markdown.',
   'Upcoming time off shows up automatically — any time off scheduled within 10 days is added to the People section of the weekly report, so you don\'t have to type it in.',
   'Weekly report got a redesign — reports are now grouped by business line, copy straight into Google Docs with full formatting, and the "View Report" preview matches the frozen snapshot exactly.',
@@ -1207,14 +1208,12 @@ const [showFilters, setShowFilters] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
   const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode; snapshotWeek?: string; docsHtml?: string }>({ open: false, title: '', content: '' })
-  // Publish-project state: pickerOpen shows the project selector modal; copied
-  // flashes a brief "copied" indicator next to a URL.
-  const [publishPickerOpen, setPublishPickerOpen] = useState(false)
-  const [publishPickerQuery, setPublishPickerQuery] = useState('')
+  // Publish-project state: publishCopiedFor flashes a brief "copied" indicator
+  // next to the chip after the URL is auto-copied on publish.
   const [addToReviewPickerOpen, setAddToReviewPickerOpen] = useState(false)
   const [addToReviewPickerQuery, setAddToReviewPickerQuery] = useState('')
   const [publishCopiedFor, setPublishCopiedFor] = useState<string | null>(null)
-  const [showPublishedList, setShowPublishedList] = useState(false)
+  const [publishedMenuFor, setPublishedMenuFor] = useState<string | null>(null)
   const [showArchive, setShowArchive] = useState(false)
   const [showSnapshotHistory, setShowSnapshotHistory] = useState(false)
   const [showWeeklyPending, setShowWeeklyPending] = useState(false)
@@ -1830,6 +1829,22 @@ const [showFilters, setShowFilters] = useState(false)
   // Persist sort/filter to localStorage
   useEffect(() => { try { localStorage.setItem('dcc_projectSortBy', projectSortBy) } catch {} }, [projectSortBy])
   useEffect(() => { try { localStorage.setItem('dcc_projectFilters', JSON.stringify(projectFilters)) } catch {} }, [projectFilters])
+
+  // Close the published-chip dropdown on outside click / Escape
+  useEffect(() => {
+    if (!publishedMenuFor) return
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.published-menu-wrapper')) setPublishedMenuFor(null)
+    }
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPublishedMenuFor(null) }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [publishedMenuFor])
 
   // Refresh projects list from server
   const refreshProjects = async () => {
@@ -3665,17 +3680,57 @@ const [showFilters, setShowFilters] = useState(false)
                                 <Clock size={11} /> No estimate
                               </span>
                             ) : null}
-                            {project.published === 1 && project.public_slug && (
-                              <a
-                                href={`/p/${project.public_slug}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="project-meta-chip project-meta-published"
-                                title="Open public project page"
-                                onClick={e => e.stopPropagation()}
+                            {project.published === 1 && project.public_slug ? (
+                              <span className="published-menu-wrapper">
+                                <button
+                                  type="button"
+                                  className="project-meta-chip project-meta-published"
+                                  title="Manage published page"
+                                  onClick={e => { e.stopPropagation(); setPublishedMenuFor(prev => prev === project.id ? null : project.id) }}
+                                >
+                                  <Globe size={11} /> Published
+                                  <ChevronDown size={10} strokeWidth={2.5} />
+                                </button>
+                                {publishedMenuFor === project.id && (
+                                  <div className="published-menu" role="menu" onClick={e => e.stopPropagation()}>
+                                    <a
+                                      className="published-menu-item"
+                                      href={`/p/${project.public_slug}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      role="menuitem"
+                                      onClick={() => setPublishedMenuFor(null)}
+                                    >
+                                      <Globe size={11} /> Go to public page
+                                    </a>
+                                    <button
+                                      type="button"
+                                      className="published-menu-item published-menu-item-danger"
+                                      role="menuitem"
+                                      onClick={() => { setPublishedMenuFor(null); unpublishProject(project.id) }}
+                                    >
+                                      <Trash2 size={11} /> Unpublish
+                                    </button>
+                                  </div>
+                                )}
+                              </span>
+                            ) : (
+                              <span
+                                className="project-meta-chip project-meta-make-public"
+                                title="Publish a public page for this project"
+                                onClick={async (e) => {
+                                  e.stopPropagation()
+                                  const slug = await publishProject(project.id)
+                                  if (slug) {
+                                    const url = `${window.location.origin}/p/${slug}`
+                                    navigator.clipboard.writeText(url).catch(() => {})
+                                    setPublishCopiedFor(project.id)
+                                    setTimeout(() => setPublishCopiedFor(prev => prev === project.id ? null : prev), 1800)
+                                  }
+                                }}
                               >
-                                <Globe size={11} /> Published
-                              </a>
+                                <Globe size={11} /> {publishCopiedFor === project.id ? 'Link copied!' : 'Make public'}
+                              </span>
                             )}
                             <span className="project-meta-spacer" />
                             <span className="project-meta-chip project-meta-action" onClick={() => {
@@ -5682,77 +5737,6 @@ const [showFilters, setShowFilters] = useState(false)
           {copiedReport && (
             <div className="report-copied-toast">Report copied to clipboard — paste into Google Docs</div>
           )}
-
-          {/* Published Project Pages — card follows .report-card pattern; the
-              list of currently-published pages nests inside via .snapshot-accordion
-              so it matches the "Past Reports" history UI on the other cards. */}
-          {(() => {
-            const published = currentProjects.filter(p => p.published === 1 && p.public_slug)
-            const color = '#059669'
-            return (
-              <div className="reports-grid" style={{ marginTop: '1rem' }}>
-                <div className={`report-card${published.length > 0 ? ' report-card-has-history' : ''}`}>
-                  <div className="report-card-icon" style={{ color }}>
-                    <Globe size={24} />
-                  </div>
-                  <div className="report-card-body">
-                    <h3 className="report-card-title">Published Project Pages</h3>
-                    <p className="report-card-desc">
-                      Share a project with stakeholders via a public, read-only URL.
-                      Anyone with the link can view the project — no sign-in required.
-                      The page stays live and reflects the project's current state.
-                    </p>
-                    <span className="report-card-stats">
-                      {published.length === 0
-                        ? 'No projects published yet'
-                        : `${published.length} published`}
-                    </span>
-                  </div>
-                  <button className="report-generate-btn" style={{ borderColor: color, color }} onClick={() => { setPublishPickerQuery(''); setPublishPickerOpen(true) }}>
-                    <Globe size={14} />
-                    Publish Project
-                  </button>
-                  {published.length > 0 && (
-                    <div className="snapshot-accordion">
-                      <button className="snapshot-accordion-toggle" onClick={() => setShowPublishedList(v => !v)}>
-                        {showPublishedList ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                        <Globe size={12} />
-                        <span>Published Pages ({published.length})</span>
-                      </button>
-                      {showPublishedList && (
-                        <div className="snapshot-accordion-body">
-                          {published.map(p => {
-                            const url = `${window.location.origin}/p/${p.public_slug}`
-                            return (
-                              <div key={p.id} className="published-project-item">
-                                <div className="published-project-main">
-                                  <a href={url} target="_blank" rel="noopener noreferrer" className="published-project-name">{p.name}</a>
-                                  <code className="published-project-url">{url}</code>
-                                </div>
-                                <div className="published-project-actions">
-                                  <button className="snapshot-item-btn" onClick={() => {
-                                    navigator.clipboard.writeText(url)
-                                    setPublishCopiedFor(p.id)
-                                    setTimeout(() => setPublishCopiedFor(prev => prev === p.id ? null : prev), 1500)
-                                  }}>
-                                    <Copy size={12} />
-                                    {publishCopiedFor === p.id ? 'Copied!' : 'Copy link'}
-                                  </button>
-                                  <button className="snapshot-item-btn" onClick={() => unpublishProject(p.id)}>
-                                    Unpublish
-                                  </button>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          })()}
         </div>
         )
       })()}
@@ -7914,55 +7898,7 @@ const [showFilters, setShowFilters] = useState(false)
         </div>
       )}
 
-      {/* Publish Project Picker Modal */}
-      {publishPickerOpen && (() => {
-        const q = publishPickerQuery.trim().toLowerCase()
-        const pickable = currentProjects
-          .filter(p => p.status !== 'archived' && p.published !== 1)
-          .filter(p => !q || p.name.toLowerCase().includes(q))
-          .sort((a, b) => a.name.localeCompare(b.name))
-        return (
-          <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setPublishPickerOpen(false) }}>
-            <div className="modal" style={{ maxWidth: 520 }}>
-              <div className="modal-header">
-                <h2>Publish a project</h2>
-                <button className="modal-close-btn" onClick={() => setPublishPickerOpen(false)}>×</button>
-              </div>
-              <div className="modal-body">
-                <div className={`float-field${publishPickerQuery ? ' has-value' : ''}`} style={{ marginBottom: '0.75rem' }}>
-                  <input type="text" value={publishPickerQuery} onChange={e => setPublishPickerQuery(e.target.value)} placeholder=" " autoFocus />
-                  <label>Search projects</label>
-                </div>
-                {pickable.length === 0 ? (
-                  <div className="published-projects-empty">No matching projects to publish.</div>
-                ) : (
-                  <ul className="publish-picker-list">
-                    {pickable.map(p => (
-                      <li key={p.id}>
-                        <button className="publish-picker-item" onClick={async () => {
-                          const slug = await publishProject(p.id)
-                          setPublishPickerOpen(false)
-                          if (slug) {
-                            const url = `${window.location.origin}/p/${slug}`
-                            navigator.clipboard.writeText(url).catch(() => {})
-                            setPublishCopiedFor(p.id)
-                            setTimeout(() => setPublishCopiedFor(prev => prev === p.id ? null : prev), 1800)
-                          }
-                        }}>
-                          <span className="publish-picker-name">{p.name}</span>
-                          <span className="publish-picker-meta">{p.businessLines?.join(', ') || ''}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* Add-to-Review Picker Modal — same pattern as the Publish picker. */}
+      {/* Add-to-Review Picker Modal */}
       {addToReviewPickerOpen && editingReview && (() => {
         const q = addToReviewPickerQuery.trim().toLowerCase()
         const existingIds = new Set((editingReview.items || []).map((ri: any) => ri.project_id))
