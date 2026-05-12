@@ -32,9 +32,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Weekly report no longer shows stale content — "View Report" is now filtered to only live, non-archived projects, and deleting a project now cascades through weekly updates, images, notes, and review history so orphaned data can no longer surface. A one-time cleanup also wipes pre-existing orphans from the database.',
   'Weekly Status report thumbnails now open the standard lightbox — clicking a project image in a Weekly Status report (live or from a past snapshot) opens the same in-app lightbox with caption, counter, and keyboard navigation used elsewhere, instead of opening the raw image in a new tab.',
   'Fixed lightbox on public project pages — clicking an attached image on a Published project\'s public URL now opens the full-size lightbox with caption, counter, and keyboard navigation, matching behavior on review pages.',
-  'Publishing controls moved to the project card — every project now has a "Make public" chip that publishes + copies the URL in one click, and the green "Published" chip opens a dropdown to either open the public page or unpublish. The separate "Published Project Pages" card on the Reports tab has been removed.',
 ]
 
 

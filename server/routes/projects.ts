@@ -1,11 +1,38 @@
 import express from 'express';
 import crypto from 'crypto';
-import { run, get, all, upsertProject, upsertBusinessLine } from '../db.js';
+import fs from 'fs';
+import path from 'path';
+import { run, get, all, upsertProject, upsertBusinessLine, IMAGES_DIR } from '../db.js';
 import { updateDbVersion, logActivity } from '../version.js';
 import { getUserEmail } from '../auth.js';
 import { recipientsForProject, pinRecipients, userIdForEmail } from '../activity.js';
 
 const router = express.Router();
+
+// Remove a project and every row that references it. Live data goes away;
+// review_items use the existing soft-delete column so the audit trail (past
+// review appearances) is preserved but they no longer show up in live queries.
+// Image files on disk are removed alongside their DB rows so we don't leak
+// storage when a project is deleted.
+export const deleteProjectCascade = async (projectId: string) => {
+  const images = await all('SELECT filename FROM project_images WHERE project_id = ?', [projectId]) as { filename: string }[]
+  for (const img of images) {
+    try {
+      const filePath = path.join(IMAGES_DIR, img.filename)
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+    } catch (e: any) {
+      console.error('project image file cleanup failed:', img.filename, e.message)
+    }
+  }
+  await run('DELETE FROM project_images WHERE project_id = ?', [projectId])
+  await run('DELETE FROM weekly_updates WHERE project_id = ?', [projectId])
+  await run('DELETE FROM weekly_general WHERE project_id = ?', [projectId])
+  await run('DELETE FROM project_priorities WHERE project_id = ?', [projectId])
+  await run('DELETE FROM note_project_links WHERE project_id = ?', [projectId])
+  await run('DELETE FROM project_assignments WHERE project_id = ?', [projectId])
+  await run("UPDATE review_items SET deleted_at = datetime('now') WHERE project_id = ? AND deleted_at IS NULL", [projectId])
+  await run('DELETE FROM projects WHERE id = ?', [projectId])
+}
 
 // ============ PROJECTS ============
 
@@ -61,8 +88,7 @@ router.delete('/projects/:id', async (req, res) => {
     const initiatorEmail = getUserEmail(req)
     const initiatorId = await userIdForEmail(initiatorEmail)
     const recipients = await recipientsForProject(req.params.id, initiatorId)
-    await run('DELETE FROM projects WHERE id = ?', [req.params.id]);
-    await run('DELETE FROM project_assignments WHERE project_id = ?', [req.params.id]);
+    await deleteProjectCascade(req.params.id)
     await updateDbVersion()
     const activityId = await logActivity('project', 'delete', existing?.name || req.params.id, initiatorEmail)
     await pinRecipients(activityId, recipients)

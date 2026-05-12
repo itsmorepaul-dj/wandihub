@@ -216,11 +216,15 @@ router.get('/current-week', (_req, res) => {
 // preview matches frozen snapshots byte-for-byte.
 const generateSnapshotPayload = async (_week: string) => {
   const week = _week
+  // Exclude updates/entries tied to archived projects so the weekly report
+  // reflects *current* work only. Project deletes already cascade to these
+  // tables, so any remaining rows point at a live project row.
   const updatesRaw = await all(
     `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
      FROM weekly_updates wu
      LEFT JOIN team t ON wu.designer_id = t.id
      JOIN projects p ON wu.project_id = p.id
+     WHERE p.status != 'archived'
      ORDER BY wu.updated_at DESC`
   )
   const generalRaw = await all(
@@ -228,6 +232,7 @@ const generateSnapshotPayload = async (_week: string) => {
      FROM weekly_general wg
      LEFT JOIN team t ON wg.designer_id = t.id
      LEFT JOIN projects p ON wg.project_id = p.id
+     WHERE wg.project_id IS NULL OR p.status != 'archived'
      ORDER BY wg.category, wg.updated_at DESC`
   )
   const projects = await all(`SELECT id, name, status, businessLine, startDate, endDate, estimatedHours, designers, deckLink, prdLink, briefLink, figmaLink, customLinks FROM projects WHERE status != 'archived'`)

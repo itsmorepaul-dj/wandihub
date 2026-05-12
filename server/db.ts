@@ -503,6 +503,60 @@ export const initSchema = async () => {
     console.log(`Migrated ${legacyReviewImages.length} review-scoped images to review_item_images`)
   }
 
+  // One-time cleanup: historical project deletes only removed `projects` and
+  // `project_assignments`, leaving orphaned rows in every other
+  // project-scoped table. Those rows surfaced as stale entries in the weekly
+  // report ("View Report" showed content whose project no longer existed).
+  // Nuke them here so the DB matches what the new cascade-on-delete path
+  // produces going forward. Idempotent: once the orphans are gone, these run
+  // as no-ops.
+  const orphanTargets = [
+    { table: 'weekly_updates', key: 'project_id' },
+    { table: 'weekly_general', key: 'project_id' },
+    { table: 'project_priorities', key: 'project_id' },
+    { table: 'note_project_links', key: 'project_id' },
+    { table: 'project_assignments', key: 'project_id' },
+  ] as const
+  for (const { table, key } of orphanTargets) {
+    try {
+      const res = await run(
+        `DELETE FROM ${table} WHERE ${key} IS NOT NULL AND ${key} NOT IN (SELECT id FROM projects)`
+      ) as any
+      const count = typeof res?.changes === 'number' ? res.changes : 0
+      if (count > 0) console.log(`orphan cleanup: removed ${count} rows from ${table}`)
+    } catch (e: any) {
+      console.error(`orphan cleanup failed for ${table}:`, e.message)
+    }
+  }
+  try {
+    const orphanImages = await all(
+      `SELECT id, filename FROM project_images
+       WHERE project_id NOT IN (SELECT id FROM projects)`
+    ) as { id: string; filename: string }[]
+    for (const img of orphanImages) {
+      try {
+        const filePath = path.join(IMAGES_DIR, img.filename)
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+      } catch (e: any) {
+        console.error('orphan project_images file cleanup failed:', img.filename, e.message)
+      }
+      await run('DELETE FROM project_images WHERE id = ?', [img.id])
+    }
+    if (orphanImages.length > 0) console.log(`orphan cleanup: removed ${orphanImages.length} project_images`)
+  } catch (e: any) {
+    console.error('orphan cleanup failed for project_images:', e.message)
+  }
+  try {
+    const res = await run(
+      `UPDATE review_items SET deleted_at = datetime('now')
+       WHERE deleted_at IS NULL AND project_id NOT IN (SELECT id FROM projects)`
+    ) as any
+    const count = typeof res?.changes === 'number' ? res.changes : 0
+    if (count > 0) console.log(`orphan cleanup: soft-deleted ${count} review_items`)
+  } catch (e: any) {
+    console.error('orphan cleanup failed for review_items:', e.message)
+  }
+
   // Seed default business lines if empty
   const existing = await get('SELECT COUNT(*) as count FROM business_lines')
   if (existing?.count === 0) {
