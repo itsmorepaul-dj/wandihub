@@ -32,9 +32,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Fixed lightbox on public project pages — clicking an attached image on a Published project\'s public URL now opens the full-size lightbox with caption, counter, and keyboard navigation, matching behavior on review pages.',
   'Publishing controls moved to the project card — every project now has a "Make public" chip that publishes + copies the URL in one click, and the green "Published" chip opens a dropdown to either open the public page or unpublish. The separate "Published Project Pages" card on the Reports tab has been removed.',
   'Project descriptions now render formatting — bold, bullets, and links from the description editor toolbar display properly in the project list instead of showing raw markdown.',
-  'Upcoming time off shows up automatically — any time off scheduled within 10 days is added to the People section of the weekly report, so you don\'t have to type it in.',
 ]
 
 

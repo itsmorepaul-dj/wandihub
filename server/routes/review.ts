@@ -3817,6 +3817,83 @@ router.get('/p/:slug', async (req, res) => {
       })();
     </script>`
 
+    // Lightbox for the attached images — reuses the same markup and styles
+    // as the /review/:id lightbox, but fetches from /api/images/:id since
+    // project_images has its own serving endpoint.
+    const lightboxScript = `<script>
+      (function() {
+        var lbOverlay = document.createElement('div');
+        lbOverlay.className = 'rv-lightbox-overlay';
+        lbOverlay.style.display = 'none';
+        lbOverlay.innerHTML = '<button class="rv-lightbox-close">&times;</button>' +
+          '<button class="rv-lightbox-nav rv-lightbox-prev">&lsaquo;</button>' +
+          '<div class="rv-lightbox-content"><img /><div class="rv-lightbox-caption"></div><div class="rv-lightbox-counter"></div></div>' +
+          '<button class="rv-lightbox-nav rv-lightbox-next">&rsaquo;</button>';
+        document.body.appendChild(lbOverlay);
+
+        var lbState = { images: [], index: 0 };
+        var lbImagesByItem = {};
+        document.querySelectorAll('.review-images-data').forEach(function(el) {
+          try { lbImagesByItem[el.dataset.itemId] = JSON.parse(el.textContent || '[]'); } catch(e) {}
+        });
+
+        function lbRender() {
+          var img = lbState.images[lbState.index];
+          if (!img) return;
+          lbOverlay.querySelector('.rv-lightbox-content img').src = '/api/images/' + img.id;
+          lbOverlay.querySelector('.rv-lightbox-content img').alt = img.caption || img.original_name || '';
+          var cap = lbOverlay.querySelector('.rv-lightbox-caption');
+          cap.textContent = img.caption || '';
+          cap.style.display = img.caption ? '' : 'none';
+          var ctr = lbOverlay.querySelector('.rv-lightbox-counter');
+          ctr.textContent = lbState.images.length > 1 ? (lbState.index + 1) + ' / ' + lbState.images.length : '';
+          lbOverlay.querySelector('.rv-lightbox-prev').style.display = lbState.index > 0 ? '' : 'none';
+          lbOverlay.querySelector('.rv-lightbox-next').style.display = lbState.index < lbState.images.length - 1 ? '' : 'none';
+        }
+
+        function lbOpen(itemId, index) {
+          var imgs = lbImagesByItem[itemId];
+          if (!imgs || imgs.length === 0) return;
+          lbState.images = imgs;
+          lbState.index = Math.min(index || 0, imgs.length - 1);
+          lbRender();
+          lbOverlay.style.display = '';
+          document.body.style.overflow = 'hidden';
+        }
+
+        function lbClose() {
+          lbOverlay.style.display = 'none';
+          document.body.style.overflow = '';
+        }
+
+        lbOverlay.querySelector('.rv-lightbox-close').addEventListener('click', lbClose);
+        lbOverlay.addEventListener('click', function(e) { if (e.target === lbOverlay) lbClose(); });
+        lbOverlay.querySelector('.rv-lightbox-content').addEventListener('click', function(e) { e.stopPropagation(); });
+        lbOverlay.querySelector('.rv-lightbox-prev').addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (lbState.index > 0) { lbState.index--; lbRender(); }
+        });
+        lbOverlay.querySelector('.rv-lightbox-next').addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (lbState.index < lbState.images.length - 1) { lbState.index++; lbRender(); }
+        });
+        document.addEventListener('keydown', function(e) {
+          if (lbOverlay.style.display === 'none') return;
+          if (e.key === 'Escape') lbClose();
+          if (e.key === 'ArrowLeft' && lbState.index > 0) { lbState.index--; lbRender(); }
+          if (e.key === 'ArrowRight' && lbState.index < lbState.images.length - 1) { lbState.index++; lbRender(); }
+        });
+
+        document.addEventListener('click', function(e) {
+          var trigger = e.target.closest && e.target.closest('[data-lightbox-trigger]');
+          if (trigger) {
+            e.preventDefault();
+            lbOpen(trigger.dataset.itemId, parseInt(trigger.dataset.imageIndex || '0', 10));
+          }
+        });
+      })();
+    </script>`
+
     const body = `<div class="project-public">
       ${headerHtml}
       ${descHtml}
@@ -3825,7 +3902,7 @@ router.get('/p/:slug', async (req, res) => {
       ${imagesHtml}
       ${capacityHtml}
       ${reviewsListHtml}
-    </div>${legendScript}`
+    </div>${legendScript}${lightboxScript}`
 
     res.send(renderPage(project.name, body, [], undefined, sessionId, { hideSidebar: true }))
   } catch (e: any) {
