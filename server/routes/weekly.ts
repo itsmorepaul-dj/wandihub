@@ -216,24 +216,28 @@ router.get('/current-week', (_req, res) => {
 // preview matches frozen snapshots byte-for-byte.
 const generateSnapshotPayload = async (_week: string) => {
   const week = _week
-  // Exclude updates/entries tied to archived projects so the weekly report
-  // reflects *current* work only. Project deletes already cascade to these
-  // tables, so any remaining rows point at a live project row.
+  // Scope to THIS week's entries. Forms edit a single row per
+  // (project, designer, type) in place and update the `week` column to the
+  // reporting week on every save — so anything whose week != current is a
+  // stale leftover from a previous reporting period and must not leak into
+  // the new report. Also exclude archived-project rows regardless of week.
   const updatesRaw = await all(
     `SELECT wu.*, t.name as designer_name, p.name as project_name, p.businessLine as business_lines
      FROM weekly_updates wu
      LEFT JOIN team t ON wu.designer_id = t.id
      JOIN projects p ON wu.project_id = p.id
-     WHERE p.status != 'archived'
-     ORDER BY wu.updated_at DESC`
+     WHERE p.status != 'archived' AND wu.week = ?
+     ORDER BY wu.updated_at DESC`,
+    [week]
   )
   const generalRaw = await all(
     `SELECT wg.*, t.name as designer_name, p.name as project_name
      FROM weekly_general wg
      LEFT JOIN team t ON wg.designer_id = t.id
      LEFT JOIN projects p ON wg.project_id = p.id
-     WHERE wg.project_id IS NULL OR p.status != 'archived'
-     ORDER BY wg.category, wg.updated_at DESC`
+     WHERE wg.week = ? AND (wg.project_id IS NULL OR p.status != 'archived')
+     ORDER BY wg.category, wg.updated_at DESC`,
+    [week]
   )
   const projects = await all(`SELECT id, name, status, businessLine, startDate, endDate, estimatedHours, designers, deckLink, prdLink, briefLink, figmaLink, customLinks FROM projects WHERE status != 'archived'`)
 
@@ -330,63 +334,13 @@ const generateSnapshotPayload = async (_week: string) => {
   const projectFyis = general.filter((e: any) => e.category === 'fyi' && e.project_id)
   const projectPeople = general.filter((e: any) => e.category === 'people' && e.project_id)
 
-  // Auto-populate upcoming OOO into the People section. Looks at every team
-  // member's timeOff entries and pulls any whose startDate is within 10 days
-  // of now. These are synthetic (not persisted in weekly_general) so the
-  // source of truth stays on the team record — editing the time-off in
-  // Settings automatically updates future snapshot regenerations.
-  const teamMembers = await all(`SELECT id, name, timeOff FROM team WHERE excluded = 0`)
-  const oooEntries: any[] = []
-  const now = new Date()
-  const tenDaysMs = 10 * 24 * 60 * 60 * 1000
-  const formatDateRange = (startISO: string, endISO: string) => {
-    const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-    const s = new Date(startISO)
-    const e = new Date(endISO)
-    if (isNaN(s.getTime())) return ''
-    if (isNaN(e.getTime()) || startISO === endISO) return fmt(s)
-    return `${fmt(s)}–${fmt(e)}`
-  }
-  for (const m of teamMembers as any[]) {
-    let entries: Array<{ id: string; name: string; startDate: string; endDate: string }> = []
-    try { entries = JSON.parse(m.timeOff || '[]') || [] } catch { entries = [] }
-    for (const to of entries) {
-      if (!to?.startDate) continue
-      // Parse as UTC midnight so timezone doesn't flip the day boundary.
-      const start = new Date(to.startDate + (to.startDate.length === 10 ? 'T00:00:00Z' : ''))
-      if (isNaN(start.getTime())) continue
-      const delta = start.getTime() - now.getTime()
-      // Within the 10-day lookahead window; skip anything that already ended.
-      if (delta > tenDaysMs) continue
-      const end = new Date((to.endDate || to.startDate) + ((to.endDate || to.startDate).length === 10 ? 'T23:59:59Z' : ''))
-      if (!isNaN(end.getTime()) && end.getTime() < now.getTime()) continue
-      const title = to.name || 'Time off'
-      const range = formatDateRange(to.startDate, to.endDate || to.startDate)
-      const content = `${m.name}: ${title}, ${range}`
-      oooEntries.push({
-        id: `ooo-${m.id}-${to.id || to.startDate}`,
-        designer_id: String(m.id),
-        designer_name: m.name,
-        week,
-        category: 'people',
-        content,
-        // Sort key; not persisted.
-        _sortKey: start.getTime(),
-      })
-    }
-  }
-  // Dedup just in case (shouldn't happen — ids are unique) and sort by
-  // soonest-first so the People section reads chronologically.
-  const oooSeen = new Set<string>()
-  const oooDedup = oooEntries.filter(e => {
-    if (oooSeen.has(e.id)) return false
-    oooSeen.add(e.id)
-    return true
-  }).sort((a, b) => a._sortKey - b._sortKey)
-
-  // Manual entries go first so a designer's explicit note (e.g. "extending
-  // my PTO") appears above the auto-generated OOO block.
-  const peopleUpdates = [...peopleUpdatesManual, ...oooDedup.map(({ _sortKey, ...rest }) => rest)]
+  // Report content is strictly what's in the form fields — no auto-injection.
+  // If the general People field is empty, the People section stays empty (the
+  // section only renders when there's content, per the SnapshotReportView
+  // rules). Upcoming time off is visible elsewhere in the app (team page,
+  // capacity view), so authors can mention it explicitly if they want it in
+  // the report.
+  const peopleUpdates = peopleUpdatesManual
 
   const highlightsText = (() => {
     const projectLines = highlights.map((u: any) => `    \u2022    ${u.primary_business_line}: ${u.project_name || 'Unknown'}\n    \u25E6    ${u.description}`)
@@ -571,6 +525,32 @@ router.get('/weekly-updates/missing', async (req, res) => {
 // ============ FRIDAY 5PM ET CRON ============
 
 let lastSnapshotCheck = ''
+
+// One-shot startup migration: remove weekly_updates and weekly_general rows
+// whose `week` is older than the current active week. The form edits a
+// single row per (project, designer, type) in place, bumping the row's
+// `week` on save — so anything with a stale week column is leftover content
+// from a prior reporting period that the designer never re-edited. It
+// clutters the live "View Report" preview even though the designer intended
+// those entries as "last week". Frozen weekly_snapshots are untouched and
+// remain the historical record. Idempotent: no-op once orphans are gone.
+export const purgeStaleWeeklyRows = async () => {
+  const currentWeek = getActiveWeek()
+  try {
+    const upd = await run('DELETE FROM weekly_updates WHERE week < ?', [currentWeek]) as any
+    const updCount = typeof upd?.changes === 'number' ? upd.changes : 0
+    if (updCount > 0) console.log(`stale cleanup: removed ${updCount} weekly_updates older than ${currentWeek}`)
+  } catch (e: any) {
+    console.error('stale weekly_updates cleanup failed:', e.message)
+  }
+  try {
+    const gen = await run('DELETE FROM weekly_general WHERE week < ?', [currentWeek]) as any
+    const genCount = typeof gen?.changes === 'number' ? gen.changes : 0
+    if (genCount > 0) console.log(`stale cleanup: removed ${genCount} weekly_general older than ${currentWeek}`)
+  } catch (e: any) {
+    console.error('stale weekly_general cleanup failed:', e.message)
+  }
+}
 
 export const startWeeklyCron = () => {
   setInterval(() => {

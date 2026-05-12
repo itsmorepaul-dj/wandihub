@@ -15,7 +15,7 @@ import capacityRouter from './server/routes/capacity.js';
 import notesRouter from './server/routes/notes.js';
 import dataRouter from './server/routes/data.js';
 import adminRouter from './server/routes/admin.js';
-import weeklyRouter, { startWeeklyCron } from './server/routes/weekly.js';
+import weeklyRouter, { startWeeklyCron, purgeStaleWeeklyRows } from './server/routes/weekly.js';
 import imagesRouter from './server/routes/images.js';
 import reviewItemImagesRouter from './server/routes/review-item-images.js';
 import reviewRouter, { startReviewCron } from './server/routes/review.js';
@@ -102,6 +102,7 @@ async function startup() {
     await initVersions();
     await loadMaintenanceState();
     await validateSchemaOnStartup();
+    await purgeStaleWeeklyRows();
     console.log('Schema initialization complete');
   } catch (e) {
     console.error('Startup error:', e);

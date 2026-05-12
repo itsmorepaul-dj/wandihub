@@ -6259,22 +6259,6 @@ a.report-view-btn {
   justify-content: flex-end;
   gap: 0.5rem;
 }
-.weekly-delete-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  cursor: pointer;
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
-}
-.weekly-delete-btn:hover {
-  color: var(--color-danger, #ef4444);
-  background: color-mix(in srgb, var(--color-danger, #ef4444) 8%, transparent);
-}
 .weekly-done-btn {
   font-size: 0.73rem;
   font-weight: 500;

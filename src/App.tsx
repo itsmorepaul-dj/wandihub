@@ -32,9 +32,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Faster and cleaner Weekly Status report — "View Report" opens immediately instead of doing copy-to-Docs prep on open, jump-nav links no longer pull up a project page behind the modal, and the report is strictly filtered to the current reporting week so leftover content from prior weeks no longer surfaces. Clearing a field in Optional General Notes and saving now deletes that entry directly (no separate Delete button or confirm modal).',
   'Weekly report no longer shows stale content — "View Report" is now filtered to only live, non-archived projects, and deleting a project now cascades through weekly updates, images, notes, and review history so orphaned data can no longer surface. A one-time cleanup also wipes pre-existing orphans from the database.',
   'Weekly Status report thumbnails now open the standard lightbox — clicking a project image in a Weekly Status report (live or from a past snapshot) opens the same in-app lightbox with caption, counter, and keyboard navigation used elsewhere, instead of opening the raw image in a new tab.',
-  'Fixed lightbox on public project pages — clicking an attached image on a Published project\'s public URL now opens the full-size lightbox with caption, counter, and keyboard navigation, matching behavior on review pages.',
 ]
 
 
@@ -845,10 +845,15 @@ const [showFilters, setShowFilters] = useState(false)
     }
   }, [activeTab, projectFilters, capacityDesignerFilter])
 
-  // Handle browser back/forward
+  // Handle browser back/forward. Only reacts to real tab routes (`#/tab` or
+  // `#/tab?...`). Plain in-page anchors like `#rr-general-notes` used by the
+  // report modal's jump nav are ignored so clicking them doesn't switch tabs
+  // and yank the modal content out from under the user.
   useEffect(() => {
     const onHashChange = () => {
       if (hashUpdateRef.current) { hashUpdateRef.current = false; return }
+      const raw = window.location.hash
+      if (!raw.startsWith('#/')) return
       const { tab, params } = parseHash()
       setActiveTab(tab)
       if (tab === 'projects' && params.toString()) {
@@ -1205,7 +1210,10 @@ const [showFilters, setShowFilters] = useState(false)
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
-  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode; snapshotWeek?: string; docsHtml?: string }>({ open: false, title: '', content: '' })
+  // `docsHtml` is a lazy builder: running the markup-to-Docs conversion is
+  // expensive and only needed if the user clicks "Copy to Docs", so we defer
+  // it until that click rather than computing on open.
+  const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode; snapshotWeek?: string; docsHtml?: () => string }>({ open: false, title: '', content: '' })
   // Publish-project state: publishCopiedFor flashes a brief "copied" indicator
   // next to the chip after the URL is auto-copied on publish.
   const [addToReviewPickerOpen, setAddToReviewPickerOpen] = useState(false)
@@ -5201,7 +5209,7 @@ const [showFilters, setShowFilters] = useState(false)
         const blockedProjects = currentProjects.filter(p => p.status === 'blocked')
         const pendingProjects = currentProjects.filter(p => p.status === 'pending')
 
-        const openReport = (title: string, content: string, richContent?: React.ReactNode, snapshotWeek?: string, docsHtml?: string) => {
+        const openReport = (title: string, content: string, richContent?: React.ReactNode, snapshotWeek?: string, docsHtml?: () => string) => {
           setReportModal({ open: true, title, content, richContent, snapshotWeek, docsHtml })
         }
 
@@ -5226,12 +5234,6 @@ const [showFilters, setShowFilters] = useState(false)
               edited_by: null,
               edited_at: null,
             }
-            const docsHtml = snapshotToDocsHtml(parsed, currentProjects, {
-              week: meta.week,
-              generatedAt: meta.generated_at,
-              editedBy: null,
-              editedAt: null,
-            })
             const rich = (
               <SnapshotReportView
                 meta={meta}
@@ -5246,8 +5248,14 @@ const [showFilters, setShowFilters] = useState(false)
                 onOpenLightbox={(images, index) => setLightbox({ images, index })}
               />
             )
+            const buildDocsHtml = () => snapshotToDocsHtml(parsed, currentProjects, {
+              week: meta.week,
+              generatedAt: meta.generated_at,
+              editedBy: null,
+              editedAt: null,
+            })
             // No snapshotWeek arg → no Regenerate button; this is a live preview.
-            openReport(`Weekly Status — ${preview.week} (preview)`, preview.plain_text || '', rich, undefined, docsHtml)
+            openReport(`Weekly Status — ${preview.week} (preview)`, preview.plain_text || '', rich, undefined, buildDocsHtml)
           } catch (err) { console.error('Preview failed:', err) }
         }
 
@@ -5268,12 +5276,6 @@ const [showFilters, setShowFilters] = useState(false)
               edited_by: snapData.edited_by ?? null,
               edited_at: snapData.edited_at ?? null,
             }
-            const docsHtml = snapshotToDocsHtml(parsed, currentProjects, {
-              week: meta.week,
-              generatedAt: meta.generated_at,
-              editedBy: meta.edited_by,
-              editedAt: meta.edited_at,
-            })
             const rich = (
               <SnapshotReportView
                 meta={meta}
@@ -5302,7 +5304,13 @@ const [showFilters, setShowFilters] = useState(false)
                 onOpenLightbox={(images, index) => setLightbox({ images, index })}
               />
             )
-            openReport(`Weekly Snapshot — ${snap.week}`, snapData.plain_text || '', rich, snap.week, docsHtml)
+            const buildDocsHtml = () => snapshotToDocsHtml(parsed, currentProjects, {
+              week: meta.week,
+              generatedAt: meta.generated_at,
+              editedBy: meta.edited_by,
+              editedAt: meta.edited_at,
+            })
+            openReport(`Weekly Snapshot — ${snap.week}`, snapData.plain_text || '', rich, snap.week, buildDocsHtml)
           } catch (err) { console.error('Error loading snapshot:', err) }
         }
 
@@ -5663,9 +5671,6 @@ const [showFilters, setShowFilters] = useState(false)
                     {(() => {
                       const myMember = findMyTeamMember()
                       const designerId = String(myMember?.id || currentUser?.id || 'admin')
-                      const sectionLabels: Record<'highlight' | 'lowlight' | 'fyi' | 'people', string> = {
-                        highlight: 'Highlights', lowlight: 'Lowlights', fyi: 'FYIs', people: 'People',
-                      }
                       return (
                         <WeeklyGeneralForm
                           weeklyGeneral={weeklyGeneral}
@@ -5675,18 +5680,13 @@ const [showFilters, setShowFilters] = useState(false)
                           onSave={async (category, content, existingId) => {
                             await saveWeeklyGeneral({ id: existingId, designer_id: designerId, week: currentWeek, category, content })
                           }}
+                          // Clearing a field and saving deletes the underlying
+                          // row — no confirm modal, no explicit Delete button.
+                          // The edit itself is the delete.
                           onDelete={async (category) => {
                             const entry = weeklyGeneral.find(e => e.category === category && e.designer_id === designerId && !e.project_id)
                             if (!entry) return
-                            return new Promise<void>((resolve) => {
-                              openConfirmModal(
-                                `Delete ${sectionLabels[category].toLowerCase()}?`,
-                                `This will permanently remove your general "${sectionLabels[category]}" entry for ${currentWeek}. This can't be undone.`,
-                                async () => {
-                                  try { await deleteWeeklyGeneral(entry.id) } finally { closeConfirmModal(); resolve() }
-                                },
-                              )
-                            })
+                            await deleteWeeklyGeneral(entry.id)
                           }}
                         />
                       )
@@ -7995,7 +7995,7 @@ const [showFilters, setShowFilters] = useState(false)
                     // non-snapshot reports (the live "View Report" flow) fall
                     // back to the basic markdown-to-html path.
                     const copyPromise = reportModal.docsHtml
-                      ? copySnapshotToDocs(reportModal.docsHtml)
+                      ? copySnapshotToDocs(reportModal.docsHtml())
                       : copyRichText(reportModal.content)
                     copyPromise.then(() => {
                       setCopiedReport(Date.now())

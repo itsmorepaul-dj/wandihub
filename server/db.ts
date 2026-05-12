@@ -503,6 +503,17 @@ export const initSchema = async () => {
     console.log(`Migrated ${legacyReviewImages.length} review-scoped images to review_item_images`)
   }
 
+  // Hot-path indexes. Every "View Report" preview and the project capacity
+  // views fan out queries keyed on project_id; without these SQLite falls
+  // back to table scans. Tiny tables make this fast today, but the index
+  // keeps query time flat as the data grows.
+  await run('CREATE INDEX IF NOT EXISTS idx_project_images_project ON project_images(project_id)').catch(() => {})
+  await run('CREATE INDEX IF NOT EXISTS idx_project_assignments_project ON project_assignments(project_id)').catch(() => {})
+  await run('CREATE INDEX IF NOT EXISTS idx_review_items_project ON review_items(project_id)').catch(() => {})
+  await run('CREATE INDEX IF NOT EXISTS idx_review_items_review ON review_items(review_id)').catch(() => {})
+  await run('CREATE INDEX IF NOT EXISTS idx_weekly_updates_week ON weekly_updates(week)').catch(() => {})
+  await run('CREATE INDEX IF NOT EXISTS idx_weekly_general_week ON weekly_general(week)').catch(() => {})
+
   // One-time cleanup: historical project deletes only removed `projects` and
   // `project_assignments`, leaving orphaned rows in every other
   // project-scoped table. Those rows surfaced as stale entries in the weekly

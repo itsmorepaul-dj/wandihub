@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { TrendingUp, TrendingDown, Megaphone, UserCheck, Loader2, Trash2 } from 'lucide-react'
+import { TrendingUp, TrendingDown, Megaphone, UserCheck, Loader2 } from 'lucide-react'
 import RichTextEditor from './components/RichTextEditor'
 import type { WeeklyGeneral } from './types'
 
@@ -170,8 +170,6 @@ export default function WeeklyGeneralForm({
     }
   }, [])
 
-  const activeExisting = entriesRef.current[activeTab]
-
   if (!isExpanded) return null
 
   return (
@@ -209,16 +207,6 @@ export default function WeeklyGeneralForm({
               {saveState === 'idle' && isDirty() && (<>Unsaved changes</>)}
               {saveState === 'idle' && !isDirty() && <>&nbsp;</>}
             </span>
-            {activeExisting && (
-              <button
-                type="button"
-                className="weekly-delete-btn"
-                onClick={() => onDelete(activeTab)}
-                title={`Delete this week's ${activeTab}`}
-              >
-                <Trash2 size={11} /> Delete
-              </button>
-            )}
             <button
               type="button"
               className={`weekly-save-btn${isDirty() ? ' is-dirty' : ''}${saveState === 'saving' ? ' is-saving' : ''}`}
