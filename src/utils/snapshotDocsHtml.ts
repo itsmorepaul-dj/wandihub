@@ -206,7 +206,19 @@ export function snapshotToDocsHtml(
     }
     if (genLL.length > 0) {
       html += `<h3 style="font-size:11pt;font-weight:600;margin:0.75em 0 0.25em;color:${COLOR.lowlight};text-transform:uppercase;letter-spacing:0.05em">Lowlights</h3>`
-      html += renderGeneralList(genLL)
+      // Each general lowlight gets its own block so Risk/Resolution sub-lines
+      // attach to the correct entry, matching the project-lowlight shape.
+      for (const e of genLL) {
+        html += `<div style="margin:0 0 0.75em 0;padding-left:0.6em;border-left:3px solid ${COLOR.lowlight}">`
+        html += `<div>${inlineMarkdown(e.content || '')}</div>`
+        if (e.risk_reason) {
+          html += `<p style="margin:0.25em 0 0"><strong>Risk:</strong> ${inlineMarkdown(e.risk_reason)}</p>`
+        }
+        if (e.resolution) {
+          html += `<p style="margin:0.25em 0 0"><strong>Resolution:</strong> ${inlineMarkdown(e.resolution)}</p>`
+        }
+        html += `</div>`
+      }
     }
     if (fi.length > 0) {
       html += `<h3 style="font-size:11pt;font-weight:600;margin:0.75em 0 0.25em;color:${COLOR.fyi};text-transform:uppercase;letter-spacing:0.05em">FYIs</h3>`

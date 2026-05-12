@@ -194,6 +194,13 @@ export default function SnapshotReportView({
     })
   }
 
+  const updateGeneralLowlightField = (entryId: string, field: 'risk_reason' | 'resolution', value: string) => {
+    patch(d => {
+      d.generalLowlights = (d.generalLowlights || []).map(e => e.id === entryId ? { ...e, [field]: value } : e)
+      return d
+    })
+  }
+
   const beginEdit = () => {
     setData(initialData)
     setEditMode(true)
@@ -429,7 +436,30 @@ export default function SnapshotReportView({
           {generalLL.length > 0 && (
             <div className="rr-subsection">
               <h3 className="rr-subsection-title rr-subsection-lowlight">Lowlights</h3>
-              {renderGeneralList(generalLL, 'general lowlights', 'generalLowlights')}
+              <div className="rr-general-lowlight-list">
+                {generalLL.map(e => (
+                  <div key={e.id} className="rr-block rr-block-lowlight rr-general-lowlight">
+                    {!editMode && (
+                      <button className="rr-copy-entry" onClick={() => onSectionCopy(e.content.trim())} title="Copy entry">
+                        <ClipboardCopy size={11} />
+                      </button>
+                    )}
+                    {editMode
+                      ? <AdminRTE placeholder="Lowlight description" value={e.content || ''} onChange={v => updateGeneralEntry(e.id, 'generalLowlights', v)} />
+                      : <div className="rr-block-body">{renderMarkdownLinks(e.content)}</div>}
+                    {(editMode || e.risk_reason) && (
+                      editMode
+                        ? <div className="rr-block-sub"><strong>Risk:</strong><AdminRTE placeholder="Risk" value={e.risk_reason || ''} onChange={v => updateGeneralLowlightField(e.id, 'risk_reason', v)} /></div>
+                        : <div className="rr-block-sub"><strong>Risk:</strong> {renderMarkdownLinks(e.risk_reason!)}</div>
+                    )}
+                    {(editMode || e.resolution) && (
+                      editMode
+                        ? <div className="rr-block-sub"><strong>Resolution:</strong><AdminRTE placeholder="Resolution" value={e.resolution || ''} onChange={v => updateGeneralLowlightField(e.id, 'resolution', v)} /></div>
+                        : <div className="rr-block-sub"><strong>Resolution:</strong> {renderMarkdownLinks(e.resolution!)}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {fi.length > 0 && (

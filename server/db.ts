@@ -320,6 +320,12 @@ export const initSchema = async () => {
   // card and should appear under the project in the snapshot.
   await run(`ALTER TABLE weekly_general ADD COLUMN project_id TEXT`).catch(() => {})
 
+  // Migration: lowlight entries (both general and project-scoped) can now
+  // carry optional Risk and Resolution sub-fields, mirroring the shape of
+  // weekly_updates lowlights. NULL/empty on other categories.
+  await run(`ALTER TABLE weekly_general ADD COLUMN risk_reason TEXT DEFAULT ''`).catch(() => {})
+  await run(`ALTER TABLE weekly_general ADD COLUMN resolution TEXT DEFAULT ''`).catch(() => {})
+
   // One row per (designer, category, project) — truly general entries
   // (project_id NULL) are one row per (designer, category). Editing in place
   // across weeks replaces `week` and `content`. Detect any prior index shape

@@ -168,6 +168,10 @@ export interface WeeklyGeneral {
   week: string
   category: 'fyi' | 'people' | 'highlight' | 'lowlight'
   content: string
+  /** Lowlight-only: reason this is at risk. Empty on other categories. */
+  risk_reason?: string
+  /** Lowlight-only: proposed path forward. Empty on other categories. */
+  resolution?: string
   project_id?: string | null
   project_name?: string
   created_at?: string

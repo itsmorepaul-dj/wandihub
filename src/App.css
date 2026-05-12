@@ -5860,11 +5860,54 @@ a.report-view-btn {
 .weekly-tab-fyi.active       { color: #2563eb; border-bottom-color: #3b82f6; font-weight: 600; }
 .weekly-tab-people.active    { color: #9333ea; border-bottom-color: #a855f7; font-weight: 600; }
 
+/* --- OOO suggestion chips (People tab) --- */
+.weekly-ooo-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0 0.15rem;
+}
+.weekly-ooo-suggest-label {
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 0.15rem;
+}
+.weekly-ooo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  color: #9333ea;
+  background: color-mix(in srgb, #a855f7 8%, transparent);
+  border: 1px solid color-mix(in srgb, #a855f7 28%, transparent);
+  border-radius: 99px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.weekly-ooo-chip:hover {
+  background: color-mix(in srgb, #a855f7 16%, transparent);
+  border-color: color-mix(in srgb, #a855f7 48%, transparent);
+}
+
 /* --- Tab body --- */
 .weekly-tab-body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+.weekly-sub-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-top: 0.35rem;
 }
 
 /* --- Footer (save button + status) --- */
@@ -9753,6 +9796,19 @@ select:focus {
   display: block;
   font-size: 0.875rem;
   line-height: 1.55;
+}
+
+/* General lowlights match the project lowlight block: vertical red line +
+   Risk/Resolution sub-blocks. Each entry gets its own block rather than a
+   flat list row, so multi-line descriptions read clearly. */
+.rr-general-lowlight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.rr-general-lowlight {
+  position: relative;
+  padding-right: 2.5rem;
 }
 .rr-general-text {
   display: inline;

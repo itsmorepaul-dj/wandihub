@@ -32,9 +32,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Faster and cleaner Weekly Status report — "View Report" opens immediately instead of doing copy-to-Docs prep on open, jump-nav links no longer pull up a project page behind the modal, and the report is strictly filtered to the current reporting week so leftover content from prior weeks no longer surfaces. Clearing a field in Optional General Notes and saving now deletes that entry directly (no separate Delete button or confirm modal).',
-  'Weekly report no longer shows stale content — "View Report" is now filtered to only live, non-archived projects, and deleting a project now cascades through weekly updates, images, notes, and review history so orphaned data can no longer surface. A one-time cleanup also wipes pre-existing orphans from the database.',
-  'Weekly Status report thumbnails now open the standard lightbox — clicking a project image in a Weekly Status report (live or from a past snapshot) opens the same in-app lightbox with caption, counter, and keyboard navigation used elsewhere, instead of opening the raw image in a new tab.',
+  'Weekly Status report overhaul — "View Report" opens faster and only shows the current reporting week\'s content (archived-project and older-week leftovers are cleaned out, including a one-time sweep of pre-existing orphans). Deleting a project now cascades through weekly updates, images, notes, and review history so nothing can orphan again. Jump-nav links stay inside the modal instead of pulling up a project page behind it. Optional General Notes now has a one-click "Upcoming OOO" suggester on the People tab, Risk and Resolution fields on the Lowlights tab (rendered with the same vertical red bar as project lowlights in the report and Docs export), and editing a field clears/saves it directly (no separate Delete button or confirm modal). Report thumbnails open the standard in-app lightbox.',
+  'Fixed lightbox on public project pages — clicking an attached image on a Published project\'s public URL now opens the full-size lightbox with caption, counter, and keyboard navigation, matching behavior on review pages.',
+  'Publishing controls moved to the project card — every project now has a "Make public" chip that publishes + copies the URL in one click, and the green "Published" chip opens a dropdown to either open the public page or unpublish. The separate "Published Project Pages" card on the Reports tab has been removed.',
 ]
 
 
@@ -5677,8 +5677,17 @@ const [showFilters, setShowFilters] = useState(false)
                           designerId={designerId}
                           week={currentWeek}
                           isExpanded={showWeeklyPending}
-                          onSave={async (category, content, existingId) => {
-                            await saveWeeklyGeneral({ id: existingId, designer_id: designerId, week: currentWeek, category, content })
+                          team={team}
+                          onSave={async (category, content, existingId, extras) => {
+                            await saveWeeklyGeneral({
+                              id: existingId,
+                              designer_id: designerId,
+                              week: currentWeek,
+                              category,
+                              content,
+                              ...(extras?.risk_reason !== undefined ? { risk_reason: extras.risk_reason } : {}),
+                              ...(extras?.resolution !== undefined ? { resolution: extras.resolution } : {}),
+                            })
                           }}
                           // Clearing a field and saving deletes the underlying
                           // row — no confirm modal, no explicit Delete button.

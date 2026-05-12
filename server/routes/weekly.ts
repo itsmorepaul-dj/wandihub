@@ -160,27 +160,34 @@ router.get('/weekly-general', async (req, res) => {
 
 router.post('/weekly-general', async (req, res) => {
   try {
-    const { id, designer_id, category, content, project_id } = req.body
+    const { id, designer_id, category, content, project_id, risk_reason, resolution } = req.body
     const entryId = id || `wg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     const activeWeek = getActiveWeek()
     const projectId = project_id || null
+    // Risk/Resolution are lowlight-only; zero them out for other categories so
+    // a stale value can't follow a row that was repurposed from lowlight→fyi.
+    const isLowlight = (category || 'fyi') === 'lowlight'
+    const risk = isLowlight ? (risk_reason || '') : ''
+    const resolutionText = isLowlight ? (resolution || '') : ''
 
     if (id) {
       await run(
-        `UPDATE weekly_general SET content = ?, project_id = ?, week = ?, updated_at = datetime('now') WHERE id = ?`,
-        [content || '', projectId, activeWeek, id]
+        `UPDATE weekly_general SET content = ?, project_id = ?, week = ?, risk_reason = ?, resolution = ?, updated_at = datetime('now') WHERE id = ?`,
+        [content || '', projectId, activeWeek, risk, resolutionText, id]
       )
     } else {
       // One row per (designer, category, project) — updates in place, week
       // shifts to whichever reporting week the edit belongs to.
       await run(
-        `INSERT INTO weekly_general (id, designer_id, week, category, content, project_id)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO weekly_general (id, designer_id, week, category, content, project_id, risk_reason, resolution)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(designer_id, category, COALESCE(project_id, '')) DO UPDATE SET
            content = excluded.content,
            week = excluded.week,
+           risk_reason = excluded.risk_reason,
+           resolution = excluded.resolution,
            updated_at = datetime('now')`,
-        [entryId, designer_id, activeWeek, category || 'fyi', content || '', projectId]
+        [entryId, designer_id, activeWeek, category || 'fyi', content || '', projectId, risk, resolutionText]
       )
     }
 
@@ -358,7 +365,12 @@ const generateSnapshotPayload = async (_week: string) => {
       return lines.join('\n')
     })
     const splitLines = (text: string) => text.split('\n').map(l => l.trim()).filter(Boolean)
-    const generalLines = generalLowlights.flatMap((e: any) => splitLines(e.content).map(l => `    \u2022    General: ${l}`))
+    const generalLines = generalLowlights.flatMap((e: any) => {
+      const body = splitLines(e.content).map(l => `    \u2022    General: ${l}`)
+      if (e.risk_reason) body.push(`    \u25E6    At risk: ${e.risk_reason}`)
+      if (e.resolution) body.push(`    \u25E6    Path to resolution: ${e.resolution}`)
+      return body
+    })
     const all = [...generalLines, ...projectLines]
     return all.length > 0 ? all.join('\n') : '    \u2022    TK'
   })()
