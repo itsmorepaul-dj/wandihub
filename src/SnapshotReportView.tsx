@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { ClipboardCopy, Pencil, Save, X } from 'lucide-react'
-import type { Project, WeeklyUpdate, WeeklyGeneral } from './types'
+import type { Project, WeeklyUpdate, WeeklyGeneral, ProjectImage, SnapshotThumbnail } from './types'
 import RichTextEditor from './components/RichTextEditor'
 
 // One snapshot's raw payload (the parsed data_json shape emitted by the server).
@@ -31,6 +31,9 @@ interface Props {
   renderMarkdownLinks: (text: string) => React.ReactNode
   /** Patch the snapshot's data_json on the server and return the saved row. */
   onAdminSave: (dataJson: SnapshotPayload) => Promise<SnapshotMeta>
+  /** Open the app-wide lightbox for a thumbnail gallery. If omitted, thumbs
+   * fall back to opening the raw image URL in a new tab. */
+  onOpenLightbox?: (images: ProjectImage[], index: number) => void
 }
 
 const slugForBL = (name: string) => `bl-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
@@ -59,8 +62,21 @@ function AdminRTE({ value, onChange, placeholder, className }: {
 
 export default function SnapshotReportView({
   meta, initialData, currentProjects, isAdmin,
-  onSectionCopy, renderMarkdownLinks, onAdminSave,
+  onSectionCopy, renderMarkdownLinks, onAdminSave, onOpenLightbox,
 }: Props) {
+  // Adapt snapshot thumbnails ({id, filename, caption}) to ProjectImage so
+  // they can be handed to the shared ImageLightbox without refetching.
+  const toLightboxImages = (thumbs: SnapshotThumbnail[], projectId: string): ProjectImage[] =>
+    thumbs.map(t => ({
+      id: t.id,
+      project_id: projectId,
+      filename: t.filename,
+      original_name: t.filename,
+      mime_type: '',
+      size_bytes: 0,
+      caption: t.caption || '',
+      created_at: '',
+    }))
   const [data, setData] = useState<SnapshotPayload>(initialData)
   const [editMode, setEditMode] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
@@ -301,10 +317,22 @@ export default function SnapshotReportView({
         )}
         {thumbs.length > 0 && (
           <div className="rr-project-thumbs">
-            {thumbs.map((t: any) => (
-              <a key={t.id} className="rr-project-thumb" href={`/api/images/${t.id}`} target="_blank" rel="noopener noreferrer">
-                <img src={`/api/images/${t.id}`} alt={t.caption || gp.project_name} loading="lazy" />
-              </a>
+            {thumbs.map((t: SnapshotThumbnail, idx: number) => (
+              onOpenLightbox ? (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="rr-project-thumb"
+                  onClick={() => onOpenLightbox(toLightboxImages(thumbs, gp.project_id), idx)}
+                  title={t.caption || gp.project_name}
+                >
+                  <img src={`/api/images/${t.id}`} alt={t.caption || gp.project_name} loading="lazy" />
+                </button>
+              ) : (
+                <a key={t.id} className="rr-project-thumb" href={`/api/images/${t.id}`} target="_blank" rel="noopener noreferrer">
+                  <img src={`/api/images/${t.id}`} alt={t.caption || gp.project_name} loading="lazy" />
+                </a>
+              )
             ))}
           </div>
         )}
