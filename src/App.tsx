@@ -35,8 +35,6 @@ const CHANGELOG = [
   'Publishing controls moved to the project card — every project now has a "Make public" chip that publishes + copies the URL in one click, and the green "Published" chip opens a dropdown to either open the public page or unpublish. The separate "Published Project Pages" card on the Reports tab has been removed.',
   'Project descriptions now render formatting — bold, bullets, and links from the description editor toolbar display properly in the project list instead of showing raw markdown.',
   'Upcoming time off shows up automatically — any time off scheduled within 10 days is added to the People section of the weekly report, so you don\'t have to type it in.',
-  'Weekly report got a redesign — reports are now grouped by business line, copy straight into Google Docs with full formatting, and the "View Report" preview matches the frozen snapshot exactly.',
-  'Your weekly text sticks around — your weekly update text carries over week to week so you can edit instead of rewriting; the snapshot locks at Friday 8pm ET and you have until Monday noon ET to pull in late edits.',
 ]
 
 
