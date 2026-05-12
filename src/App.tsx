@@ -32,6 +32,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Weekly update status badge on project cards — every active, in-review, or blocked project now shows a small red "Needs update" or green "Updated" pill next to the weekly-update toggle so it\'s obvious at a glance whether the project has an entry for the current reporting week.',
   'Weekly Status report overhaul — "View Report" opens faster, is scoped to only the current week\'s non-archived work, and jump-nav links now stay inside the modal. Optional General Notes gains a one-click "Upcoming OOO" suggester on People and Risk/Resolution fields on Lowlights (with the same vertical red bar as project lowlights). Report thumbnails open the standard lightbox.',
 ]
 
@@ -3890,6 +3891,11 @@ const [showFilters, setShowFilters] = useState(false)
                               weeklyGeneral={weeklyGeneral}
                               designerId={personalDesignerId}
                               projectId={project.id}
+                              currentWeek={currentWeek}
+                              // In-flight work expects a weekly update; done/pending projects
+                              // don't, so we skip the nag badge on those. Archived is already
+                              // filtered out of the card list upstream.
+                              showUpdateBadge={project.status === 'active' || project.status === 'review' || project.status === 'blocked'}
                               isExpanded={weeklyExpandedProject === project.id}
                               onToggle={() => setWeeklyExpandedProject(prev => prev === project.id ? null : project.id)}
                               onSave={async (data, opts) => {

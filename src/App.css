@@ -5819,6 +5819,26 @@ a.report-view-btn {
   color: var(--color-text-secondary);
 }
 
+/* Status pill sitting next to the weekly-update toggle. Sized to match the
+   review-page .notes-badge / .comment-count-badge pattern. Red = nothing
+   saved for the current reporting week yet; green = at least one entry. */
+.weekly-update-badge {
+  font-size: 0.6rem;
+  font-weight: 500;
+  padding: 0.1rem 0.4rem;
+  border-radius: 99px;
+  margin-left: 0.25rem;
+  white-space: nowrap;
+}
+.weekly-update-badge-todo {
+  color: #b91c1c;
+  background: rgba(220, 38, 38, 0.1);
+}
+.weekly-update-badge-done {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.1);
+}
+
 .weekly-inline-form {
   display: flex;
   flex-direction: column;

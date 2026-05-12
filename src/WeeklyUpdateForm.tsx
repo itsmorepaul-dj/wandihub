@@ -13,6 +13,13 @@ interface WeeklyUpdateFormProps {
   weeklyGeneral: WeeklyGeneral[]
   designerId: string
   projectId: string
+  /** Current reporting week (ISO week string). Drives the Needs update /
+   *  Updated status badge; only entries with this week's label count. */
+  currentWeek: string
+  /** When true, show the Needs update / Updated pill next to the toggle.
+   *  Callers pass false for statuses (done, pending) where no update is
+   *  expected so the badge doesn't nag. */
+  showUpdateBadge?: boolean
   isExpanded: boolean
   onToggle: () => void
   onSave: (data: WeeklyUpdateSavePayload, opts?: { keepalive?: boolean }) => Promise<void>
@@ -29,12 +36,22 @@ const PLACEHOLDERS: Record<string, string> = {
 type TabKey = 'highlight' | 'lowlight' | 'fyi' | 'people'
 
 export default function WeeklyUpdateForm({
-  projectUpdates, weeklyGeneral, designerId, projectId,
+  projectUpdates, weeklyGeneral, designerId, projectId, currentWeek, showUpdateBadge,
   isExpanded, onToggle, onSave, onAddProjectLink,
 }: WeeklyUpdateFormProps) {
   const existingHighlight = projectUpdates.find(u => u.type === 'highlight') || null
   const existingLowlight = projectUpdates.find(u => u.type === 'lowlight') || null
   const hasUpdate = !!(existingHighlight || existingLowlight)
+
+  // Status-badge input: does ANY weekly entry (highlight/lowlight/FYI/People)
+  // exist for this project + week? FYIs and People on this project are
+  // stored in weekly_general with a non-null project_id; weekly_updates rows
+  // carry `week` directly. Either kind counts as "Updated" for this week.
+  const hasCurrentWeekEntry = (() => {
+    const weekUpdate = projectUpdates.some(u => u.week === currentWeek)
+    const weekGeneral = weeklyGeneral.some(e => e.project_id === projectId && e.week === currentWeek)
+    return weekUpdate || weekGeneral
+  })()
 
   const emptyDraft = { highlight: '', lowlight: '', risk_reason: '', resolution: '', fyi: '', people: '' }
   const [draft, setDraft] = useState(emptyDraft)
@@ -176,6 +193,16 @@ export default function WeeklyUpdateForm({
       >
         {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         {hasUpdate ? 'Edit weekly update' : 'Weekly update'}
+        {showUpdateBadge && (
+          <span
+            className={`weekly-update-badge weekly-update-badge-${hasCurrentWeekEntry ? 'done' : 'todo'}`}
+            title={hasCurrentWeekEntry
+              ? `Weekly entry recorded for ${currentWeek}`
+              : `No entry yet for ${currentWeek}`}
+          >
+            {hasCurrentWeekEntry ? 'Updated' : 'Needs update'}
+          </span>
+        )}
       </button>
       {isExpanded && (
         <div className="weekly-inline-form">
