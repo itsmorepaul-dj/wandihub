@@ -6347,6 +6347,11 @@ a.report-view-btn {
 .weekly-inline-link:hover {
   opacity: 0.8;
 }
+/* Bold inside a link must beat the link's own explicit font-weight. */
+.weekly-inline-link strong,
+.weekly-inline-link b {
+  font-weight: 700;
+}
 
 /* Snapshot Accordion (inside weekly-status report card) */
 .report-card-has-history {

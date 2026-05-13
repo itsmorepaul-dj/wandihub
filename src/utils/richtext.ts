@@ -111,7 +111,10 @@ export function htmlToMarkdown(el: HTMLElement): string {
         const inner = htmlToMarkdown(elem)
         if (inner.trim()) result += `**${inner}**`
       } else if (tag === 'A') {
-        result += `[${elem.textContent || ''}](${elem.getAttribute('href') || ''})`
+        // Recurse so inner formatting (e.g. <strong>) inside the link round-
+        // trips through markdown. Result: [**bold link**](url).
+        const inner = htmlToMarkdown(elem)
+        result += `[${inner || elem.textContent || ''}](${elem.getAttribute('href') || ''})`
       } else if (tag === 'BR') {
         result += '\n'
       } else if (tag === 'DIV' || tag === 'P') {

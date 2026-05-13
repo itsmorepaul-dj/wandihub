@@ -204,14 +204,35 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(({
     if (!editorRef.current) return
     editorRef.current.focus()
     restoreSelection()
-    const safeName = name.replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const safeUrl = url.replace(/"/g, '&quot;')
-    const html = `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="weekly-inline-link">${safeName}</a>`
     const sel = window.getSelection()
-    if (sel && sel.rangeCount > 0) {
-      document.execCommand('insertHTML', false, html)
+    const selectedText = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).toString() : ''
+
+    if (selectedText && selectedText === name) {
+      // Bold-preserving path: when the user selected text and didn't change
+      // the link name, wrap the selection in an anchor in-place so any inner
+      // formatting (e.g. <strong>) survives. createLink only sets href, so
+      // we patch target/rel/class onto the new anchor afterward (any anchor
+      // inside the editor missing target="_blank" must be the one we just
+      // created — earlier anchors were patched on prior inserts).
+      document.execCommand('createLink', false, url)
+      editorRef.current.querySelectorAll('a:not([target="_blank"])').forEach((a) => {
+        a.setAttribute('target', '_blank')
+        a.setAttribute('rel', 'noopener noreferrer')
+        a.classList.add('weekly-inline-link')
+      })
     } else {
-      editorRef.current.innerHTML += html
+      // No selection (or the user edited the name) — fall back to the
+      // existing execCommand('insertHTML') flow. This path is the same as
+      // before today's changes, so the link-insertion behavior on production
+      // is preserved.
+      const safeName = name.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      const safeUrl = url.replace(/"/g, '&quot;')
+      const html = `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="weekly-inline-link">${safeName}</a>`
+      if (sel && sel.rangeCount > 0) {
+        document.execCommand('insertHTML', false, html)
+      } else {
+        editorRef.current.innerHTML += html
+      }
     }
     syncEditor()
   }, [restoreSelection, syncEditor])

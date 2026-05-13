@@ -827,29 +827,48 @@ export function renderLinks(item: any): string {
   return links.join('<span class="card-link-sep">·</span>')
 }
 
+// Inline-link transform shared by both bullet and plain-paragraph paths.
+// Accepts both fully-qualified URLs (`https://...`) and bare hosts the user
+// typed without a protocol (`google.com`, `wandihub.up.railway.app/x`). Bare
+// hosts get `https://` prepended on render so the anchor is clickable; the
+// stored markdown is left alone so editing round-trips unchanged.
+const renderInlineLinks = (s: string): string =>
+  s.replace(
+    /\[([^\]]+)\]\(([^)\s]+)\)/g,
+    (_m, label, url) => {
+      let href = url
+      if (!/^https?:\/\//i.test(href)) {
+        // Only auto-prefix if it looks host-shaped (has a dot, no spaces, not
+        // an anchor/relative). Anything else stays raw so we don't mint URLs
+        // for non-URL parens content.
+        if (/^[^\s/]+\.[^\s/]/.test(href)) href = 'https://' + href
+        else return `[${label}](${url})`
+      }
+      const safeHref = href.replace(/"/g, '&quot;')
+      return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="notes-inline-link">${label}</a>`
+    }
+  )
+
 export function markdownToHtml(text: string): string {
   if (!text) return ''
   return text.split('\n').map(line => {
     // Match leading indent + bullet marker (- * •) — mirrors src/App.tsx
     // rte-bullet handling so the public page renders bullets the same way
-    // as the editor, not as literal dashes.
-    const bulletMatch = line.match(/^(\s*)[-*•]\s?(.*)/)
+    // as the editor, not as literal dashes. The trailing whitespace is
+    // REQUIRED (not optional): without it, a `**bold**` line gets eaten as
+    // a `*` bullet plus a stray asterisk and bold renders broken. The
+    // editor and pasted-glyph bullets always include the space.
+    const bulletMatch = line.match(/^(\s*)[-*•]\s(.*)/)
     if (bulletMatch) {
       const indent = Math.min(Math.floor(bulletMatch[1].length / 2), 3)
       let inner = bulletMatch[2].replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       inner = inner.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      inner = inner.replace(
-        /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
-        '<a href="$2" target="_blank" rel="noopener noreferrer" class="notes-inline-link">$1</a>'
-      )
+      inner = renderInlineLinks(inner)
       return `<div class="rte-bullet" data-indent="${indent}">${inner || '<br>'}</div>`
     }
     let html = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    html = html.replace(
-      /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener noreferrer" class="notes-inline-link">$1</a>'
-    )
+    html = renderInlineLinks(html)
     return `<div>${html || '<br>'}</div>`
   }).join('')
 }
@@ -2893,6 +2912,8 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
       cursor: pointer; font-weight: 500;
     }
     .notes-inline-link:hover { opacity: 0.8; }
+    /* Bold inside a link must beat the link's own explicit font-weight. */
+    .notes-inline-link strong, .notes-inline-link b { font-weight: 700; }
 
     /* Bullet lines — mirrors .rte-bullet in src/App.css so notes/descriptions
        render bullets the same way on the public page as in the editor. */
