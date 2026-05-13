@@ -34,7 +34,6 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 const CHANGELOG = [
   'Description fields now carry full RTE formatting — bold and bullets render correctly alongside links on the public review pages, bare URLs like "google.com" are treated as "https://" automatically, and selecting bold text before adding a link now keeps the bold formatting on the link.',
   'Weekly update status badge on project cards — every active, in-review, or blocked project now shows a small red "Needs update" or green "Updated" pill next to the weekly-update toggle so it\'s obvious at a glance whether the project has an entry for the current reporting week.',
-  'Weekly Status report overhaul — "View Report" opens faster, is scoped to only the current week\'s non-archived work, and jump-nav links now stay inside the modal. Optional General Notes gains a one-click "Upcoming OOO" suggester on People and Risk/Resolution fields on Lowlights (with the same vertical red bar as project lowlights). Report thumbnails open the standard lightbox.',
 ]
 
 
