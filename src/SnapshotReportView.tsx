@@ -240,12 +240,16 @@ export default function SnapshotReportView({
 
   const renderProjectCard = (gp: any, bl: string) => {
     const proj = currentProjects.find(p => p.id === gp.project_id)
-    const sampleUpdate = gp.highlight || gp.lowlight!
-    const thumbs = sampleUpdate.thumbnails || []
-    const pastReviews = sampleUpdate.past_reviews || []
+    // A card may exist with only project-scoped FYI/People entries (no
+    // highlight or lowlight), so sampleUpdate can be undefined. Thumbnails,
+    // past reviews, and the designer fallback all live on the highlight/
+    // lowlight rows; project-only cards just don't render those bits.
+    const sampleUpdate = gp.highlight || gp.lowlight
+    const thumbs = sampleUpdate?.thumbnails || []
+    const pastReviews = sampleUpdate?.past_reviews || []
     const designers = proj?.designers && proj.designers.length > 0
       ? proj.designers
-      : (sampleUpdate.designer_name ? [sampleUpdate.designer_name] : [])
+      : (sampleUpdate?.designer_name ? [sampleUpdate.designer_name] : [])
     const links = [
       proj?.deckLink && { name: proj.deckName || 'Deck', url: proj.deckLink },
       proj?.prdLink && { name: proj.prdName || 'PRD', url: proj.prdLink },
