@@ -6,10 +6,8 @@ import App from './App.tsx'
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false }
   static getDerivedStateFromError() { return { hasError: true } }
-  componentDidCatch() {
-    // Clear stale state and auto-recover (once per session to avoid loops)
-    localStorage.removeItem('dcc-session-id')
-    localStorage.removeItem('dcc-last-seen-activity')
+  componentDidCatch(error: Error, info: { componentStack?: string }) {
+    console.error('ErrorBoundary caught:', error, info.componentStack)
     if (!sessionStorage.getItem('dcc-recovery')) {
       sessionStorage.setItem('dcc-recovery', '1')
       window.location.reload()
