@@ -24,7 +24,7 @@ const getISOWeek = (d: Date = new Date()) => {
 // ISO week (so late edits Sat/Sun/Mon-morning still belong to last Friday's
 // report and can be regenerated into it). From Monday noon ET onward, the
 // current ISO week (forward-dated to next Friday's report).
-const getActiveWeek = (d: Date = new Date()): string => {
+export const getActiveWeek = (d: Date = new Date()): string => {
   const et = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }))
   const day = et.getDay() // 0=Sun, 1=Mon
   const hour = et.getHours()
@@ -221,7 +221,7 @@ router.get('/current-week', (_req, res) => {
 // Read-only: produces the same payload generateSnapshot would write, but
 // without persisting. Used by the /preview endpoint so the "View Report"
 // preview matches frozen snapshots byte-for-byte.
-const generateSnapshotPayload = async (_week: string) => {
+export const generateSnapshotPayload = async (_week: string) => {
   const week = _week
   // Scope to THIS week's entries. Forms edit a single row per
   // (project, designer, type) in place and update the `week` column to the

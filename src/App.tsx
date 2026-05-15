@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
-import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, FileBarChart,ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus } from 'lucide-react'
+import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, FileBarChart,ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus, Sparkles } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
@@ -23,6 +23,8 @@ import SnapshotReportView from './SnapshotReportView'
 import RichTextEditor from './components/RichTextEditor'
 import { copyRichText, markdownToHtml } from './utils/richtext'
 import { snapshotToDocsHtml, copySnapshotToDocs } from './utils/snapshotDocsHtml'
+import { execSummaryToDocsHtml, type ExecSummary as ExecSummaryType } from './utils/execSummaryDocsHtml'
+import { ExecSummaryRulesModal, ExecSummaryReportView, type ExecRuleset } from './ExecSummary'
 import ImageLightbox from './ImageLightbox'
 import { defaultHolidays, getTodayStr, getDjFiscalLabel, DAY_MS, parseLocalDate, formatShortDate, formatFullDate, calcRangeHours, getClosestTimeOff, formatDateRange, formatMonthDay, formatMonthDayFromDate, getTodayFormatted, formatVersionDisplay } from './utils'
 import { authFetch, setClientVersion, getClientVersion, defaultBrandOptions, loadDataFromAPI } from './api'
@@ -32,10 +34,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  'Fix: Weekly Status report now opens correctly when a project has only an FYI or People note (no highlight or lowlight) for the week.',
-  'Fix: "View Report" on the Weekly Status card no longer logs you out.',
-  'Description fields now carry full RTE formatting — bold and bullets render correctly alongside links on the public review pages, bare URLs like "google.com" are treated as "https://" automatically, and selecting bold text before adding a link now keeps the bold formatting on the link.',
-  'Weekly update status badge on project cards — every active, in-review, or blocked project now shows a small red "Needs update" or green "Updated" pill next to the weekly-update toggle so it\'s obvious at a glance whether the project has an entry for the current reporting week.',
+  'New: A customized weekly executive report reformats the raw status inputs from active projects and general info into concise bites of important information grouped by business line.',
 ]
 
 
@@ -1215,6 +1214,122 @@ const [showFilters, setShowFilters] = useState(false)
   // expensive and only needed if the user clicks "Copy to Docs", so we defer
   // it until that click rather than computing on open.
   const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode; snapshotWeek?: string; docsHtml?: () => string }>({ open: false, title: '', content: '' })
+  // Executive Summary state. `execStatus` is null until the first admin /status
+  // call resolves; gates the button visibility. Baseline + lastRuleset feed the
+  // rules-editor modal; their absence means "use baseline".
+  const [execStatus, setExecStatus] = useState<{ enabled: boolean; reason?: string | null } | null>(null)
+  const [execBaseline, setExecBaseline] = useState<ExecRuleset | null>(null)
+  const [execLastRuleset, setExecLastRuleset] = useState<ExecRuleset | null>(null)
+  const [execModalOpen, setExecModalOpen] = useState(false)
+  const [execGenerating, setExecGenerating] = useState(false)
+  const [execError, setExecError] = useState<string | null>(null)
+
+  // Exec Summary: post the chosen ruleset, render the structured response in
+  // the same modal as "View Report", and offer Regenerate (force=true) from
+  // inside that view. The output is structurally fixed (BL groups + project
+  // clusters); only prose is rewritten by Claude. Lives at component scope
+  // (not inside the Reports-tab IIFE) so the rules-editor modal — which mounts
+  // at the bottom of App.tsx — can reach it.
+  const runExecSummary = async (ruleset: ExecRuleset, force: boolean) => {
+    setExecGenerating(true)
+    setExecError(null)
+    try {
+      const res = await authFetch('/api/exec-summary', {
+        method: 'POST',
+        body: JSON.stringify({ ruleset, force }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${res.status}`)
+      }
+      const result: { output: ExecSummaryType; cached: boolean } = await res.json()
+      setExecLastRuleset(ruleset)
+      setExecModalOpen(false)
+      const renderView = (cached: boolean, summary: ExecSummaryType) => (
+        <ExecSummaryReportView
+          summary={summary}
+          currentProjects={currentProjects}
+          cached={cached}
+          regenerating={false}
+          onRegenerate={async () => {
+            try {
+              const r2 = await authFetch('/api/exec-summary', {
+                method: 'POST',
+                body: JSON.stringify({ ruleset, force: true }),
+              })
+              if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
+              const next: { output: ExecSummaryType; cached: boolean } = await r2.json()
+              setReportModal(rm => rm.open ? {
+                ...rm,
+                richContent: renderView(next.cached, next.output),
+                docsHtml: () => execSummaryToDocsHtml(next.output, currentProjects, window.location.origin),
+              } : rm)
+            } catch (err) { console.error('Regenerate failed:', err) }
+          }}
+        />
+      )
+      const docsBuilder = () => execSummaryToDocsHtml(result.output, currentProjects, window.location.origin)
+      // Plain-text fallback: bites grouped by BL/project. Used when the user
+      // copies before docs HTML is built (rare path).
+      const plainLines: string[] = [`Executive Summary — ${result.output.week}`, '']
+      for (const bl of result.output.business_lines) {
+        plainLines.push(bl.business_line.toUpperCase())
+        const allP = [bl.general, ...bl.projects]
+        for (const gp of allP) {
+          const has = gp.highlights.length || gp.lowlights.length || gp.fyis.length || gp.people.length
+          if (!has) continue
+          plainLines.push(`  ${gp.project_name || 'General'}${gp.designers.length ? ` — ${gp.designers.map(d => d.split(' ')[0]).join(', ')}` : ''}`)
+          for (const b of gp.highlights) plainLines.push(`    + ${b.bite}`)
+          for (const b of gp.lowlights) plainLines.push(`    - ${b.bite}`)
+          for (const b of gp.fyis) plainLines.push(`    i ${b.bite}`)
+          for (const b of gp.people) plainLines.push(`    @ ${b.bite}`)
+        }
+        plainLines.push('')
+      }
+      setReportModal({
+        open: true,
+        title: `Executive Summary — ${result.output.week}${result.cached ? ' (cached)' : ''}`,
+        content: plainLines.join('\n'),
+        richContent: renderView(result.cached, result.output),
+        docsHtml: docsBuilder,
+      })
+    } catch (err: any) {
+      setExecError(err?.message || 'Generation failed')
+    } finally {
+      setExecGenerating(false)
+    }
+  }
+
+  // Probe exec-summary availability + fetch baseline + last-used ruleset once
+  // the user is identified as admin. Non-admins never hit these endpoints
+  // (server returns 403). Failures (e.g. server old, endpoint missing) leave
+  // execStatus null, which keeps the button hidden.
+  useEffect(() => {
+    if (!isAdmin) { setExecStatus(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [statusRes, baselineRes, lastRes] = await Promise.all([
+          authFetch('/api/exec-summary/status'),
+          authFetch('/api/exec-summary/baseline'),
+          authFetch('/api/exec-summary/last-ruleset'),
+        ])
+        if (cancelled) return
+        if (statusRes.ok) setExecStatus(await statusRes.json())
+        if (baselineRes.ok) {
+          const b = await baselineRes.json()
+          setExecBaseline(b.ruleset || null)
+        }
+        if (lastRes.ok) {
+          const l = await lastRes.json()
+          setExecLastRuleset(l.ruleset || null)
+        }
+      } catch {
+        // Silent: button stays hidden. Server may be old / route missing.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isAdmin])
   // Publish-project state: publishCopiedFor flashes a brief "copied" indicator
   // next to the chip after the URL is auto-copied on publish.
   const [addToReviewPickerOpen, setAddToReviewPickerOpen] = useState(false)
@@ -5667,6 +5782,17 @@ const [showFilters, setShowFilters] = useState(false)
                     View Report
                   </button>
                 ) : null}
+                {report.id === 'weekly-status' && isAdmin && execStatus?.enabled && (
+                  <button
+                    className="report-generate-btn"
+                    onClick={() => { setExecError(null); setExecModalOpen(true) }}
+                    style={{ borderColor: '#8b5cf6', color: '#8b5cf6', marginTop: '0.4em' }}
+                    title="Admin only — generate an exec-voice summary via Claude"
+                  >
+                    <Sparkles size={14} />
+                    Executive Summary
+                  </button>
+                )}
                 {report.id === 'weekly-status' && currentWeek && (
                   <div className="snapshot-accordion">
                     <button className="snapshot-accordion-toggle" onClick={() => setShowWeeklyPending(v => !v)}>
@@ -7962,6 +8088,19 @@ const [showFilters, setShowFilters] = useState(false)
       })()}
 
       {/* Report Modal */}
+      {/* Executive Summary rules-editor modal. Admin-only, mounts unconditionally
+          so the open/close state lives in App and the modal handles its own
+          show/hide via the `open` prop. */}
+      <ExecSummaryRulesModal
+        open={execModalOpen}
+        onClose={() => setExecModalOpen(false)}
+        baseline={execBaseline}
+        initialRuleset={execLastRuleset}
+        onGenerate={(rs) => runExecSummary(rs, false)}
+        generating={execGenerating}
+        error={execError}
+      />
+
       {reportModal.open && (
         <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setReportModal({ open: false, title: '', content: '' }) }}>
           <div className="modal report-modal" onClick={e => e.stopPropagation()}>

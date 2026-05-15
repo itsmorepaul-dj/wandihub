@@ -509,6 +509,31 @@ export const initSchema = async () => {
     console.log(`Migrated ${legacyReviewImages.length} review-scoped images to review_item_images`)
   }
 
+  // Cached executive summaries. Keyed on (snapshot_week, ruleset_hash, data_hash):
+  // a given week + ruleset + underlying-data combination is a stable cache hit.
+  // data_hash is included so live previews (which read live form state, not a
+  // frozen snapshot) invalidate when the underlying data changes — otherwise
+  // the cache would return stale Claude output after a designer updates a form.
+  // For frozen weekly_snapshots the data_hash is stable, so cache hits work normally.
+  // ruleset_json stores the exact ruleset that produced output_json, so the
+  // modal can pre-fill from "last run" without re-deriving it.
+  await run(`CREATE TABLE IF NOT EXISTS exec_summaries (
+    id TEXT PRIMARY KEY,
+    snapshot_week TEXT NOT NULL,
+    ruleset_hash TEXT NOT NULL,
+    data_hash TEXT NOT NULL DEFAULT '',
+    ruleset_json TEXT NOT NULL,
+    output_json TEXT NOT NULL,
+    model TEXT DEFAULT '',
+    generated_at TEXT DEFAULT (datetime('now')),
+    generated_by TEXT DEFAULT ''
+  )`).catch(e => console.error('exec_summaries init error:', e.message))
+  await run(`ALTER TABLE exec_summaries ADD COLUMN data_hash TEXT NOT NULL DEFAULT ''`).catch(() => {})
+  await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_exec_summaries_unique
+    ON exec_summaries (snapshot_week, ruleset_hash, data_hash)`).catch(() => {})
+  await run(`CREATE INDEX IF NOT EXISTS idx_exec_summaries_recent
+    ON exec_summaries (generated_at DESC)`).catch(() => {})
+
   // Hot-path indexes. Every "View Report" preview and the project capacity
   // views fan out queries keyed on project_id; without these SQLite falls
   // back to table scans. Tiny tables make this fast today, but the index
