@@ -6,10 +6,10 @@
 // computed in code on the server and rendered as-is here. The model only
 // rewrites the prose fields.
 
-import React, { useMemo, useRef, useState } from 'react'
-import { RefreshCw, RotateCcw, Sparkles, AlertCircle, User } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { RefreshCw, RotateCcw, Sparkles, AlertCircle } from 'lucide-react'
 import type { Project } from './types'
-import type { ExecSummary, ExecBite, ExecProject } from './utils/execSummaryDocsHtml'
+import type { ExecSummary, ExecBite, ExecProject, ExecBLGroup } from './utils/execSummaryDocsHtml'
 
 // ---------- Shared types ----------
 
@@ -29,21 +29,29 @@ interface RulesetEditorProps {
   baseline: ExecRuleset | null
   /** Pre-fill source: last-run ruleset (server) or baseline if first run. */
   initialRuleset: ExecRuleset | null
+  /** Bedrock model id (e.g. "global.anthropic.claude-sonnet-4-6") — surfaced
+   * in the editor footer so the operator knows which model will run. */
+  model: string | null
   /** Called with the chosen ruleset; promise resolves when generation finishes. */
   onGenerate: (ruleset: ExecRuleset, force: boolean) => Promise<void>
   generating: boolean
   error: string | null
 }
 
-// Rough deep-equal tuned to ExecRuleset shape.
+// Rough deep-equal tuned to ExecRuleset shape. Free-text fields (voice,
+// excludePatterns, customNotes) are normalized — trim, collapse runs of
+// whitespace, drop trailing punctuation — so an extra space or period
+// doesn't trip the drift indicator.
+const normText = (s: string) =>
+  s.replace(/\s+/g, ' ').trim().replace(/[.,;]+$/, '')
 const rulesetsEqual = (a: ExecRuleset | null, b: ExecRuleset | null): boolean => {
   if (!a || !b) return a === b
-  return a.voice === b.voice
+  return normText(a.voice) === normText(b.voice)
     && a.maxWordsPerBite === b.maxWordsPerBite
     && a.includeRiskLine === b.includeRiskLine
     && a.includeResolutionLine === b.includeResolutionLine
-    && a.excludePatterns === b.excludePatterns
-    && a.customNotes === b.customNotes
+    && normText(a.excludePatterns) === normText(b.excludePatterns)
+    && normText(a.customNotes) === normText(b.customNotes)
 }
 
 // ---------- Rules editor modal ----------
@@ -61,7 +69,7 @@ export function ExecSummaryRulesModal(props: RulesetEditorProps) {
 }
 
 function ExecSummaryRulesModalInner({
-  onClose, baseline, initialRuleset, onGenerate, generating, error,
+  onClose, baseline, initialRuleset, model, onGenerate, generating, error,
 }: RulesetEditorProps) {
   const src = initialRuleset || baseline
   const [voice, setVoice] = useState(src?.voice ?? '')
@@ -200,11 +208,24 @@ function ExecSummaryRulesModalInner({
             </div>
           )}
         </div>
-        <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)' }}>
-          <button className="secondary-btn" onClick={onClose} disabled={generating}>Cancel</button>
-          <button className="primary-btn" onClick={() => onGenerate(current, false)} disabled={generating || !voice.trim()}>
-            {generating ? 'Generating…' : 'Generate'}
-          </button>
+        <div className="modal-actions" style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {model && (
+            <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} title="Model used to rewrite each soundbite">
+              {model}
+            </span>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+            <button className="secondary-btn" onClick={onClose} disabled={generating}>Cancel</button>
+            <button
+              className="primary-btn"
+              onClick={() => onGenerate(current, false)}
+              disabled={generating || !voice.trim()}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4em' }}
+            >
+              {generating && <RefreshCw size={12} style={{ animation: 'spin 0.7s linear infinite' }} />}
+              {generating ? 'Generating…' : 'Generate'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -232,146 +253,208 @@ const textareaStyle: React.CSSProperties = { ...baseField, resize: 'vertical', l
 const inputStyle: React.CSSProperties = baseField
 
 // ---------- Output report view ----------
+//
+// Mirrors the structure of SnapshotReportView ("View Report") so the exec
+// summary slots into the same modal with consistent design-system classes.
+// What's intentionally stripped vs. View Report:
+//   - Thumbnails, past reviews — visual context, irrelevant for soundbites
+//   - Raw `description` body — replaced by the rewritten `bite`
+//   - "Also in:" multi-BL chips — exec readers don't need cross-section nav
+//   - Edit mode + per-section copy buttons — output is regenerated, not edited
+//   - Project-card RTE blocks — fixed bullet list of one-line bites
+// All `.rr-*` classes are inherited from App.css (the View Report styles).
 
 interface ReportViewProps {
   summary: ExecSummary
   currentProjects: Project[]
-  cached: boolean
   /** Force-regenerate and replace the in-modal output. */
   onRegenerate: () => Promise<void>
   regenerating: boolean
+  /** Renders inline `[label](url)` markdown + bare URLs as anchors. Passed in
+   * from App.tsx so the exec view uses the same link-rendering pipeline as
+   * the View Report flow. */
+  renderMarkdownLinks: (text: string) => React.ReactNode
 }
 
-const projectAppUrl = (project_id: string | null): string | null => {
-  if (!project_id) return null
-  return `${window.location.origin}/?project=${encodeURIComponent(project_id)}`
+const slugForBL = (name: string) => `bl-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
+
+// Match the in-app project-filter convention used elsewhere (e.g.
+// App.tsx:3860): a hash route that opens the Projects view filtered to the
+// named project. Uses project_name (not id) because that's what the route
+// filter reads. Falls back to null when there's no project (general items).
+const projectAppUrl = (project_name: string | null): string | null => {
+  if (!project_name) return null
+  return `${window.location.origin}${window.location.pathname}#/projects?project=${encodeURIComponent(project_name)}`
 }
 
-const Bites = ({ label, color, items }: { label: string; color: string; items: ExecBite[] }) => {
-  if (items.length === 0) return null
-  return (
-    <div style={{ marginTop: '0.5em' }}>
-      <div style={{
-        fontSize: '0.65rem', fontWeight: 700, color, textTransform: 'uppercase',
-        letterSpacing: '0.06em', marginBottom: '0.25em',
-      }}>{label}</div>
-      <ul style={{ margin: 0, paddingLeft: '1.25em', color: 'var(--color-text)' }}>
-        {items.map(b => (
-          <li key={b.id} style={{ marginBottom: '0.2em', lineHeight: 1.45, fontSize: '0.875rem' }}>
-            {b.bite}
-            {b.risk && (
-              <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '0.15em' }}>
-                <strong>Risk:</strong> {b.risk}
-              </div>
-            )}
-            {b.resolution && (
-              <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '0.15em' }}>
-                <strong>Path:</strong> {b.resolution}
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-const ProjectBlock = ({ gp, currentProjects }: { gp: ExecProject; currentProjects: Project[] }) => {
-  const url = projectAppUrl(gp.project_id)
-  const proj = gp.project_id ? currentProjects.find(p => p.id === gp.project_id) : null
-  const links = proj ? [
-    proj.deckLink && { name: proj.deckName || 'Deck', url: proj.deckLink },
-    proj.prdLink && { name: proj.prdName || 'PRD', url: proj.prdLink },
-    proj.briefLink && { name: proj.briefName || 'Brief', url: proj.briefLink },
-    proj.figmaLink && { name: 'Figma', url: proj.figmaLink },
-    ...(proj.customLinks || []),
-  ].filter(Boolean) as { name: string; url: string }[] : []
-  return (
-    <div style={{ marginTop: '1em', paddingTop: '0.75em', borderTop: '1px solid var(--color-border-subtle)' }}>
-      <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text)' }}>
-        {url ? (
-          <a href={url} style={{ color: 'var(--color-text-link)', textDecoration: 'none' }}>{gp.project_name || 'General'}</a>
-        ) : (gp.project_name || 'General')}
+// Each bite is its own paragraph — no bullets, no indent. Mirrors the View
+// Report's `.rr-block-body` shape so labels (when present) sit flush-left
+// above their content. Risk/Path sub-lines stay in `.rr-block-sub`.
+const BiteList = ({ items, includeRiskAndPath, renderMarkdownLinks }: {
+  items: ExecBite[]
+  includeRiskAndPath?: boolean
+  renderMarkdownLinks: (text: string) => React.ReactNode
+}) => (
+  <>
+    {items.map(b => (
+      <div key={b.id} className="rr-block-body" style={{ marginBottom: items.length > 1 ? '0.35em' : 0 }}>
+        {renderMarkdownLinks(b.bite)}
+        {includeRiskAndPath && b.risk && (
+          <div className="rr-block-sub"><strong>Risk:</strong> {renderMarkdownLinks(b.risk)}</div>
+        )}
+        {includeRiskAndPath && b.resolution && (
+          <div className="rr-block-sub"><strong>Path:</strong> {renderMarkdownLinks(b.resolution)}</div>
+        )}
       </div>
+    ))}
+  </>
+)
+
+const ExecProjectCard = ({ gp, bl, renderMarkdownLinks }: {
+  gp: ExecProject
+  bl: string
+  currentProjects: Project[]  // unused after dropping project-level link row; kept on the prop
+                              // type so call sites stay forward-compatible if we re-add it later
+  renderMarkdownLinks: (text: string) => React.ReactNode
+}) => {
+  const url = projectAppUrl(gp.project_name)
+  void bl
+  return (
+    <div className="rr-project-card">
+      {url ? (
+        <a className="rr-project-name" href={url}>{gp.project_name || 'Project'}</a>
+      ) : (
+        <div className="rr-project-name">{gp.project_name || 'Project'}</div>
+      )}
       {gp.designers.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5em', marginTop: '0.25em' }}>
-          {gp.designers.map(d => (
-            <span key={d} style={{
-              display: 'inline-flex', alignItems: 'center', gap: '0.3em',
-              fontSize: '0.7rem', color: 'var(--color-text-muted)',
-            }}>
-              <User size={10} /> {d.split(' ')[0]}
-            </span>
-          ))}
+        <div className="rr-project-designers">{gp.designers.map(d => d.split(' ')[0]).join(', ')}</div>
+      )}
+      {gp.highlights.length > 0 && (
+        <div className="rr-block rr-block-highlight">
+          <BiteList items={gp.highlights} renderMarkdownLinks={renderMarkdownLinks} />
         </div>
       )}
-      {links.length > 0 && (
-        <div style={{ marginTop: '0.25em', fontSize: '0.78rem' }}>
-          {links.map((l, i) => (
-            <React.Fragment key={i}>
-              {i > 0 && <span style={{ color: 'var(--color-text-dim)', margin: '0 0.4em' }}>·</span>}
-              <a href={l.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-text-link)' }}>{l.name}</a>
-            </React.Fragment>
-          ))}
+      {gp.lowlights.length > 0 && (
+        <div className="rr-block rr-block-lowlight">
+          <div className="rr-block-label">Lowlight</div>
+          <BiteList items={gp.lowlights} includeRiskAndPath renderMarkdownLinks={renderMarkdownLinks} />
         </div>
       )}
-      <Bites label="Highlight" color="#137333" items={gp.highlights} />
-      <Bites label="Lowlight" color="#c5221f" items={gp.lowlights} />
-      <Bites label="FYI" color="#b06000" items={gp.fyis} />
-      <Bites label="People" color="#6a1b9a" items={gp.people} />
+      {gp.fyis.length > 0 && (
+        <div className="rr-block rr-block-fyi">
+          <div className="rr-block-label">FYI</div>
+          <BiteList items={gp.fyis} renderMarkdownLinks={renderMarkdownLinks} />
+        </div>
+      )}
+      {gp.people.length > 0 && (
+        <div className="rr-block rr-block-people">
+          <div className="rr-block-label">People</div>
+          <BiteList items={gp.people} renderMarkdownLinks={renderMarkdownLinks} />
+        </div>
+      )}
     </div>
   )
 }
 
-export function ExecSummaryReportView({ summary, currentProjects, cached, onRegenerate, regenerating }: ReportViewProps) {
-  const generatedDate = useMemo(() => new Date(summary.generated_at).toLocaleString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-  }), [summary.generated_at])
+export function ExecSummaryReportView({ summary, currentProjects, onRegenerate, regenerating, renderMarkdownLinks }: ReportViewProps) {
+  // Lift the project-less "General" BL bucket to a top-level General notes
+  // section, matching SnapshotReportView's layout. Per-BL groups below it
+  // contain only project-scoped content.
+  const { generalSection, blSections } = useMemo(() => {
+    let general: ExecBLGroup['general'] | null = null
+    const bls: ExecBLGroup[] = []
+    for (const bl of summary.business_lines) {
+      if (bl.business_line === 'General') {
+        const hasGeneral = bl.general.highlights.length || bl.general.lowlights.length || bl.general.fyis.length || bl.general.people.length
+        if (hasGeneral) general = bl.general
+        // Project-scoped items mistakenly tagged 'General' (no BL on the project)
+        // still get their own BL section labeled "General".
+        if (bl.projects.length > 0) bls.push({ ...bl, general: { project_id: null, project_name: null, designers: [], highlights: [], lowlights: [], fyis: [], people: [] } })
+      } else {
+        bls.push(bl)
+      }
+    }
+    return { generalSection: general, blSections: bls }
+  }, [summary.business_lines])
+
+  const genDate = new Date(summary.generated_at)
+  const dateStr = genDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  const hasAnything = generalSection !== null || blSections.length > 0
+
   return (
-    <div style={{ padding: '0 0.25em' }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexWrap: 'wrap', gap: '0.5em',
-        marginBottom: '1em', paddingBottom: '0.6em',
-        borderBottom: '1px solid var(--color-border)',
-      }}>
-        <div>
-          <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-            {generatedDate} · {summary.model}
-            {cached && <span style={{ marginLeft: '0.5em', color: 'var(--color-text-dim)' }}>(cached)</span>}
-          </div>
+    <div className="rr rr-v2">
+      <header className="rr-header">
+        <div className="rr-header-main">
+          <div className="rr-week">{summary.week}</div>
+          <div className="rr-date">{dateStr}</div>
+          {/* Cache state lives in the modal title (set by runExecSummary in App.tsx);
+              no need for a duplicate chip in the report body. */}
         </div>
-        <button
-          onClick={onRegenerate}
-          disabled={regenerating}
-          className="secondary-btn"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4em' }}
-        >
-          <RefreshCw size={12} style={regenerating ? { animation: 'spin 1s linear infinite' } : {}} />
-          {regenerating ? 'Regenerating…' : 'Regenerate'}
-        </button>
-      </div>
-      {summary.business_lines.length === 0 && (
-        <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', textAlign: 'center', padding: '2em' }}>
-          No content for this week yet.
+        <div className="rr-header-actions">
+          <button
+            className="rr-admin-btn"
+            onClick={onRegenerate}
+            disabled={regenerating}
+            title="Re-run the executive summary against the current data"
+          >
+            <RefreshCw size={12} style={regenerating ? { animation: 'spin 1s linear infinite' } : undefined} />
+            {regenerating ? 'Regenerating…' : 'Regenerate'}
+          </button>
         </div>
+      </header>
+
+      {hasAnything && (
+        <nav className="rr-nav" aria-label="Jump to section">
+          {generalSection && <a href="#rr-general-notes">General notes</a>}
+          {blSections.map(bl => (
+            <a key={bl.business_line} href={`#${slugForBL(bl.business_line)}`}>{bl.business_line}</a>
+          ))}
+        </nav>
       )}
-      {summary.business_lines.map(bl => {
-        const generalHasContent = bl.general.highlights.length || bl.general.lowlights.length || bl.general.fyis.length || bl.general.people.length
-        return (
-          <div key={bl.business_line} style={{ marginBottom: '1.5em' }}>
-            <h3 style={{
-              fontSize: '1rem', fontWeight: 700, margin: '1em 0 0.4em',
-              paddingBottom: '0.25em', borderBottom: '2px solid var(--color-border)',
-              letterSpacing: '-0.01em',
-            }}>{bl.business_line}</h3>
-            {generalHasContent ? <ProjectBlock gp={bl.general} currentProjects={currentProjects} /> : null}
+
+      {generalSection && (
+        <section id="rr-general-notes" className="rr-bl-section rr-general-section">
+          <h2 className="rr-bl-title" style={{ borderBottomWidth: '1px' }}>General notes</h2>
+          {generalSection.highlights.length > 0 && (
+            <div className="rr-subsection">
+              <BiteList items={generalSection.highlights} renderMarkdownLinks={renderMarkdownLinks} />
+            </div>
+          )}
+          {generalSection.lowlights.length > 0 && (
+            <div className="rr-subsection">
+              <h3 className="rr-subsection-title rr-subsection-lowlight">Lowlights</h3>
+              <BiteList items={generalSection.lowlights} includeRiskAndPath renderMarkdownLinks={renderMarkdownLinks} />
+            </div>
+          )}
+          {generalSection.fyis.length > 0 && (
+            <div className="rr-subsection">
+              <h3 className="rr-subsection-title rr-subsection-fyi">FYIs</h3>
+              <BiteList items={generalSection.fyis} renderMarkdownLinks={renderMarkdownLinks} />
+            </div>
+          )}
+          {generalSection.people.length > 0 && (
+            <div className="rr-subsection">
+              <h3 className="rr-subsection-title rr-subsection-people">People</h3>
+              <BiteList items={generalSection.people} renderMarkdownLinks={renderMarkdownLinks} />
+            </div>
+          )}
+        </section>
+      )}
+
+      {!hasAnything && (
+        <div className="rr-empty">No updates recorded for {summary.week}.</div>
+      )}
+
+      {blSections.map(bl => (
+        <section key={bl.business_line} id={slugForBL(bl.business_line)} className="rr-bl-section">
+          <h2 className="rr-bl-title" style={{ borderBottomWidth: '1px' }}>{bl.business_line}</h2>
+          <div className="rr-project-grid">
             {bl.projects.map(gp => (
-              <ProjectBlock key={gp.project_id || 'general'} gp={gp} currentProjects={currentProjects} />
+              <ExecProjectCard key={gp.project_id || 'general'} gp={gp} bl={bl.business_line} currentProjects={currentProjects} renderMarkdownLinks={renderMarkdownLinks} />
             ))}
           </div>
-        )
-      })}
+        </section>
+      ))}
     </div>
   )
 }

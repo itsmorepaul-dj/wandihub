@@ -34,6 +34,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  'Polish: Executive Summary report uses the same look as View Report, links render correctly, project names link back to a filtered project view, and Docs copy/paste lays out cleanly with bullets stripped and projects spaced apart.',
   'New: A customized weekly executive report reformats the raw status inputs from active projects and general info into concise bites of important information grouped by business line.',
 ]
 
@@ -1217,7 +1218,7 @@ const [showFilters, setShowFilters] = useState(false)
   // Executive Summary state. `execStatus` is null until the first admin /status
   // call resolves; gates the button visibility. Baseline + lastRuleset feed the
   // rules-editor modal; their absence means "use baseline".
-  const [execStatus, setExecStatus] = useState<{ enabled: boolean; reason?: string | null } | null>(null)
+  const [execStatus, setExecStatus] = useState<{ enabled: boolean; reason?: string | null; model?: string } | null>(null)
   const [execBaseline, setExecBaseline] = useState<ExecRuleset | null>(null)
   const [execLastRuleset, setExecLastRuleset] = useState<ExecRuleset | null>(null)
   const [execModalOpen, setExecModalOpen] = useState(false)
@@ -1245,12 +1246,12 @@ const [showFilters, setShowFilters] = useState(false)
       const result: { output: ExecSummaryType; cached: boolean } = await res.json()
       setExecLastRuleset(ruleset)
       setExecModalOpen(false)
-      const renderView = (cached: boolean, summary: ExecSummaryType) => (
+      const renderView = (_cached: boolean, summary: ExecSummaryType) => (
         <ExecSummaryReportView
           summary={summary}
           currentProjects={currentProjects}
-          cached={cached}
           regenerating={false}
+          renderMarkdownLinks={renderMarkdownLinks}
           onRegenerate={async () => {
             try {
               const r2 = await authFetch('/api/exec-summary', {
@@ -5776,23 +5777,27 @@ const [showFilters, setShowFilters] = useState(false)
                   <p className="report-card-desc">{report.description}</p>
                   <span className="report-card-stats">{report.stats}</span>
                 </div>
-                {report.generate ? (
-                  <button className="report-generate-btn" onClick={report.generate} style={{ borderColor: report.color, color: report.color }}>
-                    <FileBarChart size={14} />
-                    View Report
-                  </button>
+                {report.generate || (report.id === 'weekly-status' && isAdmin && execStatus?.enabled) ? (
+                  <div className="report-doc-actions">
+                    {report.generate ? (
+                      <button className="report-generate-btn" onClick={report.generate} style={{ borderColor: report.color, color: report.color }}>
+                        <FileBarChart size={14} />
+                        View Report
+                      </button>
+                    ) : null}
+                    {report.id === 'weekly-status' && isAdmin && execStatus?.enabled && (
+                      <button
+                        className="report-generate-btn"
+                        onClick={() => { setExecError(null); setExecModalOpen(true) }}
+                        style={{ borderColor: '#8b5cf6', color: '#8b5cf6' }}
+                        title="Admin only — generate an exec-voice summary via Claude"
+                      >
+                        <Sparkles size={14} />
+                        Executive Summary
+                      </button>
+                    )}
+                  </div>
                 ) : null}
-                {report.id === 'weekly-status' && isAdmin && execStatus?.enabled && (
-                  <button
-                    className="report-generate-btn"
-                    onClick={() => { setExecError(null); setExecModalOpen(true) }}
-                    style={{ borderColor: '#8b5cf6', color: '#8b5cf6', marginTop: '0.4em' }}
-                    title="Admin only — generate an exec-voice summary via Claude"
-                  >
-                    <Sparkles size={14} />
-                    Executive Summary
-                  </button>
-                )}
                 {report.id === 'weekly-status' && currentWeek && (
                   <div className="snapshot-accordion">
                     <button className="snapshot-accordion-toggle" onClick={() => setShowWeeklyPending(v => !v)}>
@@ -8096,6 +8101,7 @@ const [showFilters, setShowFilters] = useState(false)
         onClose={() => setExecModalOpen(false)}
         baseline={execBaseline}
         initialRuleset={execLastRuleset}
+        model={execStatus?.model || null}
         onGenerate={(rs) => runExecSummary(rs, false)}
         generating={execGenerating}
         error={execError}

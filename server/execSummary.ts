@@ -31,6 +31,7 @@ export const BASELINE_RULESET: ExecRuleset = {
     'No hedging ("might", "should", "hopefully"). State what is true.',
     'No jargon, no acronyms unless universally known.',
     'Each soundbite is one sentence. No semicolons. No em-dashes.',
+    'Preserve explicit links.',
   ].join(' '),
   maxWordsPerBite: 22,
   includeRiskLine: true,
@@ -179,6 +180,8 @@ Rules — these are absolute:
 - Output one bite per item. No intros, no summaries, no headers.
 - Never invent facts. If the input has no concrete claim, return the input compressed, do not embellish.
 - Never include: ${rs.excludePatterns}
+- Preserve any markdown links from the input verbatim (format: [label](https://url)). Keep bare URLs as plain http(s) text — never strip, paraphrase, or shorten URLs. Links count toward the word cap but cannot be removed to make room.
+- Never invent links or URLs that were not in the input.
 ${rs.customNotes ? `- Additional run-specific notes: ${rs.customNotes}` : ''}
 
 You will receive a JSON array of items. For each item, return the rewritten "bite". For items with risk_reason or resolution fields, also rewrite those (each capped at ${rs.maxWordsPerBite} words).
@@ -230,10 +233,27 @@ export const rewriteAll = async (
     const r = byId.get(it.id)
     return {
       ...it,
-      bite: r?.bite || it.description,
-      ...(it.risk_reason && r?.risk_bite ? { risk_bite: r.risk_bite } : {}),
-      ...(it.resolution && r?.resolution_bite ? { resolution_bite: r.resolution_bite } : {}),
+      bite: normalizeLinks(r?.bite || it.description),
+      ...(it.risk_reason && r?.risk_bite ? { risk_bite: normalizeLinks(r.risk_bite) } : {}),
+      ...(it.resolution && r?.resolution_bite ? { resolution_bite: normalizeLinks(r.resolution_bite) } : {}),
     }
+  })
+}
+
+// Promote bare-domain links inside `[label](url)` to `https://`. Authors and
+// the model both produce `[foo](google.com)` regularly — the in-app
+// renderer's link regex requires `https?://`, so without this fix those URLs
+// render as raw text. Idempotent on already-prefixed URLs.
+const normalizeLinks = (text: string): string => {
+  return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
+    const trimmed = url.trim()
+    if (/^https?:\/\//i.test(trimmed)) return match
+    if (/^mailto:|^tel:|^#/i.test(trimmed)) return match
+    // Looks like a domain (has a dot, no spaces) — prepend https://
+    if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(trimmed)) {
+      return `[${label}](https://${trimmed})`
+    }
+    return match
   })
 }
 
@@ -313,7 +333,15 @@ export const assembleOutput = (
     }
   }
   const business_lines: ExecSummaryBLGroup[] = []
-  const allBLs = Array.from(new Set([...blMap.keys(), ...generalMap.keys()])).sort((a, b) => a.localeCompare(b))
+  // "General" sorts first so renderers that iterate `business_lines` in order
+  // (e.g. the Docs paste output) put project-less general notes at the top.
+  // The in-app modal renderer lifts the General bucket separately, so it
+  // already shows first there — this keeps both surfaces in sync.
+  const allBLs = Array.from(new Set([...blMap.keys(), ...generalMap.keys()])).sort((a, b) => {
+    if (a === 'General' && b !== 'General') return -1
+    if (b === 'General' && a !== 'General') return 1
+    return a.localeCompare(b)
+  })
   for (const bl of allBLs) {
     const general = generalMap.get(bl)!
     const projects = Array.from((blMap.get(bl) || new Map()).values())
