@@ -62,16 +62,30 @@ const linkifyBite = (text: string): string => {
   return s
 }
 
+// Paragraph spacing rules tuned for Google Docs paste fidelity. Values are in
+// points so Docs maps them 1:1 to its "Spacing before/after" controls.
+//   Category title (Lowlight/FYI/People label): before 16, after 4
+//   Project title:                                before 16, after 0
+//   Designer line:                                before 0,  after 4
+//   Description / bite paragraphs:                before 0,  after 8
+// All paragraphs use line-height 1.5 (Docs "1.5" line spacing).
+const STYLE = {
+  category: 'margin:16pt 0 4pt;line-height:1.5;font-weight:700;font-size:9.5pt;text-transform:uppercase;letter-spacing:0.05em',
+  project: 'margin:16pt 0 0;line-height:1.5;font-size:11pt;font-weight:700',
+  designer: `margin:0 0 4pt;line-height:1.5;color:${COLOR.muted};font-size:9.5pt`,
+  bite: 'margin:0 0 8pt;line-height:1.0',
+}
+
 const renderBites = (label: string | null, color: string, items: ExecBite[]): string => {
   if (items.length === 0) return ''
   let html = ''
   if (label) {
-    html += `<p style="margin:0.4em 0 0.15em;color:${color};font-weight:700;font-size:9.5pt;text-transform:uppercase;letter-spacing:0.05em">${label}</p>`
+    html += `<p style="${STYLE.category};color:${color}">${label}</p>`
   }
   // Each bite is a flush-left paragraph. Google Docs respects <p> margins
   // and treats them as normal paragraphs (no list indent, no bullet).
   for (const b of items) {
-    html += `<p style="margin:0 0 0.25em">${linkifyBite(b.bite)}`
+    html += `<p style="${STYLE.bite}">${linkifyBite(b.bite)}`
     if (b.risk) html += `<br><span style="font-size:9.5pt;color:${COLOR.muted}"><strong>Risk:</strong> ${linkifyBite(b.risk)}</span>`
     if (b.resolution) html += `<br><span style="font-size:9.5pt;color:${COLOR.muted}"><strong>Path:</strong> ${linkifyBite(b.resolution)}</span>`
     html += `</p>`
@@ -82,11 +96,8 @@ const renderBites = (label: string | null, color: string, items: ExecBite[]): st
 const renderProject = (gp: ExecProject, appBaseUrl: string): string => {
   const url = projectUrl(gp.project_name, appBaseUrl)
   const name = gp.project_name || 'General'
-  // Wrap each project in a block with extra bottom margin so projects are
-  // clearly separated when pasted into Docs. Trailing empty <p> reinforces
-  // the gap because Docs collapses adjacent paragraph margins on paste.
-  let html = `<div style="margin:0 0 1.5em">`
-  html += `<p style="margin:0.75em 0 0.1em;font-size:11pt;font-weight:700">`
+  let html = `<div>`
+  html += `<p style="${STYLE.project}">`
   if (url) {
     html += `<a href="${escapeHtml(url)}" style="color:#1155cc;text-decoration:underline">${escapeHtml(name)}</a>`
   } else {
@@ -94,13 +105,12 @@ const renderProject = (gp: ExecProject, appBaseUrl: string): string => {
   }
   html += `</p>`
   if (gp.designers.length > 0) {
-    html += `<p style="margin:0;color:${COLOR.muted};font-size:9.5pt">${escapeHtml(gp.designers.map(d => d.split(' ')[0]).join(', '))}</p>`
+    html += `<p style="${STYLE.designer}">${escapeHtml(gp.designers.map(d => d.split(' ')[0]).join(', '))}</p>`
   }
   html += renderBites(null, COLOR.highlight, gp.highlights)
   html += renderBites('Lowlight', COLOR.lowlight, gp.lowlights)
   html += renderBites('FYI', COLOR.fyi, gp.fyis)
   html += renderBites('People', COLOR.people, gp.people)
-  html += `<p style="margin:0;font-size:1pt">&nbsp;</p>`
   html += `</div>`
   return html
 }
@@ -116,7 +126,7 @@ export const execSummaryToDocsHtml = (
   const genDate = new Date(summary.generated_at)
   const dateStr = genDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
   let html = `<div style="font-family:'Google Sans','Arial',sans-serif;font-size:11pt;line-height:1.45;color:#202124">`
-  html += `<h1 style="font-size:18pt;font-weight:700;margin:0 0 0.25em">Executive Summary — ${escapeHtml(summary.week)}</h1>`
+  html += `<h1 style="font-size:18pt;font-weight:700;margin:0 0 0.25em">W&amp;I Weekly Status</h1>`
   html += `<p style="margin:0 0 1em;color:${COLOR.muted};font-size:9.5pt">${escapeHtml(dateStr)}</p>`
   for (const bl of summary.business_lines) {
     // The "General" BL renders as "General notes" to match the in-app

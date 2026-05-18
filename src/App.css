@@ -6482,6 +6482,32 @@ a.report-view-btn {
   background: var(--color-bg-hover);
   border-color: var(--color-accent);
 }
+.snapshot-item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.3rem;
+}
+.snapshot-item-row > .snapshot-item {
+  flex: 1;
+  min-width: 0;
+}
+.snapshot-exec-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.55rem;
+  border-radius: 5px;
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-secondary);
+  color: #8b5cf6;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.snapshot-exec-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: #8b5cf6;
+}
 .snapshot-week {
   font-weight: 600;
 }

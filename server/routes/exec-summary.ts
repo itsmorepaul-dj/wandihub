@@ -91,12 +91,25 @@ router.post('/exec-summary', requireAdmin, async (req, res) => {
     const force = body.force === true
     const ruleset_hash = hashRuleset(ruleset)
 
-    // Pull the same payload the /preview endpoint produces. Live data unless the
-    // client passes a frozen snapshot week; we don't differentiate here because
-    // the upstream snapshot table also stores frozen data_json — both flow through
-    // the same payload shape.
-    const payload = await generateSnapshotPayload(week)
-    const data_hash = crypto.createHash('sha256').update(payload.dataJson).digest('hex').slice(0, 16)
+    // For past weeks, prefer the frozen weekly_snapshots row so the exec
+    // summary reflects what was actually published (including any admin edits
+    // applied after generation). Fall back to live data when no snapshot
+    // exists — this is the path for the current/active week.
+    const frozen = await get(
+      `SELECT data_json FROM weekly_snapshots WHERE week = ?`,
+      [week]
+    ) as { data_json?: string } | undefined
+    let dataJson: string
+    let data: any
+    if (frozen?.data_json) {
+      dataJson = frozen.data_json
+      try { data = JSON.parse(frozen.data_json) } catch { data = {} }
+    } else {
+      const payload = await generateSnapshotPayload(week)
+      dataJson = payload.dataJson
+      data = payload.data
+    }
+    const data_hash = crypto.createHash('sha256').update(dataJson).digest('hex').slice(0, 16)
 
     if (!force) {
       const cached = await get(
@@ -117,7 +130,7 @@ router.post('/exec-summary', requireAdmin, async (req, res) => {
       }
     }
 
-    const items = flattenSnapshot(payload.data)
+    const items = flattenSnapshot(data)
     const rewritten = await rewriteAll(items, ruleset)
     const generatedAt = new Date().toISOString()
     const output = assembleOutput(week, rewritten, generatedAt)

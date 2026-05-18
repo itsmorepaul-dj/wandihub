@@ -1224,6 +1224,9 @@ const [showFilters, setShowFilters] = useState(false)
   const [execModalOpen, setExecModalOpen] = useState(false)
   const [execGenerating, setExecGenerating] = useState(false)
   const [execError, setExecError] = useState<string | null>(null)
+  // When set, the next generation targets that frozen snapshot week instead of
+  // the live (current) week. Cleared on close so the next open defaults to live.
+  const [execTargetWeek, setExecTargetWeek] = useState<string | null>(null)
 
   // Exec Summary: post the chosen ruleset, render the structured response in
   // the same modal as "View Report", and offer Regenerate (force=true) from
@@ -1231,13 +1234,13 @@ const [showFilters, setShowFilters] = useState(false)
   // clusters); only prose is rewritten by Claude. Lives at component scope
   // (not inside the Reports-tab IIFE) so the rules-editor modal — which mounts
   // at the bottom of App.tsx — can reach it.
-  const runExecSummary = async (ruleset: ExecRuleset, force: boolean) => {
+  const runExecSummary = async (ruleset: ExecRuleset, force: boolean, week?: string) => {
     setExecGenerating(true)
     setExecError(null)
     try {
       const res = await authFetch('/api/exec-summary', {
         method: 'POST',
-        body: JSON.stringify({ ruleset, force }),
+        body: JSON.stringify({ ruleset, force, ...(week ? { week } : {}) }),
       })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
@@ -1256,7 +1259,7 @@ const [showFilters, setShowFilters] = useState(false)
             try {
               const r2 = await authFetch('/api/exec-summary', {
                 method: 'POST',
-                body: JSON.stringify({ ruleset, force: true }),
+                body: JSON.stringify({ ruleset, force: true, ...(week ? { week } : {}) }),
               })
               if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
               const next: { output: ExecSummaryType; cached: boolean } = await r2.json()
@@ -1272,7 +1275,7 @@ const [showFilters, setShowFilters] = useState(false)
       const docsBuilder = () => execSummaryToDocsHtml(result.output, currentProjects, window.location.origin)
       // Plain-text fallback: bites grouped by BL/project. Used when the user
       // copies before docs HTML is built (rare path).
-      const plainLines: string[] = [`Executive Summary — ${result.output.week}`, '']
+      const plainLines: string[] = [`W&I Weekly Status`, '']
       for (const bl of result.output.business_lines) {
         plainLines.push(bl.business_line.toUpperCase())
         const allP = [bl.general, ...bl.projects]
@@ -1289,7 +1292,7 @@ const [showFilters, setShowFilters] = useState(false)
       }
       setReportModal({
         open: true,
-        title: `Executive Summary — ${result.output.week}${result.cached ? ' (cached)' : ''}`,
+        title: `W&I Weekly Status${result.cached ? ' (cached)' : ''}`,
         content: plainLines.join('\n'),
         richContent: renderView(result.cached, result.output),
         docsHtml: docsBuilder,
@@ -5788,7 +5791,7 @@ const [showFilters, setShowFilters] = useState(false)
                     {report.id === 'weekly-status' && isAdmin && execStatus?.enabled && (
                       <button
                         className="report-generate-btn"
-                        onClick={() => { setExecError(null); setExecModalOpen(true) }}
+                        onClick={() => { setExecError(null); setExecTargetWeek(null); setExecModalOpen(true) }}
                         style={{ borderColor: '#8b5cf6', color: '#8b5cf6' }}
                         title="Admin only — generate an exec-voice summary via Claude"
                       >
@@ -5849,10 +5852,26 @@ const [showFilters, setShowFilters] = useState(false)
                     {showSnapshotHistory && (
                       <div className="snapshot-accordion-body">
                         {weeklySnapshots.map(snap => (
-                          <button key={snap.id} className="snapshot-item" onClick={() => viewSnapshot(snap)}>
-                            <span className="snapshot-week">{snap.week}</span>
-                            <span className="snapshot-date">{new Date(snap.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                          </button>
+                          <div key={snap.id} className="snapshot-item-row">
+                            <button className="snapshot-item" onClick={() => viewSnapshot(snap)}>
+                              <span className="snapshot-week">{snap.week}</span>
+                              <span className="snapshot-date">{new Date(snap.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                            </button>
+                            {isAdmin && execStatus?.enabled && (
+                              <button
+                                className="snapshot-exec-btn"
+                                title={`Generate Executive Summary for ${snap.week}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setExecError(null)
+                                  setExecTargetWeek(snap.week)
+                                  setExecModalOpen(true)
+                                }}
+                              >
+                                <Sparkles size={12} />
+                              </button>
+                            )}
+                          </div>
                         ))}
                       </div>
                     )}
@@ -8098,11 +8117,12 @@ const [showFilters, setShowFilters] = useState(false)
           show/hide via the `open` prop. */}
       <ExecSummaryRulesModal
         open={execModalOpen}
-        onClose={() => setExecModalOpen(false)}
+        onClose={() => { setExecModalOpen(false); setExecTargetWeek(null) }}
         baseline={execBaseline}
         initialRuleset={execLastRuleset}
         model={execStatus?.model || null}
-        onGenerate={(rs) => runExecSummary(rs, false)}
+        targetWeek={execTargetWeek}
+        onGenerate={(rs) => runExecSummary(rs, false, execTargetWeek || undefined)}
         generating={execGenerating}
         error={execError}
       />

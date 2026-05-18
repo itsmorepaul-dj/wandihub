@@ -32,6 +32,9 @@ interface RulesetEditorProps {
   /** Bedrock model id (e.g. "global.anthropic.claude-sonnet-4-6") — surfaced
    * in the editor footer so the operator knows which model will run. */
   model: string | null
+  /** When set, generation targets that frozen snapshot week instead of live data.
+   * The header surfaces the week so the admin knows which report they're running. */
+  targetWeek?: string | null
   /** Called with the chosen ruleset; promise resolves when generation finishes. */
   onGenerate: (ruleset: ExecRuleset, force: boolean) => Promise<void>
   generating: boolean
@@ -69,7 +72,7 @@ export function ExecSummaryRulesModal(props: RulesetEditorProps) {
 }
 
 function ExecSummaryRulesModalInner({
-  onClose, baseline, initialRuleset, model, onGenerate, generating, error,
+  onClose, baseline, initialRuleset, model, targetWeek, onGenerate, generating, error,
 }: RulesetEditorProps) {
   const src = initialRuleset || baseline
   const [voice, setVoice] = useState(src?.voice ?? '')
@@ -112,13 +115,16 @@ function ExecSummaryRulesModalInner({
     >
       <div className="modal" style={{ maxWidth: 640 }}>
         <div className="modal-header">
-          <h2><Sparkles size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '0.4em' }} />Executive Summary — generate</h2>
+          <h2><Sparkles size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '0.4em' }} />Executive Summary — generate{targetWeek ? ` (${targetWeek})` : ''}</h2>
           <button className="modal-close-btn" onClick={onClose} disabled={generating}>×</button>
         </div>
         <div className="modal-body">
           <p style={{ margin: '0 0 1em', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>
             Claude rewrites each highlight, lowlight, FYI, and people note in an executive voice.
             Project names, designers, business-line groupings, and section structure are fixed and not rewritten.
+            {targetWeek && (
+              <> Running against the frozen snapshot for <strong>{targetWeek}</strong>.</>
+            )}
           </p>
 
           {driftFromBaseline && (

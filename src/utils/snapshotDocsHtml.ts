@@ -160,7 +160,13 @@ export function snapshotToDocsHtml(
   }
   ;(data.projectFyis || []).forEach(e => attach(e, 'fyis'))
   ;(data.projectPeople || []).forEach(e => attach(e, 'people'))
-  blList.sort((a, b) => a.localeCompare(b))
+  // "General" sorts first; everything else alphabetical. Keeps general-BL
+  // projects pinned to the top regardless of how the rest of the BLs sort.
+  blList.sort((a, b) => {
+    if (a === 'General' && b !== 'General') return -1
+    if (b === 'General' && a !== 'General') return 1
+    return a.localeCompare(b)
+  })
 
   // Colors for category labels — chosen to read well in Docs on both white
   // and dark themes (Docs usually renders on white though).
@@ -177,7 +183,7 @@ export function snapshotToDocsHtml(
   // Header
   const genDate = new Date(opts.generatedAt)
   const dateStr = genDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-  html += `<h1 style="font-size:20pt;font-weight:700;margin:0 0 0.25em">Weekly Status — ${escapeHtml(opts.week)}</h1>`
+  html += `<h1 style="font-size:20pt;font-weight:700;margin:0 0 0.25em">W&amp;I Weekly Status</h1>`
   html += `<p style="margin:0 0 1em;color:${COLOR.muted};font-size:10pt">${escapeHtml(dateStr)}</p>`
   if (opts.editedAt) {
     const editedDate = new Date(opts.editedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
