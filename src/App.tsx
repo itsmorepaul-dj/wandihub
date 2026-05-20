@@ -34,6 +34,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  "Public review cards now show a chip for each project's business line next to the status badge.",
   'Polish: Executive Summary report uses the same look as View Report, links render correctly, project names link back to a filtered project view, and Docs copy/paste lays out cleanly with bullets stripped and projects spaced apart.',
   'New: A customized weekly executive report reformats the raw status inputs from active projects and general info into concise bites of important information grouped by business line.',
 ]

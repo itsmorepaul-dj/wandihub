@@ -990,6 +990,7 @@ router.get('/review/:id', async (req, res) => {
       timeline: item.timeline ? JSON.parse(item.timeline) : [],
       customLinks: item.customLinks ? JSON.parse(item.customLinks) : [],
       designers: item.designers ? JSON.parse(item.designers) : [],
+      businessLines: item.businessLine ? (() => { try { return JSON.parse(item.businessLine); } catch { return [item.businessLine]; } })() : [],
     }))
 
     // Load review-item-scoped images. Each review_item has its own gallery —
@@ -1220,6 +1221,11 @@ router.get('/review/:id', async (req, res) => {
         ? ''
         : `<span class="status-badge time-chip" title="Approximate review time">~${mins} min</span>`
 
+      const itemBusinessLines: string[] = item.businessLines || []
+      const blChips = itemBusinessLines.length > 0
+        ? itemBusinessLines.map((bl: string) => `<span class="project-meta-chip">${escHtml(bl)}</span>`).join(' ')
+        : ''
+
       const cardHtml = `<div class="project-card">
         <div class="card-header">
           <span class="card-number">${item.excluded_from_time ? '&bull;' : item.rank + 1}</span>
@@ -1228,6 +1234,7 @@ router.get('/review/:id', async (req, res) => {
             <div class="card-meta">
               ${timeChip}
               <span class="status-badge" style="background:${statusColor}">${statusLabel}</span>
+              ${blChips}
               ${designers ? `<div class="card-designers">${designers}</div>` : ''}
             </div>
           </div>
@@ -2417,6 +2424,11 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     .card-title-area { flex: 1; min-width: 0; }
     .card-title { font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
     .card-meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; flex-wrap: wrap; }
+    .card-meta .project-meta-chip {
+      display: inline-block; padding: 0.1rem 0.5rem; border-radius: 99px;
+      font-size: 0.65rem; font-weight: 500; letter-spacing: 0.01em;
+      background: var(--rv-bg-tertiary); color: var(--rv-text-secondary);
+    }
     .card-description { padding: 0.4rem 1.25rem 0.75rem; font-size: 0.8rem; color: var(--rv-text-muted); line-height: 1.45; max-width: 70ch; }
     .status-badge {
       display: inline-block; padding: 0.1rem 0.5rem; border-radius: 99px;
