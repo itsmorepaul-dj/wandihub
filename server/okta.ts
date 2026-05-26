@@ -60,9 +60,9 @@ const ensureUserRow = async (email: string, name: string): Promise<{ id: number;
   const placeholder = `okta:${Date.now()}:${Math.random().toString(36).slice(2)}`
   const result = await run(
     'INSERT INTO users (email, password_hash, role, display_name) VALUES (?, ?, ?, ?)',
-    [email.toLowerCase(), placeholder, 'user', name || null]
+    [email.toLowerCase(), placeholder, 'viewer', name || null]
   ) as any
-  return { id: result.lastID, role: 'user' }
+  return { id: result.lastID, role: 'viewer' }
 }
 
 // Stable per-email session id so we don't churn the sessions Map / sessions

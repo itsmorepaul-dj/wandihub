@@ -77,6 +77,7 @@ app.get('/api/events', createSSEHandler(() => SITE_VERSION, getMaintenancePayloa
 const viewerWriteAllowedPaths = (path: string, method: string): boolean => {
   if (method === 'POST' && /^\/review-items\/[^/]+\/comments$/.test(path)) return true
   if ((method === 'PUT' || method === 'DELETE') && /^\/review-item-comments\/[^/]+$/.test(path)) return true
+  if (method === 'POST' && path === '/users/request-access') return true
   return false
 }
 

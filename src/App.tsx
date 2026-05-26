@@ -34,6 +34,9 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  "New people signing in via Okta now start as viewers — read-only by default until an admin promotes them.",
+  "Viewers can press \"Request access\" on the read-only toast to ask an admin for full access. Admins see a persistent banner at the top of the site listing pending requests.",
+  "User Accounts now has a search field to filter the list by name, email, or role.",
   "New \"Viewer\" role gives read-only access — viewers can browse everything and post review comments, but cannot edit projects, capacity, notes, or other data.",
   "User Accounts: redesigned as a compact table showing each person's name (from Okta) and email, with role and delete inline.",
   "Admins can now change a user's role (User ↔ Admin) directly from Settings → User Accounts.",
@@ -959,9 +962,13 @@ const [showFilters, setShowFilters] = useState(false)
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   
   // User management (admin only)
-  const [users, setUsers] = useState<{ id: number; email: string; display_name?: string | null; role: string; created_at: string }[]>([])
+  const [users, setUsers] = useState<{ id: number; email: string; display_name?: string | null; role: string; access_requested_at?: string | null; created_at: string }[]>([])
   const [showUserModal, setShowUserModal] = useState(false)
   const [userFormData, setUserFormData] = useState({ email: '', password: '', role: 'user' })
+  const [userSearch, setUserSearch] = useState('')
+  const [accessRequests, setAccessRequests] = useState<{ id: number; email: string; display_name?: string | null; access_requested_at: string }[]>([])
+  const [accessRequestSubmitting, setAccessRequestSubmitting] = useState(false)
+  const [accessRequestSent, setAccessRequestSent] = useState(false)
 
   // Notifications
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([])
@@ -1137,6 +1144,41 @@ const [showFilters, setShowFilters] = useState(false)
     }
   }, [activeTab, currentUser])
 
+  // Pending access requests — fetched globally for admins so the persistent
+  // banner shows on every page, not just Settings. Polled every 60s.
+  const fetchAccessRequests = async () => {
+    try {
+      const res = await authFetch('/api/users/access-requests')
+      if (res.ok) setAccessRequests(await res.json())
+    } catch (err) {
+      console.error('Error fetching access requests:', err)
+    }
+  }
+
+  useEffect(() => {
+    if (currentUser?.role !== 'admin') { setAccessRequests([]); return }
+    fetchAccessRequests()
+    const t = setInterval(fetchAccessRequests, 60000)
+    return () => clearInterval(t)
+  }, [currentUser])
+
+  const handleRequestAccess = async () => {
+    if (accessRequestSubmitting) return
+    setAccessRequestSubmitting(true)
+    try {
+      const res = await authFetch('/api/users/request-access', { method: 'POST' })
+      if (res.ok) {
+        setViewerBlockedAt(0)
+        setAccessRequestSent(true)
+        setTimeout(() => setAccessRequestSent(false), 5000)
+      }
+    } catch (err) {
+      console.error('Error requesting access:', err)
+    } finally {
+      setAccessRequestSubmitting(false)
+    }
+  }
+
   // Create user
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1167,6 +1209,7 @@ const [showFilters, setShowFilters] = useState(false)
       })
       if (res.ok) {
         fetchUsers()
+        fetchAccessRequests()
       } else {
         const err = await res.json()
         alert(err.error || 'Failed to update role')
@@ -3100,17 +3143,50 @@ const [showFilters, setShowFilters] = useState(false)
           A new version of Design Hub is available. Click to refresh.
         </div>
       )}
+      {/* Pending access requests banner (admin only) */}
+      {isAdmin && accessRequests.length > 0 && (
+        <div
+          className="access-request-banner"
+          role="button"
+          tabIndex={0}
+          onClick={() => setActiveTab('settings')}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setActiveTab('settings') }}
+        >
+          <span className="access-request-banner-text">
+            {accessRequests.length === 1
+              ? `${accessRequests[0].display_name || accessRequests[0].email} is requesting full access`
+              : `${accessRequests.length} people are requesting full access`}
+            <span className="access-request-banner-cta"> &mdash; review in Settings</span>
+          </span>
+        </div>
+      )}
       {/* Viewer-role read-only toast */}
       {viewerBlockedAt > 0 && (
         <div className="viewer-blocked-toast" role="status" aria-live="polite">
           <Lock size={14} />
           <span>You have read-only access. Request full access from an admin to make changes.</span>
+          <button
+            className="viewer-blocked-action"
+            onClick={handleRequestAccess}
+            disabled={accessRequestSubmitting}
+          >
+            {accessRequestSubmitting ? 'Sending…' : 'Request access'}
+          </button>
           <button className="viewer-blocked-close" onClick={() => setViewerBlockedAt(0)} aria-label="Dismiss">
             <X size={14} />
           </button>
         </div>
       )}
-    <div className={`app${showMaintenanceBanner || updateAvailable ? ' has-maintenance-banner' : ''}`}>
+      {/* Access request sent confirmation */}
+      {accessRequestSent && (
+        <div className="viewer-blocked-toast viewer-blocked-toast-success" role="status" aria-live="polite">
+          <span>Access request sent. An admin will review it shortly.</span>
+          <button className="viewer-blocked-close" onClick={() => setAccessRequestSent(false)} aria-label="Dismiss">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+    <div className={`app${showMaintenanceBanner || updateAvailable || (isAdmin && accessRequests.length > 0) ? ' has-maintenance-banner' : ''}`}>
       {/* Sidebar */}
       <aside className={`sidebar ${navCollapsed ? 'sidebar-collapsed' : ''}`}>
         <div className="logo">
@@ -7189,57 +7265,86 @@ const [showFilters, setShowFilters] = useState(false)
                   + Add User
                 </button>
               </div>
-              
+
               {users.length === 0 ? (
                 <p className="settings-empty">No user accounts. Add one to get started.</p>
-              ) : (
-                <div className="users-table">
-                  <div className="users-table-header">
-                    <span>Person</span>
-                    <span>Role</span>
-                    <span aria-hidden="true"></span>
-                  </div>
-                  {users.map(user => {
-                    const isSelf = user.id === currentUser?.id
-                    const displayName = user.display_name || user.email
-                    const showEmailLine = displayName !== user.email
-                    return (
-                      <div key={user.id} className="users-table-row">
-                        <div className="users-table-cell users-table-person">
-                          <span className="users-table-name">{displayName}</span>
-                          {showEmailLine && <span className="users-table-email">{user.email}</span>}
-                        </div>
-                        <div className="users-table-cell">
-                          {isSelf ? (
-                            <span className="user-role-self" title="You cannot change your own role">{user.role}</span>
-                          ) : (
-                            <select
-                              className="user-role-select"
-                              value={user.role}
-                              onChange={e => handleChangeRole(user.id, e.target.value)}
-                              aria-label={`Change role for ${displayName}`}
-                            >
-                              <option value="user">User</option>
-                              <option value="admin">Admin</option>
-                              <option value="viewer">Viewer</option>
-                            </select>
-                          )}
-                        </div>
-                        <div className="users-table-cell users-table-actions">
-                          <button
-                            className="action-btn delete"
-                            onClick={() => handleDeleteUser(user.id)}
-                            disabled={isSelf}
-                            title={isSelf ? "Cannot delete your own account" : "Delete user"}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
+              ) : (() => {
+                const q = userSearch.trim().toLowerCase()
+                const filtered = q
+                  ? users.filter(u =>
+                      (u.display_name || '').toLowerCase().includes(q) ||
+                      u.email.toLowerCase().includes(q) ||
+                      u.role.toLowerCase().includes(q)
                     )
-                  })}
-                </div>
-              )}
+                  : users
+                return (
+                  <>
+                    <div className={`float-field users-table-search${userSearch ? ' has-value' : ''}`}>
+                      <input
+                        type="text"
+                        value={userSearch}
+                        onChange={e => setUserSearch(e.target.value)}
+                        placeholder=" "
+                      />
+                      <label>Search by name, email, or role</label>
+                    </div>
+                    {filtered.length === 0 ? (
+                      <p className="settings-empty">No users match "{userSearch}".</p>
+                    ) : (
+                      <div className="users-table">
+                        <div className="users-table-header">
+                          <span>Person</span>
+                          <span>Role</span>
+                          <span aria-hidden="true"></span>
+                        </div>
+                        {filtered.map(user => {
+                          const isSelf = user.id === currentUser?.id
+                          const displayName = user.display_name || user.email
+                          const showEmailLine = displayName !== user.email
+                          const isRequesting = !!user.access_requested_at
+                          return (
+                            <div key={user.id} className={`users-table-row${isRequesting ? ' users-table-row-requesting' : ''}`}>
+                              <div className="users-table-cell users-table-person">
+                                <span className="users-table-name">
+                                  {displayName}
+                                  {isRequesting && <span className="users-table-badge" title="Requesting full access">Requesting access</span>}
+                                </span>
+                                {showEmailLine && <span className="users-table-email">{user.email}</span>}
+                              </div>
+                              <div className="users-table-cell">
+                                {isSelf ? (
+                                  <span className="user-role-self" title="You cannot change your own role">{user.role}</span>
+                                ) : (
+                                  <select
+                                    className="user-role-select"
+                                    value={user.role}
+                                    onChange={e => handleChangeRole(user.id, e.target.value)}
+                                    aria-label={`Change role for ${displayName}`}
+                                  >
+                                    <option value="user">User</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="viewer">Viewer</option>
+                                  </select>
+                                )}
+                              </div>
+                              <div className="users-table-cell users-table-actions">
+                                <button
+                                  className="action-btn delete"
+                                  onClick={() => handleDeleteUser(user.id)}
+                                  disabled={isSelf}
+                                  title={isSelf ? "Cannot delete your own account" : "Delete user"}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
             </div>
           )}
 

@@ -173,6 +173,7 @@ export const initUsers = async () => {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
   await run(`ALTER TABLE users ADD COLUMN display_name TEXT`).catch(() => {})
+  await run(`ALTER TABLE users ADD COLUMN access_requested_at TEXT`).catch(() => {})
 
   // Migration: relax the role CHECK to allow 'viewer'. Older installs were
   // created with CHECK(role IN ('admin','user')) which would reject any
@@ -193,7 +194,8 @@ export const initUsers = async () => {
         password_hash TEXT NOT NULL,
         role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user', 'viewer')),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        display_name TEXT
+        display_name TEXT,
+        access_requested_at TEXT
       )`)
       await run('INSERT INTO users_new (id, email, password_hash, role, created_at, display_name) SELECT id, email, password_hash, role, created_at, display_name FROM users')
       await run('DROP TABLE users')
@@ -312,11 +314,42 @@ export const usersRouter = express.Router();
 
 usersRouter.get('/', requireAdmin, async (_req, res) => {
   try {
-    const users = await all('SELECT id, email, display_name, role, created_at FROM users ORDER BY created_at DESC');
+    const users = await all('SELECT id, email, display_name, role, access_requested_at, created_at FROM users ORDER BY created_at DESC');
     res.json(users);
   } catch (err) {
     console.error('Error fetching users:', err);
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Pending access requests (admin only). Used by the persistent banner.
+usersRouter.get('/access-requests', requireAdmin, async (_req, res) => {
+  try {
+    const rows = await all(
+      `SELECT id, email, display_name, access_requested_at FROM users
+       WHERE access_requested_at IS NOT NULL ORDER BY access_requested_at ASC`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching access requests:', err);
+    res.status(500).json({ error: 'Failed to fetch access requests' });
+  }
+});
+
+// Any authenticated user can flag themselves as requesting full access. The
+// /api routes layer (server.ts) carves this out so viewers aren't blocked by
+// requireWrite — that's the whole point of this endpoint.
+usersRouter.post('/request-access', requireAuth, async (req, res) => {
+  try {
+    const session = (req as any).session;
+    await run(
+      `UPDATE users SET access_requested_at = datetime('now') WHERE id = ? AND access_requested_at IS NULL`,
+      [session.userId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error recording access request:', err);
+    res.status(500).json({ error: 'Failed to record access request' });
   }
 });
 
@@ -382,7 +415,7 @@ usersRouter.put('/:id/role', requireAdmin, async (req, res) => {
     const existing = await get('SELECT id FROM users WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ error: 'User not found' });
 
-    await run('UPDATE users SET role = ? WHERE id = ?', [role, id]);
+    await run('UPDATE users SET role = ?, access_requested_at = NULL WHERE id = ?', [role, id]);
     await invalidateUserSessions(parseInt(id));
     res.json({ success: true, id: parseInt(id), role });
   } catch (err) {

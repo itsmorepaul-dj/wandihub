@@ -8621,6 +8621,54 @@ select:focus-visible {
   cursor: not-allowed;
 }
 
+.users-table-search {
+  margin-bottom: 0.75rem;
+  max-width: 360px;
+}
+
+.users-table-row-requesting {
+  background: var(--color-accent-subtle);
+}
+
+.users-table-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border-radius: var(--radius-xs);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  vertical-align: middle;
+}
+
+/* Persistent banner shown to admins when one or more users are requesting access */
+.access-request-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9997;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  color: #fff;
+  text-align: center;
+  padding: 10px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  transition: filter 0.12s ease;
+  border: none;
+}
+.access-request-banner:hover { filter: brightness(1.05); }
+.access-request-banner:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
+.access-request-banner-cta {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
 .user-role-select {
   padding: 0.4rem 1.75rem 0.4rem 0.75rem;
   border-radius: 6px;
@@ -8854,6 +8902,25 @@ select:focus {
 .viewer-blocked-toast span {
   flex: 1;
 }
+
+.viewer-blocked-toast-success {
+  border-left-color: var(--color-success);
+}
+
+.viewer-blocked-action {
+  flex-shrink: 0;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.viewer-blocked-action:hover { background: var(--color-accent-hover); }
+.viewer-blocked-action:disabled { opacity: 0.6; cursor: default; }
 
 .viewer-blocked-close {
   flex-shrink: 0;
