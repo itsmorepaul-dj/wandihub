@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
-import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, FileBarChart,ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus, Sparkles } from 'lucide-react'
+import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, FileBarChart,ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus, Sparkles, Lock, X } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
@@ -34,10 +34,10 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  "New \"Viewer\" role gives read-only access — viewers can browse everything and post review comments, but cannot edit projects, capacity, notes, or other data.",
   "User Accounts: redesigned as a compact table showing each person's name (from Okta) and email, with role and delete inline.",
   "Admins can now change a user's role (User ↔ Admin) directly from Settings → User Accounts.",
   "Fixed: review images now load on Design Hub.",
-  "New home: WandiHub is now Design Hub, hosted on the Dow Jones internal platform. Sign in with your DJ Okta account — no separate password needed. Bookmark the new URL: https://designhub.hatch.ai.dowjones.io",
 ]
 
 
@@ -1233,6 +1233,7 @@ const [showFilters, setShowFilters] = useState(false)
   const [maintenanceForm, setMaintenanceForm] = useState({ bannerMessage: 'Save your work. Design Hub maintenance about to begin in 5 minutes.', lockoutMessage: 'Design Hub will be back soon.', countdownMinutes: 5 })
   const [countdownDisplay, setCountdownDisplay] = useState('')
   const [updateAvailable, setUpdateAvailable] = useState(false)
+  const [viewerBlockedAt, setViewerBlockedAt] = useState(0)
   const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
   // `docsHtml` is a lazy builder: running the markup-to-Docs conversion is
@@ -1952,6 +1953,20 @@ const [showFilters, setShowFilters] = useState(false)
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [showSearch])
+
+  // Listen for viewer-role 403s emitted by authFetch and show a toast.
+  useEffect(() => {
+    const onBlocked = () => setViewerBlockedAt(Date.now())
+    window.addEventListener('dcc-viewer-blocked', onBlocked)
+    return () => window.removeEventListener('dcc-viewer-blocked', onBlocked)
+  }, [])
+
+  // Auto-dismiss the viewer toast after 6s.
+  useEffect(() => {
+    if (!viewerBlockedAt) return
+    const t = setTimeout(() => setViewerBlockedAt(0), 6000)
+    return () => clearTimeout(t)
+  }, [viewerBlockedAt])
 
   // Business Line CRUD
   const saveBusinessLine = async (line: BusinessLine, originalName?: string) => {
@@ -3083,6 +3098,16 @@ const [showFilters, setShowFilters] = useState(false)
       {updateAvailable && (
         <div className="update-banner" onClick={() => window.location.reload()}>
           A new version of Design Hub is available. Click to refresh.
+        </div>
+      )}
+      {/* Viewer-role read-only toast */}
+      {viewerBlockedAt > 0 && (
+        <div className="viewer-blocked-toast" role="status" aria-live="polite">
+          <Lock size={14} />
+          <span>You have read-only access. Request full access from an admin to make changes.</span>
+          <button className="viewer-blocked-close" onClick={() => setViewerBlockedAt(0)} aria-label="Dismiss">
+            <X size={14} />
+          </button>
         </div>
       )}
     <div className={`app${showMaintenanceBanner || updateAvailable ? ' has-maintenance-banner' : ''}`}>
@@ -7196,6 +7221,7 @@ const [showFilters, setShowFilters] = useState(false)
                             >
                               <option value="user">User</option>
                               <option value="admin">Admin</option>
+                              <option value="viewer">Viewer</option>
                             </select>
                           )}
                         </div>
@@ -8664,6 +8690,7 @@ const [showFilters, setShowFilters] = useState(false)
                 >
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
+                  <option value="viewer">Viewer</option>
                 </select>
               </div>
 

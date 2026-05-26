@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import path from 'path';
 
 import { initSchema, validateSchemaOnStartup, SEED_SECRET } from './server/db.js';
-import { sessions, requireAuth, authRouter, usersRouter, initUsers, createVersionGuard } from './server/auth.js';
+import { sessions, requireAuth, requireWrite, authRouter, usersRouter, initUsers, createVersionGuard } from './server/auth.js';
 import { oktaEnabled, oktaMiddleware, oktaWhoamiHandler } from './server/okta.js';
 import { broadcast, createSSEHandler } from './server/sse.js';
 import { maintenanceMiddleware, maintenanceRouter, loadMaintenanceState, getMaintenancePayload } from './server/maintenance.js';
@@ -72,6 +72,14 @@ app.use(maintenanceMiddleware);
 app.get('/api/events', createSSEHandler(() => SITE_VERSION, getMaintenancePayload));
 
 // ============ AUTH GUARD FOR WRITES ============
+// Viewers can read everything (GET) and add/edit/delete their own review
+// comments, but everything else mutating is blocked at this layer.
+const viewerWriteAllowedPaths = (path: string, method: string): boolean => {
+  if (method === 'POST' && /^\/review-items\/[^/]+\/comments$/.test(path)) return true
+  if ((method === 'PUT' || method === 'DELETE') && /^\/review-item-comments\/[^/]+$/.test(path)) return true
+  return false
+}
+
 app.use('/api', (req, res, next) => {
   const alwaysSkipPaths = ['/auth/login', '/auth/logout', '/auth/me', '/health', '/versions', '/events']
   const isReadOnly = req.method === 'GET'
@@ -82,7 +90,8 @@ app.use('/api', (req, res, next) => {
   const shouldSkip = alwaysSkipPaths.some(p => req.path.startsWith(p)) || isReadOnly || (isSeedEndpoint && isLocalhost) || hasSeedToken
 
   if (shouldSkip) return next()
-  requireAuth(req, res, next)
+  if (viewerWriteAllowedPaths(req.path, req.method)) return requireAuth(req, res, next)
+  requireWrite(req, res, next)
 })
 
 // ============ ROUTE MODULES ============

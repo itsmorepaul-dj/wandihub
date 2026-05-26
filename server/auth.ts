@@ -74,6 +74,23 @@ export const requireAdmin = (req: express.Request, res: express.Response, next: 
   next();
 };
 
+// Auth middleware - blocks viewer-role writes. Viewers can authenticate and
+// read everything but cannot mutate state, with the exception of review
+// comments which are gated separately at the route layer (see server.ts
+// viewerWriteAllowedPaths).
+export const requireWrite = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const sessionId = getSessionIdFromRequest(req);
+  if (!sessionId || !sessions.has(sessionId)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const session = sessions.get(sessionId);
+  if (session?.role === 'viewer') {
+    return res.status(403).json({ error: 'Read-only role: writes are not permitted' });
+  }
+  (req as any).session = session;
+  next();
+};
+
 // Version guard — reject writes from stale client bundles
 export const createVersionGuard = (getSiteVersion: () => string) => {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -152,10 +169,44 @@ export const initUsers = async () => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
+    role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user', 'viewer')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
   await run(`ALTER TABLE users ADD COLUMN display_name TEXT`).catch(() => {})
+
+  // Migration: relax the role CHECK to allow 'viewer'. Older installs were
+  // created with CHECK(role IN ('admin','user')) which would reject any
+  // UPDATE setting role='viewer'. SQLite can't ALTER a CHECK in place, so
+  // rebuild the table when we detect the old constraint.
+  try {
+    const sqlRow = await get(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+    ) as { sql?: string } | undefined
+    const hasOldCheck = !!sqlRow?.sql && /CHECK\(\s*role\s+IN\s*\(\s*'admin'\s*,\s*'user'\s*\)\s*\)/i.test(sqlRow.sql)
+    if (hasOldCheck) {
+      console.log('Migrating users.role CHECK to include viewer...')
+      await run('PRAGMA foreign_keys = OFF')
+      await run('BEGIN TRANSACTION')
+      await run(`CREATE TABLE users_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user', 'viewer')),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        display_name TEXT
+      )`)
+      await run('INSERT INTO users_new (id, email, password_hash, role, created_at, display_name) SELECT id, email, password_hash, role, created_at, display_name FROM users')
+      await run('DROP TABLE users')
+      await run('ALTER TABLE users_new RENAME TO users')
+      await run('COMMIT')
+      await run('PRAGMA foreign_keys = ON')
+      console.log('users.role migration complete')
+    }
+  } catch (err) {
+    console.error('users.role migration failed:', err)
+    await run('ROLLBACK').catch(() => {})
+    await run('PRAGMA foreign_keys = ON').catch(() => {})
+  }
 
   await run(`CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -275,6 +326,9 @@ usersRouter.post('/', requireAdmin, async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password required' });
     }
+    if (role !== 'admin' && role !== 'user' && role !== 'viewer') {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await run(
@@ -318,8 +372,8 @@ usersRouter.put('/:id/role', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { role } = req.body;
-    if (role !== 'admin' && role !== 'user') {
-      return res.status(400).json({ error: 'Role must be "admin" or "user"' });
+    if (role !== 'admin' && role !== 'user' && role !== 'viewer') {
+      return res.status(400).json({ error: 'Role must be "admin", "user", or "viewer"' });
     }
     const session = (req as any).session;
     if (parseInt(id) === session.userId) {

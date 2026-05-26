@@ -33,6 +33,17 @@ export const authFetch = async (url: string, options: RequestInit = {}) => {
     }
     throw Object.assign(new Error(data.error || 'Conflict'), { status: 409 })
   }
+  // Viewer-role write rejection: surface a single in-app banner instead of
+  // letting each callsite alert() their own copy. We clone the response so
+  // the original caller can still .json()/.text() it normally.
+  if (res.status === 403) {
+    const peek = res.clone()
+    peek.json().then((data: any) => {
+      if (typeof data?.error === 'string' && /read-only role/i.test(data.error)) {
+        window.dispatchEvent(new CustomEvent('dcc-viewer-blocked'))
+      }
+    }).catch(() => {})
+  }
   return res
 }
 
