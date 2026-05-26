@@ -155,6 +155,7 @@ export const initUsers = async () => {
     role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  await run(`ALTER TABLE users ADD COLUMN display_name TEXT`).catch(() => {})
 
   await run(`CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -260,7 +261,7 @@ export const usersRouter = express.Router();
 
 usersRouter.get('/', requireAdmin, async (_req, res) => {
   try {
-    const users = await all('SELECT id, email, role, created_at FROM users ORDER BY created_at DESC');
+    const users = await all('SELECT id, email, display_name, role, created_at FROM users ORDER BY created_at DESC');
     res.json(users);
   } catch (err) {
     console.error('Error fetching users:', err);

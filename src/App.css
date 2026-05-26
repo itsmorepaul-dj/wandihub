@@ -145,11 +145,6 @@
   letter-spacing: -0.01em;
 }
 
-.user-role {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
-
 /* ============ Main Content ============ */
 .main {
   flex: 1;
@@ -8547,40 +8542,81 @@ select:focus-visible {
 }
 
 /* User Management */
-.users-list {
+.users-table {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-}
-
-.user-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem;
-  background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
 }
 
-.user-info h3 {
-  margin: 0;
-  font-size: 0.95rem;
+.users-table-header {
+  display: grid;
+  grid-template-columns: 1fr 140px 56px;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.users-table-row {
+  display: grid;
+  grid-template-columns: 1fr 140px 56px;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: background-color 0.12s ease;
+}
+
+.users-table-row:last-child {
+  border-bottom: none;
+}
+
+.users-table-row:hover {
+  background: var(--color-hover-subtle);
+}
+
+.users-table-cell {
+  min-width: 0;
+}
+
+.users-table-person {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.users-table-name {
+  font-size: 0.875rem;
   font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.user-role {
+.users-table-email {
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  text-transform: capitalize;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.user-actions {
+.users-table-actions {
   display: flex;
-  gap: 0.5rem;
+  justify-content: flex-end;
 }
 
-.user-card .action-btn:disabled {
+.users-table-row .action-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

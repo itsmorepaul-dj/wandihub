@@ -44,15 +44,23 @@ const decodeJwtName = (authHeader: string | undefined): string => {
   return ''
 }
 
-const ensureUserRow = async (email: string): Promise<{ id: number; role: string }> => {
-  const existing = await get('SELECT id, role FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
-  if (existing) return { id: existing.id, role: existing.role }
+const ensureUserRow = async (email: string, name: string): Promise<{ id: number; role: string }> => {
+  const existing = await get('SELECT id, role, display_name FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
+  if (existing) {
+    // Backfill display_name lazily — only when the column is empty or the
+    // Okta-supplied name has changed (e.g. legal name update). One UPDATE per
+    // change, not per request.
+    if (name && existing.display_name !== name) {
+      await run('UPDATE users SET display_name = ? WHERE id = ?', [name, existing.id]).catch(() => {})
+    }
+    return { id: existing.id, role: existing.role }
+  }
   // Random hash — Okta-only users never authenticate by password, but the
   // column is NOT NULL on the existing schema.
   const placeholder = `okta:${Date.now()}:${Math.random().toString(36).slice(2)}`
   const result = await run(
-    'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
-    [email.toLowerCase(), placeholder, 'user']
+    'INSERT INTO users (email, password_hash, role, display_name) VALUES (?, ?, ?, ?)',
+    [email.toLowerCase(), placeholder, 'user', name || null]
   ) as any
   return { id: result.lastID, role: 'user' }
 }
@@ -61,6 +69,19 @@ const ensureUserRow = async (email: string): Promise<{ id: number; role: string 
 // table on every request. Using a deterministic prefix means the existing
 // session-cookie path continues to identify the user across page loads.
 const sessionIdFor = (email: string): string => `okta:${email.toLowerCase()}`
+
+// Tracks emails whose display_name has been reconciled this process lifetime,
+// so we only run the SELECT+UPDATE once per pod even when sessions were
+// hydrated from disk and ensureUserRow doesn't otherwise fire.
+const nameSyncedThisProcess = new Set<string>()
+const syncDisplayName = async (email: string, name: string) => {
+  if (!name || nameSyncedThisProcess.has(email)) return
+  nameSyncedThisProcess.add(email)
+  const row = await get('SELECT id, display_name FROM users WHERE LOWER(email) = LOWER(?)', [email]) as any
+  if (row && row.display_name !== name) {
+    await run('UPDATE users SET display_name = ? WHERE id = ?', [name, row.id]).catch(() => {})
+  }
+}
 
 export const oktaMiddleware: express.RequestHandler = async (req, res, next) => {
   const rawEmail = req.headers[EMAIL_HEADER]
@@ -77,16 +98,19 @@ export const oktaMiddleware: express.RequestHandler = async (req, res, next) => 
     // invalidateUserSessions which clears the cache, forcing a fresh lookup).
     let userId: number
     let role: string
+    const name = decodeJwtName(req.headers.authorization as string | undefined)
     const cached = sessions.get(sid)
     if (cached) {
       userId = cached.userId
       role = cached.role
+      // Cached sessions skip ensureUserRow, so reconcile name here (once/process).
+      syncDisplayName(email, name).catch(() => {})
     } else {
-      const ensured = await ensureUserRow(email)
+      const ensured = await ensureUserRow(email, name)
       userId = ensured.id
       role = ensured.role
+      if (name) nameSyncedThisProcess.add(email)
     }
-    const name = decodeJwtName(req.headers.authorization as string | undefined)
 
     sessions.set(sid, { userId, email, role })
     // Populate the cookie on BOTH sides of the request: the response so the

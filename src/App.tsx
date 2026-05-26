@@ -34,10 +34,10 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  "User Accounts: redesigned as a compact table showing each person's name (from Okta) and email, with role and delete inline.",
   "Admins can now change a user's role (User ↔ Admin) directly from Settings → User Accounts.",
   "Fixed: review images now load on Design Hub.",
   "New home: WandiHub is now Design Hub, hosted on the Dow Jones internal platform. Sign in with your DJ Okta account — no separate password needed. Bookmark the new URL: https://designhub.hatch.ai.dowjones.io",
-  "Public review cards now show a chip for each project's business line next to the status badge.",
 ]
 
 
@@ -959,7 +959,7 @@ const [showFilters, setShowFilters] = useState(false)
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   
   // User management (admin only)
-  const [users, setUsers] = useState<{ id: number; email: string; role: string; created_at: string }[]>([])
+  const [users, setUsers] = useState<{ id: number; email: string; display_name?: string | null; role: string; created_at: string }[]>([])
   const [showUserModal, setShowUserModal] = useState(false)
   const [userFormData, setUserFormData] = useState({ email: '', password: '', role: 'user' })
 
@@ -7168,38 +7168,50 @@ const [showFilters, setShowFilters] = useState(false)
               {users.length === 0 ? (
                 <p className="settings-empty">No user accounts. Add one to get started.</p>
               ) : (
-                <div className="users-list">
-                  {users.map(user => (
-                    <div key={user.id} className="user-card">
-                      <div className="user-info">
-                        <h3>{user.email}</h3>
-                        <span className="user-role">{user.role}</span>
-                      </div>
-                      <div className="user-actions">
-                        {user.id === currentUser?.id ? (
-                          <span className="user-role-self" title="You cannot change your own role">{user.role}</span>
-                        ) : (
-                          <select
-                            className="user-role-select"
-                            value={user.role}
-                            onChange={e => handleChangeRole(user.id, e.target.value)}
-                            aria-label={`Change role for ${user.email}`}
+                <div className="users-table">
+                  <div className="users-table-header">
+                    <span>Person</span>
+                    <span>Role</span>
+                    <span aria-hidden="true"></span>
+                  </div>
+                  {users.map(user => {
+                    const isSelf = user.id === currentUser?.id
+                    const displayName = user.display_name || user.email
+                    const showEmailLine = displayName !== user.email
+                    return (
+                      <div key={user.id} className="users-table-row">
+                        <div className="users-table-cell users-table-person">
+                          <span className="users-table-name">{displayName}</span>
+                          {showEmailLine && <span className="users-table-email">{user.email}</span>}
+                        </div>
+                        <div className="users-table-cell">
+                          {isSelf ? (
+                            <span className="user-role-self" title="You cannot change your own role">{user.role}</span>
+                          ) : (
+                            <select
+                              className="user-role-select"
+                              value={user.role}
+                              onChange={e => handleChangeRole(user.id, e.target.value)}
+                              aria-label={`Change role for ${displayName}`}
+                            >
+                              <option value="user">User</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                          )}
+                        </div>
+                        <div className="users-table-cell users-table-actions">
+                          <button
+                            className="action-btn delete"
+                            onClick={() => handleDeleteUser(user.id)}
+                            disabled={isSelf}
+                            title={isSelf ? "Cannot delete your own account" : "Delete user"}
                           >
-                            <option value="user">User</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                        )}
-                        <button
-                          className="action-btn delete"
-                          onClick={() => handleDeleteUser(user.id)}
-                          disabled={user.id === currentUser?.id}
-                          title={user.id === currentUser?.id ? "Cannot delete your own account" : "Delete user"}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
