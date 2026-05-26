@@ -42,7 +42,7 @@ app.use(express.json({ limit: '10mb' }));
 const versionGuard = createVersionGuard(() => SITE_VERSION)
 app.use((req, res, next) => {
   if (['POST', 'PUT', 'DELETE'].includes(req.method) && req.path.startsWith('/api/')) {
-    const skipPaths = ['/api/auth/', '/api/upload-db', '/api/seed', '/api/maintenance', '/api/review-items/', '/api/images', '/api/review-item-images', '/api/review-item-comments']
+    const skipPaths = ['/api/auth/', '/api/upload-db', '/api/upload-images', '/api/seed', '/api/maintenance', '/api/review-items/', '/api/images', '/api/review-item-images', '/api/review-item-comments']
     if (skipPaths.some(p => req.path.startsWith(p))) return next()
     return versionGuard(req, res, next)
   }
@@ -76,7 +76,7 @@ app.use('/api', (req, res, next) => {
   const alwaysSkipPaths = ['/auth/login', '/auth/logout', '/auth/me', '/health', '/versions', '/events']
   const isReadOnly = req.method === 'GET'
   const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'
-  const isSeedEndpoint = req.path === '/seed' || req.path === '/upload-db' || req.path === '/download-db'
+  const isSeedEndpoint = req.path === '/seed' || req.path === '/upload-db' || req.path === '/download-db' || req.path === '/upload-images'
   const hasSeedToken = isSeedEndpoint && SEED_SECRET && req.headers['x-seed-secret'] === SEED_SECRET
 
   const shouldSkip = alwaysSkipPaths.some(p => req.path.startsWith(p)) || isReadOnly || (isSeedEndpoint && isLocalhost) || hasSeedToken

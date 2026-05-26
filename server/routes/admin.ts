@@ -1,8 +1,9 @@
 import express from 'express';
 import fs from 'fs';
-import sqlite3 from 'sqlite3';
-import { run, get, all, DB_PATH, SEED_SECRET, getDb, setDb, schemaDrift,
+import { spawn } from 'child_process';
+import { run, get, all, DB_PATH, IMAGES_DIR, SEED_SECRET, getDb, setDb, schemaDrift,
   upsertProject, upsertTeamMember, upsertBusinessLine, upsertAssignment, upsertNote } from '../db.js';
+import sqlite3 from 'sqlite3';
 import { requireAdmin } from '../auth.js';
 import { broadcast } from '../sse.js';
 import { loadMaintenanceState } from '../maintenance.js';
@@ -104,6 +105,59 @@ router.post('/upload-db', express.raw({ type: 'application/octet-stream', limit:
     })
   } catch (e) {
     try { setDb(new sqlite3.Database(DB_PATH)) } catch {}
+    res.status(500).json({ error: (e as Error).message })
+  }
+})
+
+// ============ IMAGE FILES UPLOAD ============
+//
+// Accepts a tar.gz of image files and unpacks them flat into IMAGES_DIR.
+// Auth: same dual path as /upload-db — Okta admin session (requireAdmin runs
+// upstream via the route guard) OR x-seed-secret header for ops scripts.
+// Existing files with the same filename are overwritten, which is the right
+// behavior for the migration scenario this was built for (re-syncing image
+// files to match a freshly-restored DB).
+//
+// The tar is piped through busybox tar (-xz) inside the container — Node 22
+// alpine ships with it. Files in subdirectories are stripped via
+// --strip-components, so a tarball built with `tar czf - -C /src .` lays its
+// contents flat in IMAGES_DIR regardless of whether the source had nested dirs.
+router.post('/upload-images', express.raw({ type: 'application/octet-stream', limit: '500mb' }), async (req, res) => {
+  try {
+    const tarBytes = req.body as Buffer
+    if (!tarBytes || tarBytes.length < 100) {
+      return res.status(400).json({ error: 'No tar archive received or file too small' })
+    }
+    // gzip magic bytes
+    if (tarBytes[0] !== 0x1f || tarBytes[1] !== 0x8b) {
+      return res.status(400).json({ error: 'Not a gzip-compressed tar (missing 0x1f8b magic)' })
+    }
+
+    fs.mkdirSync(IMAGES_DIR, { recursive: true })
+
+    const result = await new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
+      const proc = spawn('tar', ['-xzvf', '-', '-C', IMAGES_DIR], { stdio: ['pipe', 'pipe', 'pipe'] })
+      let stdout = ''
+      let stderr = ''
+      proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+      proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+      proc.on('close', (code: number) => resolve({ stdout, stderr, code: code ?? -1 }))
+      proc.stdin.write(tarBytes)
+      proc.stdin.end()
+    })
+
+    if (result.code !== 0) {
+      return res.status(500).json({ error: 'tar extraction failed', stderr: result.stderr.slice(0, 500), code: result.code })
+    }
+
+    const written = fs.readdirSync(IMAGES_DIR).length
+    res.json({
+      success: true,
+      imagesDir: IMAGES_DIR,
+      filesNowInDir: written,
+      tarOutput: (result.stdout || result.stderr).split('\n').filter(Boolean).slice(0, 10),
+    })
+  } catch (e) {
     res.status(500).json({ error: (e as Error).message })
   }
 })
