@@ -34,11 +34,10 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  "Admins can now change a user's role (User ↔ Admin) directly from Settings → User Accounts.",
   "Fixed: review images now load on Design Hub.",
   "New home: WandiHub is now Design Hub, hosted on the Dow Jones internal platform. Sign in with your DJ Okta account — no separate password needed. Bookmark the new URL: https://designhub.hatch.ai.dowjones.io",
   "Public review cards now show a chip for each project's business line next to the status badge.",
-  'Polish: Executive Summary report uses the same look as View Report, links render correctly, project names link back to a filtered project view, and Docs copy/paste lays out cleanly with bullets stripped and projects spaced apart.',
-  'New: A customized weekly executive report reformats the raw status inputs from active projects and general info into concise bites of important information grouped by business line.',
 ]
 
 
@@ -1156,6 +1155,24 @@ const [showFilters, setShowFilters] = useState(false)
       }
     } catch (err) {
       alert('Failed to create user')
+    }
+  }
+
+  // Change user role
+  const handleChangeRole = async (userId: number, newRole: string) => {
+    try {
+      const res = await authFetch(`/api/users/${userId}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: newRole })
+      })
+      if (res.ok) {
+        fetchUsers()
+      } else {
+        const err = await res.json()
+        alert(err.error || 'Failed to update role')
+      }
+    } catch (err) {
+      alert('Failed to update role')
     }
   }
 
@@ -7159,8 +7176,21 @@ const [showFilters, setShowFilters] = useState(false)
                         <span className="user-role">{user.role}</span>
                       </div>
                       <div className="user-actions">
-                        <button 
-                          className="action-btn delete" 
+                        {user.id === currentUser?.id ? (
+                          <span className="user-role-self" title="You cannot change your own role">{user.role}</span>
+                        ) : (
+                          <select
+                            className="user-role-select"
+                            value={user.role}
+                            onChange={e => handleChangeRole(user.id, e.target.value)}
+                            aria-label={`Change role for ${user.email}`}
+                          >
+                            <option value="user">User</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        )}
+                        <button
+                          className="action-btn delete"
                           onClick={() => handleDeleteUser(user.id)}
                           disabled={user.id === currentUser?.id}
                           title={user.id === currentUser?.id ? "Cannot delete your own account" : "Delete user"}
