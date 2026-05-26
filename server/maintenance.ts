@@ -6,7 +6,7 @@ import { broadcast } from './sse.js';
 export const maintenanceState = {
   enabled: false,
   bannerMessage: '',
-  lockoutMessage: 'Wandi Hub will be back soon.',
+  lockoutMessage: 'Design Hub will be back soon.',
   countdownTarget: null as string | null,
 }
 
@@ -53,7 +53,7 @@ export const MAINTENANCE_HTML = (message: string) => `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Wandi Hub - Maintenance</title>
+  <title>Design Hub - Maintenance</title>
   <meta http-equiv="refresh" content="30">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }

@@ -1213,7 +1213,7 @@ const [showFilters, setShowFilters] = useState(false)
     countdownTarget: string | null
     isLockout: boolean
   }>({ enabled: false, bannerMessage: '', lockoutMessage: '', countdownTarget: null, isLockout: false })
-  const [maintenanceForm, setMaintenanceForm] = useState({ bannerMessage: 'Save your work. Wandi Hub maintenance about to begin in 5 minutes.', lockoutMessage: 'Wandi Hub will be back soon.', countdownMinutes: 5 })
+  const [maintenanceForm, setMaintenanceForm] = useState({ bannerMessage: 'Save your work. Design Hub maintenance about to begin in 5 minutes.', lockoutMessage: 'Design Hub will be back soon.', countdownMinutes: 5 })
   const [countdownDisplay, setCountdownDisplay] = useState('')
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [showChangelog, setShowChangelog] = useState(true)
@@ -2560,7 +2560,7 @@ const [showFilters, setShowFilters] = useState(false)
       <div className="loading" role="status" aria-live="polite">
         <div className="loading-shell">
           <Loader size={32} strokeWidth={1.5} className="spin" style={{ margin: '0 auto 0.75rem', display: 'block', color: 'var(--color-text-muted)' }} />
-          <div className="loading-title">Wandi Hub</div>
+          <div className="loading-title">Design Hub</div>
           <div className="loading-subtitle">Loading dashboard…</div>
         </div>
       </div>
@@ -2970,7 +2970,7 @@ const [showFilters, setShowFilters] = useState(false)
         <div className="login-container">
           <div className="login-lockup">
             <LayoutGrid size={23} />
-            <h1>Wandi Hub</h1>
+            <h1>Design Hub</h1>
             <button className="changelog-toggle" onClick={() => setShowChangelog(v => !v)} aria-label="What's new">
               <Info size={15} />
             </button>
@@ -3031,7 +3031,7 @@ const [showFilters, setShowFilters] = useState(false)
         <div className="maintenance-lockout-card">
           <div className="maintenance-lockout-icon">&#128736;</div>
           <h1>Scheduled Maintenance</h1>
-          <p>{maintenance.lockoutMessage || 'Wandi Hub is being improved. Back as soon as possible.'}</p>
+          <p>{maintenance.lockoutMessage || 'Design Hub is being improved. Back as soon as possible.'}</p>
           <div className="maintenance-lockout-status">
             <span className="maintenance-pulse" />
             This page updates automatically
@@ -3065,7 +3065,7 @@ const [showFilters, setShowFilters] = useState(false)
       {/* Update available banner */}
       {updateAvailable && (
         <div className="update-banner" onClick={() => window.location.reload()}>
-          A new version of Wandi Hub is available. Click to refresh.
+          A new version of Design Hub is available. Click to refresh.
         </div>
       )}
     <div className={`app${showMaintenanceBanner || updateAvailable ? ' has-maintenance-banner' : ''}`}>
@@ -3073,7 +3073,7 @@ const [showFilters, setShowFilters] = useState(false)
       <aside className={`sidebar ${navCollapsed ? 'sidebar-collapsed' : ''}`}>
         <div className="logo">
           <LayoutGrid size={22} className="logo-icon" />
-          <span className="logo-text">Wandi Hub</span>
+          <span className="logo-text">Design Hub</span>
         </div>
         
         <nav className="nav">
@@ -6878,7 +6878,7 @@ const [showFilters, setShowFilters] = useState(false)
                               setMaintenanceForm(prev => ({
                                 ...prev,
                                 countdownMinutes: mins,
-                                bannerMessage: `Save your work. Wandi Hub maintenance about to begin in ${mins} minute${mins !== 1 ? 's' : ''}.`
+                                bannerMessage: `Save your work. Design Hub maintenance about to begin in ${mins} minute${mins !== 1 ? 's' : ''}.`
                               }))
                             }}
                             placeholder=" "
@@ -6895,8 +6895,8 @@ const [showFilters, setShowFilters] = useState(false)
                         const target = new Date(Date.now() + maintenanceForm.countdownMinutes * 60000).toISOString()
                         const body = {
                           enabled: true,
-                          bannerMessage: maintenanceForm.bannerMessage || 'Save your work. Wandi Hub maintenance about to begin in 5 minutes.',
-                          lockoutMessage: maintenanceForm.lockoutMessage || 'Wandi Hub will be back soon.',
+                          bannerMessage: maintenanceForm.bannerMessage || 'Save your work. Design Hub maintenance about to begin in 5 minutes.',
+                          lockoutMessage: maintenanceForm.lockoutMessage || 'Design Hub will be back soon.',
                           countdownTarget: target,
                         }
                         const res = await authFetch('/api/maintenance', {
