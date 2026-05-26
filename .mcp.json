@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hatch": {
+      "type": "http",
+      "url": "https://platform.hatch.internal.ai.dowjones.io/"
+    }
+  }
+}

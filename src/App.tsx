@@ -34,6 +34,7 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  "New home: WandiHub is now Design Hub, hosted on the Dow Jones internal platform. Sign in with your DJ Okta account — no separate password needed. Bookmark the new URL: https://designhub.hatch.ai.dowjones.io",
   "Public review cards now show a chip for each project's business line next to the status badge.",
   'Polish: Executive Summary report uses the same look as View Report, links render correctly, project names link back to a filtered project view, and Docs copy/paste lays out cleanly with bullets stripped and projects spaced apart.',
   'New: A customized weekly executive report reformats the raw status inputs from active projects and general info into concise bites of important information grouped by business line.',
@@ -952,7 +953,7 @@ const [showFilters, setShowFilters] = useState(false)
 
   // Authentication
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [currentUser, setCurrentUser] = useState<{ id: number; email: string; role: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ id: number; email: string; role: string; name?: string; okta?: boolean } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loginError, setLoginError] = useState('')
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
@@ -980,24 +981,28 @@ const [showFilters, setShowFilters] = useState(false)
   // Clear recovery flag on successful mount
   useEffect(() => { sessionStorage.removeItem('dcc-recovery') }, [])
 
-  // Check auth on mount
+  // Check auth on mount.
+  //
+  // Always probe /api/auth/me — on Hatch, the Okta gateway has already injected
+  // identity headers and the server populates the session on the first call,
+  // so the user is authenticated without ever touching the bcrypt login form.
+  // On local dev (or pre-Hatch Railway) the request only succeeds when the
+  // browser already holds a dcc-session-id; otherwise it 401s and the bcrypt
+  // login form renders as before.
   useEffect(() => {
     const checkAuth = async () => {
-      const sessionId = getSessionId()
-      if (!sessionId) {
-        setIsLoading(false)
-        return
-      }
       try {
+        const sessionId = getSessionId()
         const res = await fetch('/api/auth/me', {
-          headers: { 'x-session-id': sessionId }
+          credentials: 'include',
+          headers: sessionId ? { 'x-session-id': sessionId } : {},
         })
         if (res.ok) {
           const user = await res.json()
           setCurrentUser(user)
           setIsAuthenticated(true)
           setActiveTab('projects')
-        } else {
+        } else if (sessionId) {
           // Stale session (server restarted) — clear so login page shows cleanly
           clearSessionId()
         }
@@ -6977,10 +6982,12 @@ const [showFilters, setShowFilters] = useState(false)
                 <span>DB version</span>
                 <span className="settings-version-value">{formatVersionDisplay(dbVersion.version) || '-'}</span>
               </div>
-              <div className="settings-row">
-                <span />
-                <button className="secondary-btn" onClick={handleLogout}>Sign Out</button>
-              </div>
+              {!currentUser?.okta && (
+                <div className="settings-row">
+                  <span />
+                  <button className="secondary-btn" onClick={handleLogout}>Sign Out</button>
+                </div>
+              )}
             </div>
           </div>
 

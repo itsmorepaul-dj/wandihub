@@ -5,6 +5,7 @@ import path from 'path';
 
 import { initSchema, validateSchemaOnStartup, SEED_SECRET } from './server/db.js';
 import { sessions, requireAuth, authRouter, usersRouter, initUsers, createVersionGuard } from './server/auth.js';
+import { oktaEnabled, oktaMiddleware, oktaWhoamiHandler } from './server/okta.js';
 import { broadcast, createSSEHandler } from './server/sse.js';
 import { maintenanceMiddleware, maintenanceRouter, loadMaintenanceState, getMaintenancePayload } from './server/maintenance.js';
 import { SITE_VERSION, initVersions, versionRouter } from './server/version.js';
@@ -21,6 +22,12 @@ import imagesRouter from './server/routes/images.js';
 import reviewItemImagesRouter from './server/routes/review-item-images.js';
 import reviewRouter, { startReviewCron } from './server/routes/review.js';
 import { startReminderCron } from './server/reminders.js';
+
+// Hatch's bedrock=true provisioning injects AWS_DEFAULT_REGION but not
+// AWS_REGION. The Anthropic Bedrock SDK reads AWS_REGION, so mirror it.
+if (!process.env.AWS_REGION && process.env.AWS_DEFAULT_REGION) {
+  process.env.AWS_REGION = process.env.AWS_DEFAULT_REGION
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -41,6 +48,17 @@ app.use((req, res, next) => {
   }
   next()
 })
+
+// ============ OKTA PASSTHROUGH (Hatch only) ============
+// Hatch's oauth2-proxy gateway has already validated the Okta session by the
+// time a request reaches us, so we trust x-auth-request-email and decode the
+// Bearer JWT for the display name. Local dev (HATCH_OKTA unset) keeps using
+// the bcrypt /api/auth/login flow.
+if (oktaEnabled()) {
+  app.use('/api', oktaMiddleware);
+  app.get('/api/auth/whoami', oktaWhoamiHandler);
+  console.log('Okta passthrough enabled — bcrypt login routes are no-ops on this host');
+}
 
 // ============ AUTH ROUTES (before maintenance middleware) ============
 app.use('/api/auth', authRouter);

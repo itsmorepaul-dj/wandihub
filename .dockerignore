@@ -1,0 +1,37 @@
+node_modules
+dist
+dist-ssr
+.git
+.githooks
+.claude
+.claude-logs
+.claude-project.json
+.mcp.json
+.DS_Store
+*.log
+*.local
+.vscode
+.idea
+
+# Local data — production data lives on the Hatch EFS volume, not in the image.
+data
+backups
+*.db
+*.db-journal
+data.json
+db.json
+
+# Docs / one-off scripts not needed in the running container.
+*.md
+fix_modal*.py
+search.ts.bak
+
+# Railway-specific tooling that doesn't apply on Hatch.
+railway.json
+scripts/deploy.sh
+scripts/merge-railway.sh
+scripts/backup-railway.sh
+scripts/pull-from-railway.sh
+scripts/maintenance.sh
+scripts/open-crits-appscript.js
+scripts/rebuild-note-links.sh

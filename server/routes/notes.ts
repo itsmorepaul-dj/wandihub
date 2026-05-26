@@ -12,6 +12,17 @@ const router = express.Router();
 const GEMINI_NOTES_DB = process.env.GEMINI_NOTES_DB || path.join(homedir(), '.openclaw', 'workspace', 'data', 'gemini-notes.db');
 const WORK_KB_DB = process.env.WORK_KB_DB || path.join(homedir(), '.openclaw', 'workspace', 'kb', 'work', 'data', 'work-kb.db');
 
+// /notes/sync and /kb/* depend on Paul's local ~/.openclaw workspace (Gemini
+// note exports + a Python ingestion script). None of that exists inside the
+// Hatch container. Routes are mounted but short-circuit to 404 unless the
+// host explicitly opts in via NOTES_SYNC_ENABLED=true.
+const localSyncEnabled = (): boolean =>
+  process.env.NOTES_SYNC_ENABLED === 'true' || process.env.NOTES_SYNC_ENABLED === '1'
+const guardLocalSync: express.RequestHandler = (_req, res, next) => {
+  if (!localSyncEnabled()) return res.status(404).json({ error: 'Not available on this host' })
+  next()
+}
+
 function noteFingerprint(sourceFilename: string, driveUrl: string): string | null {
   const raw = (sourceFilename || '').trim().toLowerCase() || (driveUrl || '').trim().toLowerCase()
   return raw || null
@@ -274,7 +285,7 @@ router.put('/notes/:id', async (req, res) => {
 
 // ============ NOTES SYNC ============
 
-router.post('/notes/sync', async (req, res) => {
+router.post('/notes/sync', guardLocalSync, async (req, res) => {
   function cleanContentPreview(raw: string): string {
     if (!raw) return ''
     let text = raw
@@ -453,7 +464,7 @@ const getKbDb = () => {
   }
 };
 
-router.get('/notes/:id/full-content', async (req, res) => {
+router.get('/notes/:id/full-content', guardLocalSync, async (req, res) => {
   try {
     const kb = getKbDb()
     if (!kb) return res.status(503).json({ error: 'Work KB not available' })
@@ -465,7 +476,7 @@ router.get('/notes/:id/full-content', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
-router.get('/kb/search', async (req, res) => {
+router.get('/kb/search', guardLocalSync, async (req, res) => {
   const { q, project, person, limit: limitStr } = req.query as { q?: string; project?: string; person?: string; limit?: string };
   if (!q) return res.status(400).json({ error: 'Query parameter q is required' });
 
@@ -529,7 +540,7 @@ router.get('/kb/search', async (req, res) => {
   }
 });
 
-router.get('/kb/stats', async (_req, res) => {
+router.get('/kb/stats', guardLocalSync, async (_req, res) => {
   const kb = getKbDb();
   if (!kb) return res.status(503).json({ error: 'Work KB not available' });
 
@@ -561,7 +572,7 @@ router.get('/kb/stats', async (_req, res) => {
   }
 });
 
-router.get('/kb/recent', async (req, res) => {
+router.get('/kb/recent', guardLocalSync, async (req, res) => {
   const { limit: limitStr, project, person } = req.query as { limit?: string; project?: string; person?: string };
   const limit = parseInt(limitStr || '20', 10);
   const kb = getKbDb();
@@ -594,7 +605,7 @@ router.get('/kb/recent', async (req, res) => {
   }
 });
 
-router.get('/kb/source/:sourceId', async (req, res) => {
+router.get('/kb/source/:sourceId', guardLocalSync, async (req, res) => {
   const kb = getKbDb();
   if (!kb) return res.status(503).json({ error: 'Work KB not available' });
 
@@ -619,7 +630,7 @@ router.get('/kb/source/:sourceId', async (req, res) => {
   }
 });
 
-router.post('/kb/sync', async (_req, res) => {
+router.post('/kb/sync', guardLocalSync, async (_req, res) => {
   try {
     const { execSync } = require('child_process');
     const scriptPath = path.join(homedir(), '.openclaw', 'workspace', 'kb', 'work', 'scripts', 'ingest_gemini.py');

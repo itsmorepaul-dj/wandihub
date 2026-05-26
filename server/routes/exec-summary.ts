@@ -35,8 +35,8 @@ const isEnabled = (): { ok: boolean; reason?: string } => {
   if (!hasBedrockToken && !hasIamCreds && !hasProfile) {
     return { ok: false, reason: 'No Bedrock credentials (AWS_BEARER_TOKEN_BEDROCK or AWS_ACCESS_KEY_ID/SECRET or AWS_PROFILE)' }
   }
-  if (!process.env.AWS_REGION) {
-    return { ok: false, reason: 'AWS_REGION is not set' }
+  if (!process.env.AWS_REGION && !process.env.AWS_DEFAULT_REGION) {
+    return { ok: false, reason: 'AWS_REGION (or AWS_DEFAULT_REGION) is not set' }
   }
   return { ok: true }
 }

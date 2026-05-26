@@ -419,12 +419,16 @@ router.put('/api/review-items/:id/notes', async (req, res) => {
 
 // ============ REVIEW ITEM COMMENTS (chat) ============
 
-// Resolve a display name for an authenticated user: team.name when the email
-// matches a team member, otherwise the email local-part.
-async function resolveDisplayName(email: string): Promise<string> {
+// Resolve a display name for an authenticated user. Order of preference:
+//   1. team.name if the email matches a team member (design-team identity wins
+//      so commenter names match the rest of the app)
+//   2. Okta `name` claim from the session (any DJ employee leaving feedback)
+//   3. email local-part (last-resort fallback for the bcrypt path)
+async function resolveDisplayName(email: string, oktaName?: string): Promise<string> {
   if (!email) return ''
   const t = await get('SELECT name FROM team WHERE LOWER(email) = LOWER(?)', [email]) as any
   if (t?.name) return t.name
+  if (oktaName && oktaName.trim()) return oktaName.trim()
   return email.split('@')[0]
 }
 
@@ -472,7 +476,7 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
     ) as any
     if (!item) return res.status(404).json({ error: 'Review item not found' })
 
-    const authorName = await resolveDisplayName(email)
+    const authorName = await resolveDisplayName(email, (req as any).session?.name)
     const id = `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
     await run(
       `INSERT INTO review_item_comments (id, review_item_id, author_email, author_name, body)

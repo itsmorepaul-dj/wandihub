@@ -70,7 +70,7 @@ const linkifyBite = (text: string): string => {
 //   Description / bite paragraphs:                before 0,  after 8
 // All paragraphs use line-height 1.5 (Docs "1.5" line spacing).
 const STYLE = {
-  category: 'margin:16pt 0 4pt;line-height:1.5;font-weight:700;font-size:9.5pt;text-transform:uppercase;letter-spacing:0.05em',
+  category: 'margin:32pt 0 4pt;line-height:1.5;font-weight:700;font-size:9.5pt;text-transform:uppercase;letter-spacing:0.05em',
   project: 'margin:16pt 0 0;line-height:1.5;font-size:11pt;font-weight:700',
   designer: `margin:0 0 4pt;line-height:1.5;color:${COLOR.muted};font-size:9.5pt`,
   bite: 'margin:0 0 8pt;line-height:1.0',

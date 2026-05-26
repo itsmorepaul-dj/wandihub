@@ -245,7 +245,14 @@ authRouter.post('/logout', (req, res) => {
 
 authRouter.get('/me', requireAuth, (req, res) => {
   const session = (req as any).session;
-  res.json({ id: session.userId, email: session.email, role: session.role });
+  res.json({
+    id: session.userId,
+    email: session.email,
+    role: session.role,
+    // Populated by oktaMiddleware on Hatch; absent on the bcrypt path.
+    ...(session.name ? { name: session.name } : {}),
+    ...(session.name ? { okta: true } : {}),
+  });
 });
 
 // User management routes
