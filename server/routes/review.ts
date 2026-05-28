@@ -2173,6 +2173,21 @@ function getISOWeek(d: Date): number {
   return Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
 }
 
+const monthsShort = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+function formatISOWeekRange(d: Date): string {
+  const tmp = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  const dow = tmp.getUTCDay() || 7
+  tmp.setUTCDate(tmp.getUTCDate() - (dow - 1))
+  const start = new Date(tmp)
+  const end = new Date(tmp)
+  end.setUTCDate(end.getUTCDate() + 6)
+  const sm = monthsShort[start.getUTCMonth()]
+  const em = monthsShort[end.getUTCMonth()]
+  if (sm === em) return `${sm} ${start.getUTCDate()} – ${end.getUTCDate()}`
+  return `${sm} ${start.getUTCDate()} – ${em} ${end.getUTCDate()}`
+}
+
 export function renderPage(title: string, body: string, reviews: any[], activeId?: string, _sessionId?: string, opts?: { sidebarTitle?: string; sidebarHtml?: string; hideSidebar?: boolean }): string {
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
@@ -2225,20 +2240,18 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
         const weekEntries = byWeek.get(wk)!
         const weekly = weekEntries.find(e => !!e.review.is_weekly_crit)
         const quick = weekEntries.filter(e => !e.review.is_weekly_crit)
-        navItems += `<div class="nav-week-label">Week ${wk}</div>`
+        const refDate = new Date(((weekly?.review || quick[0]?.review)?.created_at || '') + 'Z')
+        const weekRange = formatISOWeekRange(refDate)
+        navItems += `<div class="nav-week-label">${escHtml(weekRange)}</div>`
         if (weekly) {
-          navItems += `<div class="nav-subsection-label">Weekly Crit</div>`
           const isActive = weekly.review.id === activeId
-          const label = (weekly.review.title && String(weekly.review.title).trim()) || `Week ${wk}`
-          navItems += `<a href="/review/${weekly.review.id}" class="nav-item nav-item-weekly-crit${isActive ? ' active' : ''}" title="${escHtml(label)}">${escHtml(label)}</a>`
+          const label = (weekly.review.title && String(weekly.review.title).trim()) || weekRange
+          navItems += `<a href="/review/${weekly.review.id}" class="nav-item nav-item-weekly-crit${isActive ? ' active' : ''}" title="${escHtml(label)}"><svg class="nav-item-star" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg><span class="nav-item-text">${escHtml(label)}</span></a>`
         }
-        if (quick.length > 0) {
-          navItems += `<div class="nav-subsection-label">Quick Crits</div>`
-          for (const { review: r } of quick) {
-            const isActive = r.id === activeId
-            const label = (r.title && String(r.title).trim()) || `Week ${wk}`
-            navItems += `<a href="/review/${r.id}" class="nav-item${isActive ? ' active' : ''}" title="${escHtml(label)}">${escHtml(label)}</a>`
-          }
+        for (const { review: r } of quick) {
+          const isActive = r.id === activeId
+          const label = (r.title && String(r.title).trim()) || weekRange
+          navItems += `<a href="/review/${r.id}" class="nav-item${isActive ? ' active' : ''}" title="${escHtml(label)}"><span class="nav-item-text">${escHtml(label)}</span></a>`
         }
       }
       navItems += `</div>`
@@ -2252,6 +2265,7 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>${title} — Design Hub</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -12 161 160" fill="none"><path d="M89 0C126.555 0 157 30.4446 157 68C157 105.555 126.555 136 89 136H0V128H4C11.1797 128 17 122.18 17 115V21C17 13.8203 11.1797 8 4 8H0V0H89Z" fill="#dc2626"/><path d="M54.5 23.5C63.3366 23.5 70.5 30.6634 70.5 39.5C70.5 46.404 66.1271 52.2864 60 54.5293V63.002C69.5637 63.006 77.1091 63.0294 83.0303 63.1768C90.0446 63.3513 95.1835 63.7011 98.8428 64.5205C102.567 65.3546 105.93 66.9393 107.697 70.501C108.476 72.0694 108.757 73.6776 108.882 75.0469C109.004 76.3914 109 77.8643 109 79.1963V81.7979C115.388 83.8975 120 89.9097 120 97C120 105.837 112.837 113 104 113C95.1634 113 88 105.837 88 97C88 89.9097 92.6123 83.8975 99 81.7979V79.1963C99 77.7294 98.9956 76.7525 98.9229 75.9541C98.889 75.5823 98.8458 75.331 98.8057 75.1621C98.7894 75.0938 98.7741 75.0443 98.7627 75.0098C98.564 74.8702 98.0048 74.5801 96.6572 74.2783C94.0665 73.6983 89.8299 73.3492 82.7822 73.1738C76.9875 73.0297 69.5632 73.0061 60 73.002V82.1641C65.8635 84.5377 70 90.2854 70 97C70 105.837 62.8366 113 54 113C45.1634 113 38 105.837 38 97C38 90.2854 42.1365 84.5377 48 82.1641V54.123C42.4029 51.6314 38.5 46.022 38.5 39.5C38.5 30.6634 45.6634 23.5 54.5 23.5Z" fill="#fff"/></svg>')}">
   <style>
     :root {
       --rv-bg: #ffffff;
@@ -2304,12 +2318,28 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
       display: flex; flex-direction: column; height: 100vh; position: sticky; top: 0;
       transition: background 0.2s, border-color 0.2s;
     }
-    .sidebar-title {
-      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--rv-text-muted); padding: 1.25rem 1.25rem 0.5rem; flex-shrink: 0;
+    .sidebar-home {
+      display: flex; align-items: center; gap: 0.55rem;
+      padding: 1rem 1.1rem 0.85rem; flex-shrink: 0;
+      color: var(--rv-text); text-decoration: none;
+      border-bottom: 1px solid var(--rv-border-subtle);
+      transition: background 0.15s;
+    }
+    .sidebar-home:hover { background: var(--rv-hover); }
+    .sidebar-home-mark {
+      width: 22px; height: 22px; flex-shrink: 0;
+      color: var(--rv-accent);
+    }
+    .sidebar-home-text {
+      font-size: 0.95rem; font-weight: 700; letter-spacing: -0.01em;
+      color: var(--rv-text);
+    }
+    .sidebar-section-label {
+      font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--rv-text-dim); padding: 0.85rem 1.25rem 0.4rem; flex-shrink: 0;
     }
     .sidebar-nav {
-      flex: 1; overflow-y: auto; padding: 0 0.75rem; display: flex; flex-direction: column; gap: 0.25rem;
+      flex: 1; overflow-y: auto; padding: 0 0.75rem 0.5rem; display: flex; flex-direction: column; gap: 0.15rem;
       min-height: 0;
     }
     .sidebar-nav::-webkit-scrollbar { width: 4px; }
@@ -2331,42 +2361,45 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     .nav-month-toggle.open .nav-month-chevron { transform: rotate(90deg); }
     .nav-month-items { padding-left: 0.35rem; }
     .nav-week-label {
-      font-size: 0.7rem; font-weight: 600; color: var(--rv-text-muted);
-      padding: 0.5rem 0.5rem 0.25rem 0.75rem;
+      font-size: 0.7rem; font-weight: 600; color: var(--rv-text-secondary);
+      padding: 0.55rem 0.5rem 0.3rem 0.75rem;
+      letter-spacing: -0.005em;
     }
     .nav-month-items > .nav-week-label:not(:first-child) {
-      margin-top: 0.35rem;
-      border-top: 1px solid var(--rv-border-subtle);
-      padding-top: 0.55rem;
-    }
-    .nav-subsection-label {
-      font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.06em; color: var(--rv-text-dim);
-      padding: 0.3rem 0.5rem 0.15rem 0.75rem;
+      margin-top: 0.5rem;
+      border-top: 2px solid var(--rv-border);
+      padding-top: 0.75rem;
     }
     .nav-item {
-      display: block; padding: 0.4rem 0.5rem 0.4rem 0.75rem; border-radius: 6px; font-size: 0.75rem;
-      color: var(--rv-text-secondary); text-decoration: none; transition: background 0.15s, color 0.15s;
+      position: relative;
+      display: flex; align-items: center; gap: 0.4rem;
+      padding: 0.4rem 0.5rem 0.4rem 0.85rem;
+      border-radius: 6px; font-size: 0.75rem;
+      color: var(--rv-text-secondary); text-decoration: none;
+      transition: background 0.15s, color 0.15s;
       line-height: 1.35; word-break: break-word; flex-shrink: 0;
     }
-    .nav-item + .nav-item {
-      border-top: 1px solid var(--rv-border-subtle);
-      border-top-left-radius: 0; border-top-right-radius: 0;
-    }
-    .nav-item:has(+ .nav-item) {
-      border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+    .nav-item-text {
+      min-width: 0; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .nav-item:hover { background: var(--rv-hover); color: var(--rv-text); }
     .nav-item.active { background: var(--rv-accent); color: #fff; }
-    .nav-item.active + .nav-item, .nav-item + .nav-item.active { border-top-color: transparent; }
+    .nav-item.active::before {
+      content: ""; position: absolute; left: -0.75rem; top: 0.15rem; bottom: 0.15rem;
+      width: 3px; border-radius: 0 2px 2px 0; background: var(--rv-accent);
+    }
     .nav-item-weekly-crit { font-weight: 600; color: var(--rv-text); }
-    .nav-review-title { opacity: 0.6; font-weight: 400; }
-    .nav-item.active .nav-review-title { opacity: 0.8; }
+    .nav-item-star {
+      flex-shrink: 0; color: var(--rv-accent);
+      transition: color 0.15s;
+    }
+    .nav-item-weekly-crit:hover .nav-item-star { color: var(--rv-accent); }
+    .nav-item-weekly-crit.active .nav-item-star { color: #fff; }
     .sidebar-footer {
       flex-shrink: 0; padding: 0.75rem; border-top: 1px solid var(--rv-border-subtle);
-      display: flex; align-items: center; justify-content: space-between;
+      display: flex; align-items: center; justify-content: flex-end;
     }
-    .branding { font-size: 0.65rem; color: var(--rv-text-dim); }
     .theme-toggle {
       background: none; border: 1px solid var(--rv-border); border-radius: 6px;
       color: var(--rv-text-muted); cursor: pointer; padding: 0.3rem 0.45rem;
@@ -3282,12 +3315,18 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
 <body>
   <div class="layout${opts?.hideSidebar ? ' no-sidebar' : ''}">
     ${opts?.hideSidebar ? '' : `<nav class="sidebar">
-      <div class="sidebar-title">${opts?.sidebarTitle || 'Reviews'}</div>
+      <a class="sidebar-home" href="/" title="Design Hub home">
+        <svg class="sidebar-home-mark" viewBox="-2 -12 161 160" fill="none" aria-hidden="true">
+          <path d="M89 0C126.555 0 157 30.4446 157 68C157 105.555 126.555 136 89 136H0V128H4C11.1797 128 17 122.18 17 115V21C17 13.8203 11.1797 8 4 8H0V0H89Z" fill="currentColor"/>
+          <path d="M54.5 23.5C63.3366 23.5 70.5 30.6634 70.5 39.5C70.5 46.404 66.1271 52.2864 60 54.5293V63.002C69.5637 63.006 77.1091 63.0294 83.0303 63.1768C90.0446 63.3513 95.1835 63.7011 98.8428 64.5205C102.567 65.3546 105.93 66.9393 107.697 70.501C108.476 72.0694 108.757 73.6776 108.882 75.0469C109.004 76.3914 109 77.8643 109 79.1963V81.7979C115.388 83.8975 120 89.9097 120 97C120 105.837 112.837 113 104 113C95.1634 113 88 105.837 88 97C88 89.9097 92.6123 83.8975 99 81.7979V79.1963C99 77.7294 98.9956 76.7525 98.9229 75.9541C98.889 75.5823 98.8458 75.331 98.8057 75.1621C98.7894 75.0938 98.7741 75.0443 98.7627 75.0098C98.564 74.8702 98.0048 74.5801 96.6572 74.2783C94.0665 73.6983 89.8299 73.3492 82.7822 73.1738C76.9875 73.0297 69.5632 73.0061 60 73.002V82.1641C65.8635 84.5377 70 90.2854 70 97C70 105.837 62.8366 113 54 113C45.1634 113 38 105.837 38 97C38 90.2854 42.1365 84.5377 48 82.1641V54.123C42.4029 51.6314 38.5 46.022 38.5 39.5C38.5 30.6634 45.6634 23.5 54.5 23.5Z" fill="var(--rv-bg-secondary)"/>
+        </svg>
+        <span class="sidebar-home-text">Design Hub</span>
+      </a>
+      <div class="sidebar-section-label">${opts?.sidebarTitle || 'Reviews'}</div>
       <div class="sidebar-nav">
         ${opts?.sidebarHtml !== undefined ? opts.sidebarHtml : navItems}
       </div>
       <div class="sidebar-footer">
-        <span class="branding">Design Hub</span>
         <button class="theme-toggle" onclick="var d=document.documentElement;var isDark=d.getAttribute('data-theme')==='dark';d.setAttribute('data-theme',isDark?'':'dark');localStorage.setItem('rv-theme',isDark?'light':'dark');this.innerHTML=isDark?'<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;><path d=&quot;M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z&quot;/></svg>':'<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;><circle cx=&quot;12&quot; cy=&quot;12&quot; r=&quot;5&quot;/><line x1=&quot;12&quot; y1=&quot;1&quot; x2=&quot;12&quot; y2=&quot;3&quot;/><line x1=&quot;12&quot; y1=&quot;21&quot; x2=&quot;12&quot; y2=&quot;23&quot;/><line x1=&quot;4.22&quot; y1=&quot;4.22&quot; x2=&quot;5.64&quot; y2=&quot;5.64&quot;/><line x1=&quot;18.36&quot; y1=&quot;18.36&quot; x2=&quot;19.78&quot; y2=&quot;19.78&quot;/><line x1=&quot;1&quot; y1=&quot;12&quot; x2=&quot;3&quot; y2=&quot;12&quot;/><line x1=&quot;21&quot; y1=&quot;12&quot; x2=&quot;23&quot; y2=&quot;12&quot;/><line x1=&quot;4.22&quot; y1=&quot;19.78&quot; x2=&quot;5.64&quot; y2=&quot;18.36&quot;/><line x1=&quot;18.36&quot; y1=&quot;5.64&quot; x2=&quot;19.78&quot; y2=&quot;4.22&quot;/></svg>'">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>

@@ -10,6 +10,7 @@
 export type ChangelogEntry = { date: string; time?: string; entry: string }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { date: "2026-05-28", time: "1034", entry: "Public review site has a clearer left nav: Design Hub logo at the top links home, weeks are labeled by date range (e.g. \"May 25 – 31\"), Weekly Crits are pinned with a star, the redundant \"Weekly Crit / Quick Crits\" subheaders are gone, the active item gets an accent left bar, and the review pages now use a dark red Design Hub favicon to match the review numbering." },
   { date: "2026-05-27", time: "2228", entry: "Settings access UI now matches reality: any @dowjones.com employee can sign in as a Viewer automatically (no admin needed), so the request flow has been relabeled around role upgrades — \"Access Requests\" is now \"Role Upgrade Requests,\" the read-only toast asks for \"edit access,\" and the User Accounts section explains how the auto-Viewer onboarding works." },
   { date: "2026-05-27", time: "2153", entry: "Faster Capacity tab — the per-request integrity sweep now runs once at startup instead of on every load, removing hundreds of redundant SQLite round-trips before the page renders." },
   { date: "2026-05-27", time: "2053", entry: "Settings → \"View changelog\" replaces the sign-in popover — opens a full history modal with week-by-week navigation; the link itself shows the latest deploy stamp." },
