@@ -2,9 +2,9 @@ import type { Request, Response, NextFunction } from 'express'
 
 // When `WANDIHUB_SUNSET_REDIRECT_TO` is set (e.g. on the legacy Railway
 // deployment), every browser GET serves a "we've moved" announcement that
-// counts down 8 seconds and then redirects to the same path on the new host.
-// API and SSE routes are exempt so existing data flows keep working for any
-// stale clients still talking to Railway.
+// links to the same path on the new host. API and SSE routes are exempt so
+// existing data flows keep working for any stale clients still talking to
+// Railway.
 //
 // On the new home (Hatch / designhub), the env var is unset and this
 // middleware is a no-op.
@@ -20,7 +20,7 @@ const isHtmlRequest = (req: Request): boolean => {
   return accept.includes('text/html') || accept === '' || accept === '*/*'
 }
 
-const renderAnnouncement = (newUrl: string, host: string, countdownSeconds: number): string => {
+const renderAnnouncement = (newUrl: string, host: string): string => {
   const safeNew = escapeHtml(newUrl)
   const safeHost = escapeHtml(host)
   return `<!doctype html>
@@ -30,7 +30,6 @@ const renderAnnouncement = (newUrl: string, host: string, countdownSeconds: numb
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex" />
   <title>WandiHub has moved — Design Hub</title>
-  <meta http-equiv="refresh" content="${countdownSeconds};url=${safeNew}" />
   <link rel="canonical" href="${safeNew}" />
   <style>
     :root {
@@ -98,14 +97,9 @@ const renderAnnouncement = (newUrl: string, host: string, countdownSeconds: numb
     .url-value.old { color: var(--muted); text-decoration: line-through; }
     .url-value.new a { color: var(--accent); text-decoration: none; font-weight: 500; }
     .url-value.new a:hover { text-decoration: underline; }
-    .countdown {
-      margin: 1.25rem 0 1rem;
-      font-size: 0.9rem;
-      color: var(--muted);
-    }
-    .countdown strong { color: var(--text); font-variant-numeric: tabular-nums; }
     .go-now {
       display: inline-block;
+      margin-top: 0.5rem;
       background: var(--accent);
       color: white;
       text-decoration: none;
@@ -143,40 +137,24 @@ const renderAnnouncement = (newUrl: string, host: string, countdownSeconds: numb
       <div class="url-value new"><a href="${safeNew}">${safeNew}</a></div>
     </div>
 
-    <div class="countdown">Redirecting in <strong id="seconds">${countdownSeconds}</strong> seconds…</div>
-    <a class="go-now" href="${safeNew}">Go now →</a>
+    <a class="go-now" href="${safeNew}">Go to Design Hub →</a>
 
     <div class="footnote">Update your bookmarks. The old wandihub.up.railway.app URL will be retired soon.</div>
   </div>
 
   <script>
     // Preserve any URL hash (SPA deep links like #/reviews?review=abc) that
-    // never reached the server. The original new-host URL is a string
-    // template; we append the *current* window's hash before redirecting.
+    // never reached the server, by appending it to the destination link.
     (function () {
       var newBase = ${JSON.stringify(newUrl)};
       var hash = window.location.hash || '';
       var target = newBase + hash;
-
-      // Update the visible link + the meta refresh so the user sees and gets
-      // the same destination the script will use.
       try {
         var link = document.querySelector('.url-value.new a');
         if (link) { link.setAttribute('href', target); link.textContent = target; }
         var goNow = document.querySelector('.go-now');
         if (goNow) goNow.setAttribute('href', target);
       } catch (e) {}
-
-      var el = document.getElementById('seconds');
-      var n = ${countdownSeconds};
-      var iv = setInterval(function () {
-        n -= 1;
-        if (el) el.textContent = String(Math.max(n, 0));
-        if (n <= 0) {
-          clearInterval(iv);
-          window.location.replace(target);
-        }
-      }, 1000);
     })();
   </script>
 </body>
@@ -195,10 +173,8 @@ export const sunsetMiddleware = (req: Request, res: Response, next: NextFunction
   if (!isHtmlRequest(req)) return next()
 
   // Build the new URL: same path + query on the new host. Preserves deep
-  // links into /review/:id, /p/:slug, and SPA hash routes (browsers send
-  // the hash with the request, so the server can't see it — but the
-  // countdown's window.location.replace runs in the browser, where the
-  // hash is preserved automatically when we copy from window.location).
+  // links into /review/:id, /p/:slug. SPA hash routes are also preserved
+  // by inline JS that appends window.location.hash to the visible link.
   const base = target.replace(/\/+$/, '')
   const newUrl = base + req.originalUrl
 
@@ -206,5 +182,5 @@ export const sunsetMiddleware = (req: Request, res: Response, next: NextFunction
 
   res.setHeader('Cache-Control', 'no-store')
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
-  res.status(200).send(renderAnnouncement(newUrl, `https://${oldHost}${req.originalUrl}`, 8))
+  res.status(200).send(renderAnnouncement(newUrl, `https://${oldHost}${req.originalUrl}`))
 }
