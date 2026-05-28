@@ -76,6 +76,13 @@ export const MAINTENANCE_HTML = (message: string) => `<!DOCTYPE html>
       border: 1px solid rgba(255,255,255,0.1);
       box-shadow: 0 8px 32px rgba(0,0,0,0.3);
     }
+    .brand {
+      font-size: 0.8rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #7a8599;
+      margin-bottom: 1.25rem;
+    }
     .icon { font-size: 3.5rem; margin-bottom: 1rem; }
     h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.75rem; color: #fff; }
     p { font-size: 1rem; line-height: 1.6; color: #b0b8c8; margin-bottom: 1.5rem; }
@@ -93,25 +100,23 @@ export const MAINTENANCE_HTML = (message: string) => `<!DOCTYPE html>
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.4; transform: scale(0.8); }
     }
-    .admin-link {
-      display: inline-block;
-      margin-top: 2rem;
-      color: rgba(255,255,255,0.1);
-      font-size: 0.7rem;
-      text-decoration: none;
-      cursor: pointer;
-      transition: color 0.2s;
+    .footer-note {
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: #7a8599;
     }
-    .admin-link:hover { color: rgba(255,255,255,0.4); }
+    .footer-note a { color: #b0b8c8; text-decoration: none; }
+    .footer-note a:hover { color: #fff; }
   </style>
 </head>
 <body>
   <div class="card">
+    <div class="brand">Design Hub</div>
     <div class="icon">&#128736;</div>
     <h1>Scheduled Maintenance</h1>
     <p>${message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>
     <div class="status"><span class="pulse"></span>This page auto-refreshes every 30 seconds</div>
-    <a href="/?admin=1" class="admin-link">Admin access</a>
+    <div class="footer-note">Public review and published-project links remain available during maintenance.</div>
   </div>
 </body>
 </html>`
@@ -128,8 +133,10 @@ export function maintenanceMiddleware(req: express.Request, res: express.Respons
   const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'
   const sessionId = req.headers['x-session-id'] as string
   const session = sessionId ? sessions.get(sessionId) : null
+  // Only admins bypass lockout. Viewers and users both see the lockout
+  // screen — maintenance windows typically coincide with DB migrations
+  // or deploys where even read access could surface inconsistent data.
   const isAdminUser = session?.role === 'admin'
-  const isAdminLogin = req.query.admin === '1'
   const isStaticAsset = /\.(js|css|ico|svg|png|jpg|woff2?)$/i.test(req.path)
   const isImageServe = req.method === 'GET' && (
     req.path.startsWith('/api/images/') ||
@@ -143,7 +150,7 @@ export function maintenanceMiddleware(req: express.Request, res: express.Respons
     req.path.startsWith('/review/') ||
     req.path.startsWith('/p/')
   )
-  if (isMaintenanceEndpoint || isHealthEndpoint || isAuthEndpoint || isActivityEndpoint || isDbEndpoint || isLocalhost || isAdminUser || isAdminLogin || isStaticAsset || isImageServe || isPublicReadOnlyPage) return next()
+  if (isMaintenanceEndpoint || isHealthEndpoint || isAuthEndpoint || isActivityEndpoint || isDbEndpoint || isLocalhost || isAdminUser || isStaticAsset || isImageServe || isPublicReadOnlyPage) return next()
   if (req.path.startsWith('/api/')) {
     return res.status(503).json({ error: 'maintenance', message: maintenanceState.lockoutMessage })
   }

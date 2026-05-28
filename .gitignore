@@ -31,3 +31,8 @@ data/images/
 
 # Backup directories
 backups/
+
+# Local secrets (service account keys, etc) — never commit
+.local-secrets/
+.localsecrets/
+*.json.key

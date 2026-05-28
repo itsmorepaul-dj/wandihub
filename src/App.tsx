@@ -276,6 +276,26 @@ function highlightTextWithLinks(
   })
 }
 
+// Design Hub brand mark — replaces the LayoutGrid icon in the sidebar logo,
+// login lockup, and maintenance-lockout brand. The "DH" figure inside the
+// rounded shape is solid white and the shape itself uses currentColor so
+// callers can theme it via CSS color (the sidebar logo uses --color-accent).
+const DesignHubLogo = ({ size = 22, className, style }: { size?: number; className?: string; style?: React.CSSProperties }) => (
+  <svg
+    width={size}
+    height={size * (136 / 157)}
+    viewBox="0 0 157 136"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+    style={style}
+    aria-hidden="true"
+  >
+    <path d="M89 0C126.555 0 157 30.4446 157 68C157 105.555 126.555 136 89 136H0V128H4C11.1797 128 17 122.18 17 115V21C17 13.8203 11.1797 8 4 8H0V0H89Z" fill="currentColor"/>
+    <path d="M54.5 23.5C63.3366 23.5 70.5 30.6634 70.5 39.5C70.5 46.404 66.1271 52.2864 60 54.5293V63.002C69.5637 63.006 77.1091 63.0294 83.0303 63.1768C90.0446 63.3513 95.1835 63.7011 98.8428 64.5205C102.567 65.3546 105.93 66.9393 107.697 70.501C108.476 72.0694 108.757 73.6776 108.882 75.0469C109.004 76.3914 109 77.8643 109 79.1963V81.7979C115.388 83.8975 120 89.9097 120 97C120 105.837 112.837 113 104 113C95.1634 113 88 105.837 88 97C88 89.9097 92.6123 83.8975 99 81.7979V79.1963C99 77.7294 98.9956 76.7525 98.9229 75.9541C98.889 75.5823 98.8458 75.331 98.8057 75.1621C98.7894 75.0938 98.7741 75.0443 98.7627 75.0098C98.564 74.8702 98.0048 74.5801 96.6572 74.2783C94.0665 73.6983 89.8299 73.3492 82.7822 73.1738C76.9875 73.0297 69.5632 73.0061 60 73.002V82.1641C65.8635 84.5377 70 90.2854 70 97C70 105.837 62.8366 113 54 113C45.1634 113 38 105.837 38 97C38 90.2854 42.1365 84.5377 48 82.1641V54.123C42.4029 51.6314 38.5 46.022 38.5 39.5C38.5 30.6634 45.6634 23.5 54.5 23.5Z" fill="#fff"/>
+  </svg>
+)
+
 const VALID_TABS = ['projects', 'team', 'calendar', 'capacity', 'reports', 'reviews', 'settings'] as const
 
 function parseHash(): { tab: TabId; params: URLSearchParams } {
@@ -674,6 +694,10 @@ function App() {
   const [brandOptions, setBrandOptions] = useState<string[]>(defaultBrandOptions)
   const [calendarData, setCalendarData] = useState<CalendarData | null>(null)
   const [capacityData, setCapacityData] = useState<CapacityData | null>(null)
+  // Per-tab loading flags. UI only shows the spinner if a flag stays true
+  // for >1s (see tabLoadingDelayed below) so fast loads don't flash.
+  const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({})
+  const [tabLoadingDelayed, setTabLoadingDelayed] = useState<Record<string, boolean>>({})
   const [showModal, setShowModal] = useState(false)
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null)
   const [formData, setFormData] = useState({ name: '', role: '', brands: ["Barron's"] as string[], status: 'offline' as TeamMember['status'], slack: '', email: '', timeOff: [] as { name: string; startDate: string; endDate: string; id: string }[] })
@@ -741,7 +765,7 @@ function App() {
 
   // Holidays state
   const [holidays, setHolidays] = useState<{ id: string; name: string; date: string }[]>([])
-  const [holidayForm, setHolidayForm] = useState({ name: '', date: '' })
+  const [holidayForm, setHolidayForm] = useState({ name: '', startDate: '', endDate: '' })
   const [showHolidayModal, setShowHolidayModal] = useState(false)
   const [riskDetail, setRiskDetail] = useState<{
     title: string;
@@ -768,6 +792,9 @@ function App() {
   const overlayMouseDownTarget = useRef<EventTarget | null>(null)
   const onDataChangeRef = useRef<() => void>(() => {})
   const pendingRefreshRef = useRef(false)
+  // SSE handlers run inside a useEffect with empty deps; keep a live ref
+  // to currentUser so the role-change listener sees the latest value.
+  const currentUserRef = useRef<{ id: number; email: string; role: string; name?: string; okta?: boolean } | null>(null)
 
   const [isLoaded, setIsLoaded] = useState(false)
   const [projectSortBy, setProjectSortBy] = useState<'name' | 'businessLine' | 'designer' | 'dueDate' | 'status'>(() => { try { return (localStorage.getItem('dcc_projectSortBy') as any) || 'businessLine' } catch { return 'businessLine' } })
@@ -969,6 +996,18 @@ const [showFilters, setShowFilters] = useState(false)
   const [accessRequests, setAccessRequests] = useState<{ id: number; email: string; display_name?: string | null; access_requested_at: string }[]>([])
   const [accessRequestSubmitting, setAccessRequestSubmitting] = useState(false)
   const [accessRequestSent, setAccessRequestSent] = useState(false)
+  // External access requests — submitted via the DJ Slack workflow (since
+  // non-allowlisted Okta users can't reach designhub directly). Backed by
+  // a Google Sheet, polled by the server.
+  const [externalAccessRequests, setExternalAccessRequests] = useState<{
+    rowId: number; timestamp: string; email: string; name: string;
+    requestedRole: 'admin' | 'user' | 'viewer'; reason: string; project: string;
+  }[]>([])
+  const [externalActionRowId, setExternalActionRowId] = useState<number | null>(null)
+  // After Approve, surface a styled confirmation that includes the (manual)
+  // Hatch allowlist step. Replaces the native alert() so the visual matches
+  // the rest of the app and the copy is clearer about what happens next.
+  const [approveConfirmModal, setApproveConfirmModal] = useState<{ open: boolean; email: string; role: string }>({ open: false, email: '', role: '' })
 
   // Notifications
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([])
@@ -990,6 +1029,8 @@ const [showFilters, setShowFilters] = useState(false)
 
   // Check auth on mount.
   //
+  useEffect(() => { currentUserRef.current = currentUser }, [currentUser])
+
   // Always probe /api/auth/me — on Hatch, the Okta gateway has already injected
   // identity headers and the server populates the session on the first call,
   // so the user is authenticated without ever touching the bcrypt login form.
@@ -1155,10 +1196,23 @@ const [showFilters, setShowFilters] = useState(false)
     }
   }
 
+  const fetchExternalAccessRequests = async () => {
+    try {
+      const res = await authFetch('/api/access-requests')
+      if (res.ok) {
+        const data = await res.json()
+        setExternalAccessRequests(data.pending || [])
+      }
+    } catch (err) {
+      console.error('Error fetching external access requests:', err)
+    }
+  }
+
   useEffect(() => {
-    if (currentUser?.role !== 'admin') { setAccessRequests([]); return }
+    if (currentUser?.role !== 'admin') { setAccessRequests([]); setExternalAccessRequests([]); return }
     fetchAccessRequests()
-    const t = setInterval(fetchAccessRequests, 60000)
+    fetchExternalAccessRequests()
+    const t = setInterval(() => { fetchAccessRequests(); fetchExternalAccessRequests() }, 60000)
     return () => clearInterval(t)
   }, [currentUser])
 
@@ -1177,6 +1231,60 @@ const [showFilters, setShowFilters] = useState(false)
     } finally {
       setAccessRequestSubmitting(false)
     }
+  }
+
+  // Approve / deny external (Slack-submitted) access requests. Approve writes
+  // the role to the local users table; the admin still has to add the user
+  // to the Hatch app allowlist manually until the Hatch service API exists.
+  const handleApproveExternalRequest = async (rowId: number, roleOverride?: 'viewer' | 'user' | 'admin') => {
+    setExternalActionRowId(rowId)
+    try {
+      const res = await authFetch(`/api/access-requests/${rowId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify(roleOverride ? { role: roleOverride } : {}),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        await fetchExternalAccessRequests()
+        await fetchUsers()
+        setApproveConfirmModal({ open: true, email: data.email, role: data.role })
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error || 'Failed to approve request')
+      }
+    } catch (err) {
+      console.error('Error approving request:', err)
+    } finally {
+      setExternalActionRowId(null)
+    }
+  }
+
+  const handleDenyExternalRequest = (rowId: number) => {
+    openConfirmModal(
+      'Deny access request?',
+      'The request will be marked as denied in the queue and the requester will not be granted access.',
+      async () => {
+        setExternalActionRowId(rowId)
+        try {
+          const res = await authFetch(`/api/access-requests/${rowId}/deny`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+          })
+          if (res.ok) {
+            await fetchExternalAccessRequests()
+            closeConfirmModal()
+          } else {
+            const err = await res.json().catch(() => ({}))
+            alert(err.error || 'Failed to deny request')
+          }
+        } catch (err) {
+          console.error('Error denying request:', err)
+        } finally {
+          setExternalActionRowId(null)
+        }
+      },
+      { confirmLabel: 'Deny' }
+    )
   }
 
   // Create user
@@ -1239,7 +1347,33 @@ const [showFilters, setShowFilters] = useState(false)
     })
   }
 
-  const isAdmin = currentUser?.role === 'admin'
+  const isRealAdmin = currentUser?.role === 'admin'
+  // Admin-only UI-level role override for design QA. Persists in sessionStorage
+  // so it survives reloads of the same tab but not new windows. Server still
+  // trusts the real role — this is purely cosmetic gating of admin sections
+  // and write affordances. Cleared automatically if the real user isn't admin.
+  const [viewAsRole, setViewAsRoleState] = useState<'user' | 'viewer' | null>(() => {
+    try {
+      const v = sessionStorage.getItem('dcc_viewAsRole')
+      return v === 'user' || v === 'viewer' ? v : null
+    } catch { return null }
+  })
+  useEffect(() => {
+    if (!isRealAdmin && viewAsRole) {
+      setViewAsRoleState(null)
+      try { sessionStorage.removeItem('dcc_viewAsRole') } catch {}
+    }
+  }, [isRealAdmin, viewAsRole])
+  const setViewAsRole = (role: 'user' | 'viewer' | null) => {
+    setViewAsRoleState(role)
+    try {
+      if (role) sessionStorage.setItem('dcc_viewAsRole', role)
+      else sessionStorage.removeItem('dcc_viewAsRole')
+    } catch {}
+  }
+  const effectiveRole: 'admin' | 'user' | 'viewer' | undefined =
+    isRealAdmin && viewAsRole ? viewAsRole : (currentUser?.role as any)
+  const isAdmin = effectiveRole === 'admin'
 
   // Business Lines (Settings)
   const [businessLines, setBusinessLines] = useState<BusinessLine[]>([])
@@ -1429,6 +1563,27 @@ const [showFilters, setShowFilters] = useState(false)
       try { setMaintenance(JSON.parse(e.data)) } catch {}
     })
 
+    // Admin changed someone's role: if it's us, re-fetch /auth/me so the
+    // UI flips immediately (e.g. demoted admin loses banner controls;
+    // promoted user can see admin sections without a hard refresh).
+    es.addEventListener('role-change', (e) => {
+      try {
+        const data = JSON.parse(e.data) as { userId?: number; email?: string; role?: string }
+        const me = currentUserRef.current
+        if (!me) return
+        const isMe = (data.userId && data.userId === me.id) || (data.email && data.email.toLowerCase() === me.email.toLowerCase())
+        if (!isMe) return
+        const sessionId = getSessionId()
+        fetch('/api/auth/me', {
+          credentials: 'include',
+          headers: sessionId ? { 'x-session-id': sessionId } : {},
+        })
+          .then(r => r.ok ? r.json() : null)
+          .then(user => { if (user) setCurrentUser(user) })
+          .catch(() => {})
+      } catch {}
+    })
+
     es.addEventListener('version', (e) => {
       try {
         const { site_version } = JSON.parse(e.data)
@@ -1547,16 +1702,39 @@ const [showFilters, setShowFilters] = useState(false)
     }
   }, [team])
 
+  // Each tabLoading flag drives a delayed mirror: only flips on after 1s of
+  // continuous loading, and clears immediately when loading finishes.
+  useEffect(() => {
+    const timers: Record<string, ReturnType<typeof setTimeout>> = {}
+    Object.entries(tabLoading).forEach(([key, isLoading]) => {
+      if (isLoading && !tabLoadingDelayed[key]) {
+        timers[key] = setTimeout(() => {
+          setTabLoadingDelayed(prev => ({ ...prev, [key]: true }))
+        }, 1000)
+      } else if (!isLoading && tabLoadingDelayed[key]) {
+        setTabLoadingDelayed(prev => {
+          const next = { ...prev }
+          delete next[key]
+          return next
+        })
+      }
+    })
+    return () => { Object.values(timers).forEach(t => clearTimeout(t)) }
+  }, [tabLoading, tabLoadingDelayed])
+
   // Load calendar data when switching to calendar tab
   useEffect(() => {
     if (activeTab === 'calendar' && !calendarData) {
       const loadCalendar = async () => {
+        setTabLoading(prev => ({ ...prev, calendar: true }))
         try {
           const response = await authFetch('/api/calendar')
           const data = await response.json()
           setCalendarData(data)
         } catch (err) {
           console.error('Error loading calendar:', err)
+        } finally {
+          setTabLoading(prev => ({ ...prev, calendar: false }))
         }
       }
       loadCalendar()
@@ -1686,6 +1864,7 @@ const [showFilters, setShowFilters] = useState(false)
   useEffect(() => {
     if (activeTab === 'capacity') {
       const loadCapacity = async () => {
+        setTabLoading(prev => ({ ...prev, capacity: true }))
         try {
           const res = await authFetch('/api/capacity')
           const data = await res.json()
@@ -1703,6 +1882,8 @@ const [showFilters, setShowFilters] = useState(false)
           setExcludedDesigners(initialExcluded)
         } catch (err) {
           console.error('Error loading capacity:', err)
+        } finally {
+          setTabLoading(prev => ({ ...prev, capacity: false }))
         }
       }
       loadCapacity()
@@ -1711,6 +1892,7 @@ const [showFilters, setShowFilters] = useState(false)
 
   // Load reviews when reviews tab is active
   const loadReviews = async (selectId?: string) => {
+    setTabLoading(prev => ({ ...prev, reviews: true }))
     try {
       const res = await authFetch('/api/reviews')
       const data = await res.json()
@@ -1725,6 +1907,7 @@ const [showFilters, setShowFilters] = useState(false)
         setEditingReview(null)
       }
     } catch (err) { console.error('Error loading reviews:', err) }
+    finally { setTabLoading(prev => ({ ...prev, reviews: false })) }
   }
   useEffect(() => {
     if (activeTab === 'reviews') loadReviews()
@@ -3044,7 +3227,7 @@ const [showFilters, setShowFilters] = useState(false)
       <div className="login-page">
         <div className="login-container">
           <div className="login-lockup">
-            <LayoutGrid size={23} />
+            <DesignHubLogo size={26} />
             <h1>Design Hub</h1>
             <button className="changelog-toggle" onClick={() => setShowChangelog(v => !v)} aria-label="What's new">
               <Info size={15} />
@@ -3100,34 +3283,74 @@ const [showFilters, setShowFilters] = useState(false)
   }
 
   // Show lockout screen for non-admin users when maintenance lockout is active
-  if (maintenance.enabled && maintenance.isLockout && currentUser?.role !== 'admin') {
+  if (maintenance.enabled && maintenance.isLockout && !isAdmin) {
+    // Surface the ETA when one is set — until the countdown target the
+    // banner had it, but once we're locked out the user has no clock.
+    const etaLabel = (() => {
+      if (!maintenance.countdownTarget) return ''
+      const eta = new Date(maintenance.countdownTarget)
+      if (isNaN(eta.getTime())) return ''
+      // Always show clock time (e.g. "2:30 PM"). If different day, prepend.
+      const sameDay = eta.toDateString() === new Date().toDateString()
+      const time = eta.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      return sameDay ? time : `${eta.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} at ${time}`
+    })()
     return (
       <div className="maintenance-lockout">
         <div className="maintenance-lockout-card">
+          <div className="maintenance-lockout-brand">
+            <DesignHubLogo size={20} />
+            <span>Design Hub</span>
+          </div>
           <div className="maintenance-lockout-icon">&#128736;</div>
           <h1>Scheduled Maintenance</h1>
           <p>{maintenance.lockoutMessage || 'Design Hub is being improved. Back as soon as possible.'}</p>
+          {etaLabel && (
+            <p className="maintenance-lockout-eta">Expected back at <strong>{etaLabel}</strong></p>
+          )}
           <div className="maintenance-lockout-status">
             <span className="maintenance-pulse" />
             This page updates automatically
           </div>
-          <button
-            className="maintenance-admin-link"
-            onClick={() => {
-              handleLogout()
-            }}
-          >
-            Admin access
-          </button>
+          <p className="maintenance-lockout-public-note">
+            Public review and published-project links remain available during maintenance.
+          </p>
+          <p className="maintenance-lockout-help">
+            Questions? Reach the design team in <strong>#designhub-access</strong> on Slack.
+          </p>
         </div>
       </div>
     )
   }
 
   const showMaintenanceBanner = maintenance.enabled && !!maintenance.bannerMessage && (!maintenance.isLockout || isAdmin)
+  const disableMaintenance = async () => {
+    const res = await authFetch('/api/maintenance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    })
+    if (res.ok) setMaintenance(await res.json())
+  }
 
   return (
     <>
+      {/* View-as banner — admin-only UI override. Real role still admin server-side. */}
+      {isRealAdmin && viewAsRole && (
+        <div className="view-as-banner" role="status" aria-live="polite">
+          <span className="view-as-banner-text">
+            Viewing as <strong>{viewAsRole}</strong> — UI only, your server role is still admin.
+          </span>
+          <button
+            type="button"
+            className="view-as-banner-stop"
+            onClick={() => setViewAsRole(null)}
+            aria-label="Stop viewing as another role"
+          >
+            Stop
+          </button>
+        </div>
+      )}
       {/* Maintenance Banner — fixed above everything */}
       {showMaintenanceBanner && (
         <div className="maintenance-banner">
@@ -3135,6 +3358,16 @@ const [showFilters, setShowFilters] = useState(false)
             {maintenance.isLockout ? 'Maintenance mode active — site is locked out for users' : maintenance.bannerMessage}
             {!maintenance.isLockout && countdownDisplay && <span className="maintenance-banner-countdown"> &mdash; {countdownDisplay}</span>}
           </span>
+          {isAdmin && (
+            <button
+              type="button"
+              className="maintenance-banner-disable"
+              onClick={disableMaintenance}
+              aria-label="Disable maintenance mode"
+            >
+              Disable
+            </button>
+          )}
         </div>
       )}
       {/* Update available banner */}
@@ -3143,8 +3376,10 @@ const [showFilters, setShowFilters] = useState(false)
           A new version of Design Hub is available. Click to refresh.
         </div>
       )}
-      {/* Pending access requests banner (admin only) */}
-      {isAdmin && accessRequests.length > 0 && (
+      {/* Pending access requests banner (admin only) — combines in-app
+          requests (existing viewers asking for full access) and external
+          Slack-submitted requests from the queue sheet. */}
+      {isAdmin && (accessRequests.length + externalAccessRequests.length) > 0 && (
         <div
           className="access-request-banner"
           role="button"
@@ -3153,9 +3388,16 @@ const [showFilters, setShowFilters] = useState(false)
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setActiveTab('settings') }}
         >
           <span className="access-request-banner-text">
-            {accessRequests.length === 1
-              ? `${accessRequests[0].display_name || accessRequests[0].email} is requesting full access`
-              : `${accessRequests.length} people are requesting full access`}
+            {(() => {
+              const total = accessRequests.length + externalAccessRequests.length
+              if (total === 1 && accessRequests.length === 1) {
+                return `${accessRequests[0].display_name || accessRequests[0].email} is requesting full access`
+              }
+              if (total === 1 && externalAccessRequests.length === 1) {
+                return `${externalAccessRequests[0].name || externalAccessRequests[0].email} is requesting access`
+              }
+              return `${total} ${total === 1 ? 'person is' : 'people are'} requesting access`
+            })()}
             <span className="access-request-banner-cta"> &mdash; review in Settings</span>
           </span>
         </div>
@@ -3186,11 +3428,11 @@ const [showFilters, setShowFilters] = useState(false)
           </button>
         </div>
       )}
-    <div className={`app${showMaintenanceBanner || updateAvailable || (isAdmin && accessRequests.length > 0) ? ' has-maintenance-banner' : ''}`}>
+    <div className={`app${showMaintenanceBanner || updateAvailable || (isAdmin && (accessRequests.length + externalAccessRequests.length) > 0) || (isRealAdmin && viewAsRole) ? ' has-maintenance-banner' : ''}`}>
       {/* Sidebar */}
       <aside className={`sidebar ${navCollapsed ? 'sidebar-collapsed' : ''}`}>
         <div className="logo">
-          <LayoutGrid size={22} className="logo-icon" />
+          <DesignHubLogo size={24} className="logo-icon" />
           <span className="logo-text">Design Hub</span>
         </div>
         
@@ -3264,6 +3506,15 @@ const [showFilters, setShowFilters] = useState(false)
 
       {/* Main Content */}
       <main className="main">
+        {tabLoadingDelayed[activeTab] && (
+          <div className="tab-loading-overlay" role="status" aria-live="polite">
+            <div className="loading-shell">
+              <Loader size={32} strokeWidth={1.5} className="spin" style={{ margin: '0 auto 0.75rem', display: 'block', color: 'var(--color-text-muted)' }} />
+              <div className="loading-title">Loading…</div>
+              <div className="loading-subtitle">This is taking a moment.</div>
+            </div>
+          </div>
+        )}
         {/* Header */}
         <header className="header">
           <div className="header-title">
@@ -6988,32 +7239,45 @@ const [showFilters, setShowFilters] = useState(false)
                         <div className="float-field has-value" style={{ width: '120px' }}>
                           <input
                             type="number"
-                            min="1"
+                            min="0"
                             max="120"
                             value={maintenanceForm.countdownMinutes}
                             onChange={e => {
-                              const mins = parseInt(e.target.value) || 15
+                              const raw = e.target.value === '' ? 0 : parseInt(e.target.value)
+                              const mins = Number.isFinite(raw) ? Math.max(0, Math.min(120, raw)) : 0
                               setMaintenanceForm(prev => ({
                                 ...prev,
                                 countdownMinutes: mins,
-                                bannerMessage: `Save your work. Design Hub maintenance about to begin in ${mins} minute${mins !== 1 ? 's' : ''}.`
+                                bannerMessage: mins === 0
+                                  ? 'Design Hub is entering maintenance now.'
+                                  : `Save your work. Design Hub maintenance about to begin in ${mins} minute${mins !== 1 ? 's' : ''}.`
                               }))
                             }}
                             placeholder=" "
                           />
                           <label>Minutes</label>
                         </div>
-                        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>until lockout</span>
+                        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                          {maintenanceForm.countdownMinutes === 0 ? 'lockout starts immediately' : 'until lockout'}
+                        </span>
                       </div>
                     </div>
                     <button
                       className="primary-btn"
                       style={{ background: '#ef4444' }}
                       onClick={async () => {
-                        const target = new Date(Date.now() + maintenanceForm.countdownMinutes * 60000).toISOString()
+                        // 0 minutes = immediate lockout — skip the countdown entirely
+                        // by leaving countdownTarget null (server treats null as "in lockout
+                        // now" via isInLockout()).
+                        const isImmediate = maintenanceForm.countdownMinutes <= 0
+                        const target = isImmediate
+                          ? null
+                          : new Date(Date.now() + maintenanceForm.countdownMinutes * 60000).toISOString()
                         const body = {
                           enabled: true,
-                          bannerMessage: maintenanceForm.bannerMessage || 'Save your work. Design Hub maintenance about to begin in 5 minutes.',
+                          bannerMessage: maintenanceForm.bannerMessage || (isImmediate
+                            ? 'Design Hub is entering maintenance now.'
+                            : 'Save your work. Design Hub maintenance about to begin in 5 minutes.'),
                           lockoutMessage: maintenanceForm.lockoutMessage || 'Design Hub will be back soon.',
                           countdownTarget: target,
                         }
@@ -7028,7 +7292,7 @@ const [showFilters, setShowFilters] = useState(false)
                         }
                       }}
                     >
-                      Enable Maintenance Mode
+                      {maintenanceForm.countdownMinutes === 0 ? 'Lock Out Now' : 'Enable Maintenance Mode'}
                     </button>
                   </>
                 ) : (
@@ -7073,6 +7337,42 @@ const [showFilters, setShowFilters] = useState(false)
             </div>
           )}
 
+          {/* View-as toggle (Admin Only). UI-only role simulation for design QA;
+              the server still trusts the real session role, so this is not a
+              security boundary — write endpoints will still succeed if hit. */}
+          {isRealAdmin && (
+            <div className="settings-section settings-admin-only">
+              <div className="settings-header">
+                <h2>View as</h2>
+              </div>
+              <div className="settings-general-card">
+                <div className="settings-row">
+                  <span>Simulate role</span>
+                  <div className="view-as-toggle">
+                    <button
+                      type="button"
+                      className={`view-as-btn${!viewAsRole ? ' active' : ''}`}
+                      onClick={() => setViewAsRole(null)}
+                    >Admin</button>
+                    <button
+                      type="button"
+                      className={`view-as-btn${viewAsRole === 'user' ? ' active' : ''}`}
+                      onClick={() => setViewAsRole('user')}
+                    >User</button>
+                    <button
+                      type="button"
+                      className={`view-as-btn${viewAsRole === 'viewer' ? ' active' : ''}`}
+                      onClick={() => setViewAsRole('viewer')}
+                    >Viewer</button>
+                  </div>
+                </div>
+                <p className="view-as-note">
+                  UI-only — admin sections and write controls are hidden, but the server still trusts your real session role. Useful for design QA, not security testing. Persists for this browser tab only.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* General Section — Account, Theme, Version */}
           <div className="settings-section">
             <div className="settings-header">
@@ -7081,7 +7381,13 @@ const [showFilters, setShowFilters] = useState(false)
             <div className="settings-general-card">
               <div className="settings-row">
                 <span>Account</span>
-                <span className="settings-account-detail">{currentUser?.email} <span className="settings-role-badge">{currentUser?.role}</span></span>
+                <span className="settings-account-detail">
+                  {currentUser?.email}{' '}
+                  <span className="settings-role-badge">{currentUser?.role}</span>
+                  {viewAsRole && (
+                    <span className="settings-role-badge view-as-badge" title="UI-only override active">viewing as {viewAsRole}</span>
+                  )}
+                </span>
               </div>
               <div className="settings-row">
                 <span>Theme</span>
@@ -7145,26 +7451,66 @@ const [showFilters, setShowFilters] = useState(false)
           <div className="settings-section">
             <div className="settings-header">
               <h2>Special Days</h2>
-              <button className="primary-btn" onClick={() => { setHolidayForm({ name: '', date: '' }); setShowHolidayModal(true) }}>+ Add Special Day</button>
+              <button className="primary-btn" onClick={() => { setHolidayForm({ name: '', startDate: '', endDate: '' }); setShowHolidayModal(true) }}>+ Add Special Day</button>
             </div>
             <div className="timeline-list">
-              {holidays.map(h => (
-                <div key={h.id} className="timeline-item">
-                  <div className="timeline-info">
-                    <span className="timeline-name">{h.name}</span>
-                    <span className="timeline-dates">{formatFullDate(h.date)}</span>
-                  </div>
-                  <div className="timeline-actions">
-                    <button type="button" className="action-btn delete" onClick={() => {
-                      openConfirmModal('Remove special day?', `This will remove "${h.name}" from the calendar.`, async () => {
-                        const res = await authFetch(`/api/holidays/${h.id}`, { method: 'DELETE' })
-                        if (res.ok) { setHolidays(await res.json()); setCalendarData(null) }
-                        closeConfirmModal()
-                      })
-                    }}><Trash2 size={14} /></button>
-                  </div>
-                </div>
-              ))}
+              {(() => {
+                // Group consecutive same-name rows into a single range entry,
+                // mirroring how Team time off displays "May 1 → May 5".
+                // Holidays are stored as one row per day, so we collapse them
+                // for display only; delete fans out across the grouped ids.
+                const sorted = [...holidays].sort((a, b) => a.date.localeCompare(b.date))
+                type Group = { name: string; startDate: string; endDate: string; ids: string[] }
+                const groups: Group[] = []
+                for (const h of sorted) {
+                  const last = groups[groups.length - 1]
+                  if (last && last.name === h.name) {
+                    const lastEnd = parseLocalDate(last.endDate)
+                    const cur = parseLocalDate(h.date)
+                    if (lastEnd && cur && (cur.getTime() - lastEnd.getTime()) === DAY_MS) {
+                      last.endDate = h.date
+                      last.ids.push(h.id)
+                      continue
+                    }
+                  }
+                  groups.push({ name: h.name, startDate: h.date, endDate: h.date, ids: [h.id] })
+                }
+                return groups.map(g => {
+                  const isRange = g.startDate !== g.endDate
+                  const datesLabel = isRange
+                    ? `${formatShortDate(g.startDate)} → ${formatShortDate(g.endDate)}`
+                    : formatFullDate(g.startDate)
+                  const key = `${g.name}-${g.startDate}-${g.endDate}`
+                  return (
+                    <div key={key} className="timeline-item">
+                      <div className="timeline-info">
+                        <span className="timeline-name">{g.name}</span>
+                        <span className="timeline-dates">{datesLabel}</span>
+                      </div>
+                      <div className="timeline-actions">
+                        <button type="button" className="action-btn delete" onClick={() => {
+                          const msg = isRange
+                            ? `This will remove "${g.name}" (${datesLabel}, ${g.ids.length} days) from the calendar.`
+                            : `This will remove "${g.name}" from the calendar.`
+                          openConfirmModal('Remove special day?', msg, async () => {
+                            let last: Response | null = null
+                            for (const id of g.ids) {
+                              last = await authFetch(`/api/holidays/${id}`, { method: 'DELETE' })
+                              if (!last.ok) break
+                            }
+                            if (last && last.ok) {
+                              const refreshed = await authFetch('/api/holidays')
+                              if (refreshed.ok) setHolidays(await refreshed.json())
+                              setCalendarData(null)
+                            }
+                            closeConfirmModal()
+                          })
+                        }}><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                  )
+                })
+              })()}
               {holidays.length === 0 && <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>No special days added yet.</p>}
             </div>
           </div>
@@ -7251,6 +7597,80 @@ const [showFilters, setShowFilters] = useState(false)
               </div>
             )}
           </div>
+
+          {/* External Access Requests (Admin Only) — submitted via the
+              "Request DesignHub access" Slack workflow by people who can't
+              reach the app yet (blocked by the Hatch oauth2-proxy DENY
+              policy). Approve to grant the role; admin still adds them to
+              the Hatch app allowlist manually until that API exists. */}
+          {isAdmin && externalAccessRequests.length > 0 && (
+            <div className="settings-section settings-admin-only">
+              <div className="settings-header">
+                <h2>Access Requests</h2>
+                <span className="settings-section-meta">
+                  {externalAccessRequests.length} pending from Slack
+                </span>
+              </div>
+              <div className="users-table access-requests-table">
+                <div className="users-table-header">
+                  <span>Person</span>
+                  <span>Requested role</span>
+                  <span aria-hidden="true"></span>
+                </div>
+                {externalAccessRequests.map(req => {
+                  const isActing = externalActionRowId === req.rowId
+                  return (
+                    <div key={req.rowId} className="users-table-row users-table-row-requesting access-request-row">
+                      <div className="users-table-cell users-table-person">
+                        <span className="users-table-name">{req.name || req.email}</span>
+                        {req.name && <span className="users-table-email">{req.email}</span>}
+                        {(req.reason || req.project) && (
+                          <span className="access-request-context">
+                            {req.project && <span className="access-request-project">{req.project}</span>}
+                            {req.reason && <span className="access-request-reason">{req.reason}</span>}
+                          </span>
+                        )}
+                      </div>
+                      <div className="users-table-cell">
+                        <select
+                          className="user-role-select"
+                          value={req.requestedRole}
+                          onChange={e => {
+                            const newReqs = externalAccessRequests.map(r =>
+                              r.rowId === req.rowId ? { ...r, requestedRole: e.target.value as 'admin' | 'user' | 'viewer' } : r
+                            )
+                            setExternalAccessRequests(newReqs)
+                          }}
+                          aria-label={`Change role for ${req.name || req.email}`}
+                          disabled={isActing}
+                        >
+                          <option value="viewer">Viewer</option>
+                          <option value="user">User</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </div>
+                      <div className="users-table-cell users-table-actions">
+                        <button
+                          className="primary-btn"
+                          onClick={() => handleApproveExternalRequest(req.rowId, req.requestedRole)}
+                          disabled={isActing}
+                        >
+                          {isActing ? '…' : 'Approve'}
+                        </button>
+                        <button
+                          className="secondary-btn"
+                          onClick={() => handleDenyExternalRequest(req.rowId)}
+                          disabled={isActing}
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* User Management Section (Admin Only) */}
           {isAdmin && (
@@ -7955,24 +8375,62 @@ const [showFilters, setShowFilters] = useState(false)
                 />
                 <label>Name</label>
               </div>
-              <div className={`float-field${holidayForm.date ? ' has-value' : ''}`}>
-                <input
-                  type="date"
-                  value={holidayForm.date}
-                  onChange={e => setHolidayForm({ ...holidayForm, date: e.target.value })}
-                  onClick={e => (e.target as HTMLInputElement).showPicker?.()}
-                  placeholder=" "
-                />
-                <label>Date</label>
+              <div className="form-row">
+                <div className={`float-field${holidayForm.startDate ? ' has-value' : ''}`}>
+                  <input
+                    id="holiday-start"
+                    type="date"
+                    value={holidayForm.startDate}
+                    onChange={e => setHolidayForm({ ...holidayForm, startDate: e.target.value, endDate: holidayForm.endDate || e.target.value })}
+                    onClick={e => (e.target as HTMLInputElement).showPicker?.()}
+                    placeholder=" "
+                  />
+                  <label htmlFor="holiday-start">Start Date</label>
+                </div>
+                <div className={`float-field${holidayForm.endDate ? ' has-value' : ''}`}>
+                  <input
+                    id="holiday-end"
+                    type="date"
+                    value={holidayForm.endDate}
+                    onChange={e => setHolidayForm({ ...holidayForm, endDate: e.target.value })}
+                    onClick={e => (e.target as HTMLInputElement).showPicker?.()}
+                    placeholder=" "
+                  />
+                  <label htmlFor="holiday-end">End Date</label>
+                </div>
               </div>
             </div>
             <div className="modal-footer">
               <button className="secondary-btn" onClick={() => setShowHolidayModal(false)}>Cancel</button>
               <button className="primary-btn" onClick={async () => {
-                if (!holidayForm.name || !holidayForm.date) return
-                const res = await authFetch('/api/holidays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(holidayForm) })
-                if (res.ok) { setHolidays(await res.json()); setCalendarData(null); setShowHolidayModal(false); setHolidayForm({ name: '', date: '' }) }
-              }}>Add Special Day</button>
+                if (!holidayForm.name || !holidayForm.startDate || !holidayForm.endDate) return
+                const start = parseLocalDate(holidayForm.startDate)
+                const end = parseLocalDate(holidayForm.endDate)
+                if (!start || !end || end < start) { alert('End date must be on or after start date'); return }
+                // Expand the range into one row per day so the existing
+                // per-date holidays table, calendar lookup, and reminders
+                // keep working without a schema change.
+                const dates: string[] = []
+                const cursor = new Date(start)
+                while (cursor <= end) {
+                  const y = cursor.getFullYear()
+                  const m = String(cursor.getMonth() + 1).padStart(2, '0')
+                  const d = String(cursor.getDate()).padStart(2, '0')
+                  dates.push(`${y}-${m}-${d}`)
+                  cursor.setDate(cursor.getDate() + 1)
+                }
+                let last: Response | null = null
+                for (const date of dates) {
+                  last = await authFetch('/api/holidays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: holidayForm.name, date }) })
+                  if (!last.ok) break
+                }
+                if (last && last.ok) {
+                  setHolidays(await last.json())
+                  setCalendarData(null)
+                  setShowHolidayModal(false)
+                  setHolidayForm({ name: '', startDate: '', endDate: '' })
+                }
+              }}>{holidayForm.startDate && holidayForm.endDate && holidayForm.startDate !== holidayForm.endDate ? 'Add Special Days' : 'Add Special Day'}</button>
             </div>
           </div>
         </div>
@@ -8239,6 +8697,32 @@ const [showFilters, setShowFilters] = useState(false)
                 }}
               >
                 {confirmModal.confirmLabel || 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approve-success modal — styled equivalent of the native alert.
+          Surfaces the (still-manual) Hatch allowlist step plainly so the
+          admin doesn't forget it after closing. */}
+      {approveConfirmModal.open && (
+        <div className="modal-overlay" style={{ zIndex: 2000 }} onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setApproveConfirmModal({ open: false, email: '', role: '' }) }}>
+          <div className="modal confirm-modal" onClick={e => e.stopPropagation()}>
+            <h2>Request approved</h2>
+            <p className="confirm-message">
+              <strong>{approveConfirmModal.email}</strong> has been granted the <strong>{approveConfirmModal.role}</strong> role inside designhub.
+            </p>
+            <p className="confirm-message">
+              They still need to be added to the Hatch app allowlist before they can sign in. Tell Claude:
+              <code className="confirm-code">add {approveConfirmModal.email} to the designhub Hatch allowlist</code>
+            </p>
+            <div className="confirm-actions">
+              <button
+                className="primary-btn"
+                onClick={() => setApproveConfirmModal({ open: false, email: '', role: '' })}
+              >
+                Done
               </button>
             </div>
           </div>

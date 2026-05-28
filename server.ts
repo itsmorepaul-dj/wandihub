@@ -22,6 +22,7 @@ import imagesRouter from './server/routes/images.js';
 import reviewItemImagesRouter from './server/routes/review-item-images.js';
 import reviewRouter, { startReviewCron } from './server/routes/review.js';
 import { startReminderCron } from './server/reminders.js';
+import { accessRequestsRouter, startAccessRequestPoller } from './server/access-requests.js';
 
 // Hatch's bedrock=true provisioning injects AWS_DEFAULT_REGION but not
 // AWS_REGION. The Anthropic Bedrock SDK reads AWS_REGION, so mirror it.
@@ -106,6 +107,7 @@ app.use('/api', weeklyRouter);
 app.use('/api', execSummaryRouter);
 app.use('/api', imagesRouter);
 app.use('/api', reviewItemImagesRouter);
+app.use('/api', accessRequestsRouter);
 app.use('/api/versions', versionRouter);
 app.use(reviewRouter);
 
@@ -146,5 +148,6 @@ startup().then(() => {
     startWeeklyCron();
     startReviewCron();
     startReminderCron();
+    startAccessRequestPoller();
   });
 });

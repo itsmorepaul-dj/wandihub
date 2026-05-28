@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { run, get, all } from './db.js';
+import { broadcast } from './sse.js';
 
 // Session store: durable in SQLite, cached in memory for synchronous reads.
 // Writes go to both stores; expired entries are pruned from both on login
@@ -412,11 +413,15 @@ usersRouter.put('/:id/role', requireAdmin, async (req, res) => {
     if (parseInt(id) === session.userId) {
       return res.status(400).json({ error: 'Cannot change your own role' });
     }
-    const existing = await get('SELECT id FROM users WHERE id = ?', [id]);
+    const existing = await get('SELECT id, email FROM users WHERE id = ?', [id]) as any;
     if (!existing) return res.status(404).json({ error: 'User not found' });
 
     await run('UPDATE users SET role = ?, access_requested_at = NULL WHERE id = ?', [role, id]);
     await invalidateUserSessions(parseInt(id));
+    // Tell every connected client to re-check their identity. The target's
+    // SPA will see role: changed via /api/auth/me; everyone else's check
+    // is a no-op. Cheaper than per-session push channels.
+    broadcast('role-change', { userId: parseInt(id), email: existing.email, role });
     res.json({ success: true, id: parseInt(id), role });
   } catch (err) {
     console.error('Error updating user role:', err);
