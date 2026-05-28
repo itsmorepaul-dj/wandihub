@@ -191,6 +191,38 @@ export const validateSchemaOnStartup = async () => {
 // SCHEMA INITIALIZATION & MIGRATIONS
 // ============================================
 
+// One-time migration: strip the trailing `-XXXXXXXX` random suffix from any
+// existing public_slug values. Idempotent — slugs already without an 8-char
+// suffix are left alone. Collisions disambiguated with -2/-3/...
+const stripLegacyPublicSlugSuffixes = async () => {
+  try {
+    const rows = await all(`SELECT id, public_slug FROM projects WHERE public_slug IS NOT NULL`) as { id: string; public_slug: string }[]
+    if (!rows.length) return
+    // Match the legacy generator's suffix shape: dash + 8 chars from base64url
+    // (lowercased), i.e. [a-z0-9_-]. Don't strip slugs that have already been
+    // disambiguated with -2/-3 etc.
+    const legacyRe = /^(.+)-([a-z0-9_-]{8})$/
+    const taken = new Set(rows.map(r => r.public_slug))
+    for (const row of rows) {
+      const m = row.public_slug.match(legacyRe)
+      if (!m) continue
+      const base = m[1]
+      // Pick the first free name-only variant (base, base-2, base-3, ...).
+      let candidate = base
+      for (let n = 0; n < 100; n++) {
+        const c = n === 0 ? base : `${base}-${n + 1}`
+        if (!taken.has(c) || c === row.public_slug) { candidate = c; break }
+      }
+      if (candidate === row.public_slug) continue
+      await run(`UPDATE projects SET public_slug = ? WHERE id = ?`, [candidate, row.id])
+      taken.delete(row.public_slug)
+      taken.add(candidate)
+    }
+  } catch (e: any) {
+    console.error('public_slug backfill error:', e.message)
+  }
+}
+
 export const initSchema = async () => {
   await run("CREATE TABLE IF NOT EXISTS app_versions (key TEXT PRIMARY KEY, db_version TEXT, db_time TEXT, updated_at TEXT)")
   await run("CREATE TABLE IF NOT EXISTS project_priorities (business_line_id TEXT NOT NULL, project_id TEXT NOT NULL, rank INTEGER NOT NULL, PRIMARY KEY (business_line_id, project_id))")
@@ -211,6 +243,11 @@ export const initSchema = async () => {
   await run(`ALTER TABLE projects ADD COLUMN public_slug TEXT`).catch(() => {})
   await run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_public_slug ON projects(public_slug) WHERE public_slug IS NOT NULL`).catch(() => {})
   await run(`UPDATE projects SET status = 'archived' WHERE archivedQuarter IS NOT NULL AND status != 'archived'`).catch(() => {})
+
+  // Backfill: strip the legacy 8-char random suffix from public_slug values
+  // (added when the site was internet-facing). With designhub now behind the
+  // DJ firewall, slugs are name-only; collisions get -2/-3/... Idempotent.
+  await stripLegacyPublicSlugSuffixes()
 
   await run(`CREATE TABLE IF NOT EXISTS team (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT, brands TEXT,

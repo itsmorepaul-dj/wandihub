@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import path from 'path';
 
 import { initSchema, validateSchemaOnStartup, SEED_SECRET } from './server/db.js';
+import { sunsetMiddleware } from './server/sunset.js';
 import { sessions, requireAuth, requireWrite, authRouter, usersRouter, initUsers, createVersionGuard } from './server/auth.js';
 import { oktaEnabled, oktaMiddleware, oktaWhoamiHandler } from './server/okta.js';
 import { broadcast, createSSEHandler } from './server/sse.js';
@@ -37,6 +38,13 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
 app.use(express.raw({ type: 'image/*', limit: '10mb' }));
 app.use(express.json({ limit: '10mb' }));
+
+// ============ SUNSET REDIRECT (legacy host only) ============
+// When WANDIHUB_SUNSET_REDIRECT_TO is set (Railway / wandihub.up.railway.app),
+// every browser GET serves a "we've moved" announcement that counts down 8
+// seconds and redirects to the same path on designhub. API/SSE pass through.
+// On Hatch the env var is unset and this is a no-op.
+app.use(sunsetMiddleware);
 
 // ============ VERSION GUARD ============
 // Reject writes from stale client bundles

@@ -1,5 +1,4 @@
 import express from 'express';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { run, get, all, upsertProject, upsertBusinessLine, IMAGES_DIR } from '../db.js';
@@ -165,18 +164,18 @@ const slugifyBase = (name: string): string => {
     .slice(0, 60) || 'project'
 }
 
-// Build a capability-style public slug: `<name>-<8-char-random>`. The random
-// suffix keeps the URL unguessable so anonymous visitors need the shared link
-// to find the page.
+// Build a clean, name-only public slug. Collisions are disambiguated with a
+// numeric suffix (-2, -3, ...). Random capability suffixes were dropped after
+// the site moved behind the DJ firewall — public pages no longer need to be
+// unguessable.
 const buildPublicSlug = async (name: string, excludeId: string): Promise<string> => {
   const base = slugifyBase(name)
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const suffix = crypto.randomBytes(5).toString('base64url').slice(0, 8).toLowerCase()
-    const slug = `${base}-${suffix}`
+  for (let n = 0; n < 100; n++) {
+    const slug = n === 0 ? base : `${base}-${n + 1}`
     const collision = await get('SELECT id FROM projects WHERE public_slug = ? AND id != ?', [slug, excludeId]) as any
     if (!collision) return slug
   }
-  throw new Error('Failed to generate unique slug after 5 attempts')
+  throw new Error('Failed to generate unique slug after 100 attempts')
 }
 
 router.put('/projects/:id/publish', async (req, res) => {

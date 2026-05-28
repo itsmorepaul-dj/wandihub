@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable'
-import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, FileBarChart,ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Info, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus, Sparkles, Lock, X } from 'lucide-react'
+import { Pencil, Trash2, FileText, Presentation, FileEdit, Mail, MessageSquare, LayoutGrid, Users, Calendar, Figma, Link as LinkIcon, Search, Gauge, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Settings, GripVertical, Folder, StickyNote, RefreshCw, User, CheckSquare, Sun, Moon, Edit2, Bell, Loader, Clock, ClipboardCopy, FileBarChart,ListChecks, Palette, HelpCircle, AlertTriangle, Flag, Archive, RotateCcw, ChevronLeft, Copy, Globe, Plus, Sparkles, Lock, X } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import './App.css'
 import type { TimelineRange, Project, BusinessLine, TeamMember, Note, CalendarEvent, CalendarDay, CalendarMonth, CalendarData, CapacityMember, CapacityAssignment, CapacityData, ActivityItem, TabId, WeeklyUpdate, WeeklyGeneral, ProjectImage } from './types'
@@ -32,22 +32,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgressDropZone, DoneDropZone } from './components/Sortable'
 
-// Recent updates shown on login screen
-const CHANGELOG = [
-  "Fresh Design Hub logo across the site.",
-  "Multi-day special days: pick a start and end date when adding a holiday and Settings groups them into a single range row.",
-  "Slow tabs (Capacity, Calendar, Reviews) now show a loading overlay if they take longer than a second to render.",
-  "Admins can now \"View as\" a User or Viewer from Settings to test role-gated features without logging out.",
-  "Maintenance mode polish: rebranded lockout screen with ETA messaging, public review/published links stay live, support pings #designhub-access, and admins can lock out instantly (0 minutes).",
-  "Access requests submitted via the external request form now create pending viewer accounts automatically.",
-  "New people signing in via Okta now start as viewers — read-only by default until an admin promotes them.",
-  "Viewers can press \"Request access\" on the read-only toast to ask an admin for full access. Admins see a persistent banner at the top of the site listing pending requests.",
-  "User Accounts now has a search field to filter the list by name, email, or role.",
-  "New \"Viewer\" role gives read-only access — viewers can browse everything and post review comments, but cannot edit projects, capacity, notes, or other data.",
-  "User Accounts: redesigned as a compact table showing each person's name (from Okta) and email, with role and delete inline.",
-  "Admins can now change a user's role (User ↔ Admin) directly from Settings → User Accounts.",
-  "Fixed: review images now load on Design Hub.",
-]
+import { changelogForWeek, changelogWeekKeys, formatChangelogDate, formatWeekRange, latestChangelogStamp, mostRecentChangelogWeek } from './changelog'
 
 
 function renderMarkdownLinks(text: string): React.ReactNode {
@@ -1417,12 +1402,14 @@ const [showFilters, setShowFilters] = useState(false)
   const [countdownDisplay, setCountdownDisplay] = useState('')
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [viewerBlockedAt, setViewerBlockedAt] = useState(0)
-  const [showChangelog, setShowChangelog] = useState(true)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
   // `docsHtml` is a lazy builder: running the markup-to-Docs conversion is
   // expensive and only needed if the user clicks "Copy to Docs", so we defer
   // it until that click rather than computing on open.
   const [reportModal, setReportModal] = useState<{ open: boolean; title: string; content: string; richContent?: React.ReactNode; snapshotWeek?: string; docsHtml?: () => string }>({ open: false, title: '', content: '' })
+  // "What's new" changelog modal: tracks which ISO week (Mon-Sun) is shown.
+  // `weekKey` is the Monday's YYYY-MM-DD; empty = closed.
+  const [changelogModal, setChangelogModal] = useState<{ open: boolean; weekKey: string }>({ open: false, weekKey: '' })
   // Executive Summary state. `execStatus` is null until the first admin /status
   // call resolves; gates the button visibility. Baseline + lastRuleset feed the
   // rules-editor modal; their absence means "use baseline".
@@ -3235,23 +3222,7 @@ const [showFilters, setShowFilters] = useState(false)
           <div className="login-lockup">
             <DesignHubLogo size={26} />
             <h1>Design Hub</h1>
-            <button className="changelog-toggle" onClick={() => setShowChangelog(v => !v)} aria-label="What's new">
-              <Info size={15} />
-            </button>
           </div>
-
-          {showChangelog && (
-            <div className="changelog-popover">
-              <div className="changelog-title">What's new</div>
-              <ul className="changelog-list">
-                {CHANGELOG.map((item, i) => {
-                  const dash = item.indexOf('—')
-                  if (dash === -1) return <li key={i}>{item}</li>
-                  return <li key={i}><strong>{item.slice(0, dash).trim()}</strong> — {item.slice(dash + 1).trim()}</li>
-                })}
-              </ul>
-            </div>
-          )}
 
           <form className="login-form" onSubmit={handleLogin} action="/api/auth/login" method="post" autoComplete="on">
             {loginError && <div className="login-error">{loginError}</div>}
@@ -7413,6 +7384,18 @@ const [showFilters, setShowFilters] = useState(false)
                 <span>DB version</span>
                 <span className="settings-version-value">{formatVersionDisplay(dbVersion.version) || '-'}</span>
               </div>
+              <div className="settings-row">
+                <span>View changelog</span>
+                <button
+                  className="settings-changelog-link"
+                  onClick={() => {
+                    const mostRecent = mostRecentChangelogWeek()
+                    setChangelogModal({ open: true, weekKey: mostRecent })
+                  }}
+                >
+                  {formatVersionDisplay(latestChangelogStamp()) || '-'}
+                </button>
+              </div>
               {!currentUser?.okta && (
                 <div className="settings-row">
                   <span />
@@ -8867,6 +8850,53 @@ const [showFilters, setShowFilters] = useState(false)
           </div>
         </div>
       )}
+
+      {/* Changelog ("What's new") Modal — fixed header with week selector + close,
+          scrolling body grouped by date in descending order. Mirrors the
+          report-modal pattern so it slots into the existing CSS without invention. */}
+      {changelogModal.open && (() => {
+        const weeks = changelogWeekKeys()
+        const groups = changelogForWeek(changelogModal.weekKey)
+        return (
+          <div className="modal-overlay" onMouseDown={e => { overlayMouseDownTarget.current = e.target }} onClick={e => { if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) setChangelogModal({ open: false, weekKey: '' }) }}>
+            <div className="modal report-modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>What's new</h2>
+                <div className="report-modal-actions">
+                  <select
+                    className="changelog-week-select"
+                    value={changelogModal.weekKey}
+                    onChange={e => setChangelogModal({ open: true, weekKey: e.target.value })}
+                  >
+                    {weeks.map(w => (
+                      <option key={w} value={w}>{formatWeekRange(w)}</option>
+                    ))}
+                  </select>
+                  <button className="modal-close-btn" onClick={() => setChangelogModal({ open: false, weekKey: '' })}>×</button>
+                </div>
+              </div>
+              <div className="modal-body">
+                <div className="changelog-modal-content">
+                  {groups.length === 0 ? (
+                    <p className="changelog-modal-empty">No updates this week.</p>
+                  ) : groups.map(g => (
+                    <div key={g.date} className="changelog-day">
+                      <h3 className="changelog-day-title">{formatChangelogDate(g.date)}</h3>
+                      <ul className="changelog-day-list">
+                        {g.entries.map((entry, i) => {
+                          const dash = entry.indexOf('—')
+                          if (dash === -1) return <li key={i}>{entry}</li>
+                          return <li key={i}><strong>{entry.slice(0, dash).trim()}</strong> — {entry.slice(dash + 1).trim()}</li>
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Capacity Help Modal */}
       {showCapacityHelp && (

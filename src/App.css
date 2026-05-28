@@ -8472,50 +8472,76 @@ select:focus-visible {
   color: var(--color-text);
 }
 
-.changelog-toggle {
+/* "View changelog" link inside Settings → General. Mirrors the
+   .settings-version-value affordance — text-only, blue accent, no border. */
+.settings-changelog-link {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--color-text-dim);
-  padding: 2px;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  border-radius: 50%;
-  transition: color 0.15s;
+  color: var(--color-accent);
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0;
+  text-decoration: none;
 }
-.changelog-toggle:hover {
-  color: var(--color-primary);
+.settings-changelog-link:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
 }
 
-.changelog-popover {
-  text-align: left;
-  background: var(--color-bg);
+/* Week dropdown sits inside the changelog modal's fixed header. */
+.changelog-week-select {
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 0.65rem 0.75rem 0.5rem;
-  margin-bottom: 0.75rem;
+  border-radius: 5px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.3rem 0.55rem;
+  transition: border-color 0.15s;
 }
-.changelog-title {
-  font-size: 0.65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-  margin-bottom: 0.35rem;
+.changelog-week-select:hover {
+  border-color: var(--color-border-hover);
 }
-.changelog-list {
+.changelog-week-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.changelog-modal-content {
+  padding: 1rem 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.changelog-modal-empty {
   margin: 0;
-  padding: 0 0 0 1rem;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-style: italic;
+}
+.changelog-day-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+.changelog-day-list {
+  margin: 0;
+  padding: 0 0 0 1.1rem;
   list-style: disc;
 }
-.changelog-list li {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-  margin-bottom: 0.45rem;
+.changelog-day-list li {
+  font-size: 0.875rem;
+  color: var(--color-text);
+  line-height: 1.55;
+  margin-bottom: 0.55rem;
 }
-.changelog-list li:last-child {
+.changelog-day-list li:last-child {
   margin-bottom: 0;
 }
 
