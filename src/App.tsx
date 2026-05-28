@@ -34,7 +34,6 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
-  "Behind the scenes: Hatch is now the system of record. Railway will be retired soon.",
   "Fresh Design Hub logo across the site.",
   "Multi-day special days: pick a start and end date when adding a holiday and Settings groups them into a single range row.",
   "Slow tabs (Capacity, Calendar, Reviews) now show a loading overlay if they take longer than a second to render.",
