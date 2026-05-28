@@ -10,6 +10,7 @@
 export type ChangelogEntry = { date: string; time?: string; entry: string }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { date: "2026-05-27", time: "2153", entry: "Faster Capacity tab — the per-request integrity sweep now runs once at startup instead of on every load, removing hundreds of redundant SQLite round-trips before the page renders." },
   { date: "2026-05-27", time: "2053", entry: "Settings → \"View changelog\" replaces the sign-in popover — opens a full history modal with week-by-week navigation; the link itself shows the latest deploy stamp." },
   { date: "2026-05-27", time: "2053", entry: "Fresh blue Design Hub favicon in browser tabs." },
   { date: "2026-05-27", time: "2053", entry: "Cleaner public project URLs — capability suffixes are gone now that the site is behind the firewall (existing public links have been backfilled too)." },

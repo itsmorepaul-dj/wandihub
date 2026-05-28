@@ -11,7 +11,7 @@ import { broadcast, createSSEHandler } from './server/sse.js';
 import { maintenanceMiddleware, maintenanceRouter, loadMaintenanceState, getMaintenancePayload } from './server/maintenance.js';
 import { SITE_VERSION, initVersions, versionRouter } from './server/version.js';
 
-import projectsRouter from './server/routes/projects.js';
+import projectsRouter, { reconcileProjectDesignerAssignments } from './server/routes/projects.js';
 import teamRouter from './server/routes/team.js';
 import capacityRouter from './server/routes/capacity.js';
 import notesRouter from './server/routes/notes.js';
@@ -143,6 +143,7 @@ async function startup() {
     await loadMaintenanceState();
     await validateSchemaOnStartup();
     await purgeStaleWeeklyRows();
+    await reconcileProjectDesignerAssignments();
     console.log('Schema initialization complete');
   } catch (e) {
     console.error('Startup error:', e);

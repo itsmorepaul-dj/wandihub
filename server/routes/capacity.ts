@@ -2,7 +2,7 @@ import express from 'express';
 import { run, get, all, upsertAssignment } from '../db.js';
 import { updateDbVersion, logActivity } from '../version.js';
 import { getUserEmail } from '../auth.js';
-import { reconcileProjectDesignerAssignments, syncAssignmentToProjectDesigners } from './projects.js';
+import { syncAssignmentToProjectDesigners } from './projects.js';
 import { pinRecipients, userIdForEmail, recipientForTeamMember } from '../activity.js';
 
 const router = express.Router();
@@ -44,8 +44,6 @@ router.put('/priorities', async (req, res) => {
 
 router.get('/capacity', async (req, res) => {
   try {
-    await reconcileProjectDesignerAssignments()
-
     const team = await all('SELECT * FROM team ORDER BY name') as any[]
     const teamWithHours = team.map((m: any) => ({
       ...m,
