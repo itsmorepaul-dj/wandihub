@@ -4,7 +4,7 @@ import { spawn } from 'child_process';
 import { run, get, all, DB_PATH, IMAGES_DIR, SEED_SECRET, getDb, setDb, schemaDrift,
   upsertProject, upsertTeamMember, upsertBusinessLine, upsertAssignment, upsertNote } from '../db.js';
 import sqlite3 from 'sqlite3';
-import { requireAdmin } from '../auth.js';
+import { requireAdmin, getSessionIdFromRequest, sessions } from '../auth.js';
 import { broadcast } from '../sse.js';
 import { loadMaintenanceState } from '../maintenance.js';
 import { updateDbVersion, SITE_VERSION } from '../version.js';
@@ -40,8 +40,16 @@ router.get('/table-counts', async (_req, res) => {
 
 router.get('/download-db', async (req, res) => {
   try {
+    // Two auth paths: x-seed-secret header (ops scripts inside the cluster /
+    // Railway) OR an admin session cookie (Hatch — the oauth2-proxy gateway
+    // strips custom headers, so external scripts have to ride a browser
+    // cookie). Either is sufficient.
     const secret = req.headers['x-seed-secret']
-    if (!SEED_SECRET || secret !== SEED_SECRET) {
+    const hasSeedToken = SEED_SECRET && secret === SEED_SECRET
+    const sid = getSessionIdFromRequest(req)
+    const session = sid ? sessions.get(sid) : null
+    const isAdmin = session?.role === 'admin'
+    if (!hasSeedToken && !isAdmin) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
 

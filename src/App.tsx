@@ -34,6 +34,12 @@ import { SortablePriorityItem, SortableDoneItem, SortableTimelineItem, InProgres
 
 // Recent updates shown on login screen
 const CHANGELOG = [
+  "Fresh Design Hub logo across the site.",
+  "Multi-day special days: pick a start and end date when adding a holiday and Settings groups them into a single range row.",
+  "Slow tabs (Capacity, Calendar, Reviews) now show a loading overlay if they take longer than a second to render.",
+  "Admins can now \"View as\" a User or Viewer from Settings to test role-gated features without logging out.",
+  "Maintenance mode polish: rebranded lockout screen with ETA messaging, public review/published links stay live, support pings #designhub-access, and admins can lock out instantly (0 minutes).",
+  "Access requests submitted via the external request form now create pending viewer accounts automatically.",
   "New people signing in via Okta now start as viewers — read-only by default until an admin promotes them.",
   "Viewers can press \"Request access\" on the read-only toast to ask an admin for full access. Admins see a persistent banner at the top of the site listing pending requests.",
   "User Accounts now has a search field to filter the list by name, email, or role.",
