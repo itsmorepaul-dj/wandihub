@@ -8755,6 +8755,12 @@ select:focus-visible {
   color: var(--color-text-secondary);
   font-weight: 500;
 }
+.settings-section-hint {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin: -4px 0 12px;
+  line-height: 1.4;
+}
 
 /* Persistent banner shown to admins when one or more users are requesting access */
 .access-request-banner {

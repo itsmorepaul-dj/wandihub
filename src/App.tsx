@@ -3353,9 +3353,11 @@ const [showFilters, setShowFilters] = useState(false)
           A new version of Design Hub is available. Click to refresh.
         </div>
       )}
-      {/* Pending access requests banner (admin only) — combines in-app
-          requests (existing viewers asking for full access) and external
-          Slack-submitted requests from the queue sheet. */}
+      {/* Pending role-upgrade requests banner (admin only) — combines
+          in-app requests from existing viewers and Slack-submitted
+          requests from people who haven't signed in yet. Hatch's wildcard
+          allowlist already lets any @dowjones.com employee in as a viewer;
+          these are upgrades to User or Admin. */}
       {isAdmin && (accessRequests.length + externalAccessRequests.length) > 0 && (
         <div
           className="access-request-banner"
@@ -3368,12 +3370,14 @@ const [showFilters, setShowFilters] = useState(false)
             {(() => {
               const total = accessRequests.length + externalAccessRequests.length
               if (total === 1 && accessRequests.length === 1) {
-                return `${accessRequests[0].display_name || accessRequests[0].email} is requesting full access`
+                return `${accessRequests[0].display_name || accessRequests[0].email} is requesting User role`
               }
               if (total === 1 && externalAccessRequests.length === 1) {
-                return `${externalAccessRequests[0].name || externalAccessRequests[0].email} is requesting access`
+                const r = externalAccessRequests[0]
+                const role = r.requestedRole.charAt(0).toUpperCase() + r.requestedRole.slice(1)
+                return `${r.name || r.email} is requesting ${role} role`
               }
-              return `${total} ${total === 1 ? 'person is' : 'people are'} requesting access`
+              return `${total} ${total === 1 ? 'person is' : 'people are'} requesting a role upgrade`
             })()}
             <span className="access-request-banner-cta"> &mdash; review in Settings</span>
           </span>
@@ -3383,13 +3387,13 @@ const [showFilters, setShowFilters] = useState(false)
       {viewerBlockedAt > 0 && (
         <div className="viewer-blocked-toast" role="status" aria-live="polite">
           <Lock size={14} />
-          <span>You have read-only access. Request full access from an admin to make changes.</span>
+          <span>You have read-only access. Ask an admin to upgrade your role to make changes.</span>
           <button
             className="viewer-blocked-action"
             onClick={handleRequestAccess}
             disabled={accessRequestSubmitting}
           >
-            {accessRequestSubmitting ? 'Sending…' : 'Request access'}
+            {accessRequestSubmitting ? 'Sending…' : 'Request edit access'}
           </button>
           <button className="viewer-blocked-close" onClick={() => setViewerBlockedAt(0)} aria-label="Dismiss">
             <X size={14} />
@@ -3399,7 +3403,7 @@ const [showFilters, setShowFilters] = useState(false)
       {/* Access request sent confirmation */}
       {accessRequestSent && (
         <div className="viewer-blocked-toast viewer-blocked-toast-success" role="status" aria-live="polite">
-          <span>Access request sent. An admin will review it shortly.</span>
+          <span>Request sent. An admin will review your role upgrade shortly.</span>
           <button className="viewer-blocked-close" onClick={() => setAccessRequestSent(false)} aria-label="Dismiss">
             <X size={14} />
           </button>
@@ -7587,15 +7591,15 @@ const [showFilters, setShowFilters] = useState(false)
             )}
           </div>
 
-          {/* External Access Requests (Admin Only) — submitted via the
-              "Request DesignHub access" Slack workflow by people who can't
-              reach the app yet (blocked by the Hatch oauth2-proxy DENY
-              policy). Approve to grant the role; admin still adds them to
-              the Hatch app allowlist manually until that API exists. */}
+          {/* Role Upgrade Requests (Admin Only) — submitted via the
+              "Request DesignHub access" Slack workflow. The Hatch wildcard
+              allowlist already lets any @dowjones.com employee sign in as
+              a viewer, so this queue is now strictly about promoting from
+              Viewer to User or Admin. */}
           {isAdmin && externalAccessRequests.length > 0 && (
             <div className="settings-section settings-admin-only">
               <div className="settings-header">
-                <h2>Access Requests</h2>
+                <h2>Role Upgrade Requests</h2>
                 <span className="settings-section-meta">
                   {externalAccessRequests.length} pending from Slack
                 </span>
@@ -7674,6 +7678,10 @@ const [showFilters, setShowFilters] = useState(false)
                   + Add User
                 </button>
               </div>
+              <p className="settings-section-hint">
+                Anyone with a <strong>@dowjones.com</strong> Okta account can sign in as a Viewer automatically &mdash;
+                no admin action needed. Promote here to grant edit (User) or admin access.
+              </p>
 
               {users.length === 0 ? (
                 <p className="settings-empty">No user accounts. Add one to get started.</p>
@@ -7716,7 +7724,7 @@ const [showFilters, setShowFilters] = useState(false)
                               <div className="users-table-cell users-table-person">
                                 <span className="users-table-name">
                                   {displayName}
-                                  {isRequesting && <span className="users-table-badge" title="Requesting full access">Requesting access</span>}
+                                  {isRequesting && <span className="users-table-badge" title="Has asked an admin to upgrade their role">Requesting User role</span>}
                                 </span>
                                 {showEmailLine && <span className="users-table-email">{user.email}</span>}
                               </div>
