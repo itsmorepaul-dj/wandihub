@@ -2,8 +2,8 @@ import express from 'express';
 import { run, get } from './db.js';
 import { broadcast } from './sse.js';
 
-export const SITE_VERSION = '2026.05.27.2129'
-export const SITE_TIME = '2129'
+export const SITE_VERSION = '2026.05.27.2135'
+export const SITE_TIME = '2135'
 
 const VERSION_KEY = 'dcc_versions'
 

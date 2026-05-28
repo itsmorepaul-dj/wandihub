@@ -115,6 +115,9 @@ const renderAnnouncement = (newUrl: string, host: string): string => {
       font-size: 0.78rem;
       color: var(--muted);
     }
+    .footnote strong { color: var(--text); font-weight: 600; }
+    .footnote a { color: var(--accent); text-decoration: none; font-weight: 500; }
+    .footnote a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -134,6 +137,7 @@ const renderAnnouncement = (newUrl: string, host: string): string => {
     <a class="go-now" href="${safeNew}">Go to Design Hub →</a>
 
     <div class="footnote">Update your bookmarks. The old wandihub.up.railway.app URL will be retired soon.</div>
+    <div class="footnote">Need access? <a href="https://slack.com/shortcuts/Ft0B62NMLP9D/635dcd3bf960b0893baebb9fef20b149" target="_blank" rel="noopener">Request it via Slack</a> (kicks off a workflow in <strong>#designhub-access</strong>).</div>
 
     <div class="logo">
       <svg width="24" height="24" viewBox="-2 -12 161 160" aria-hidden="true">
