@@ -10,6 +10,8 @@
 export type ChangelogEntry = { date: string; time?: string; entry: string }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  { date: "2026-06-01", time: "1103", entry: "Fixed weekly updates that wouldn't save (and reports that wouldn't open) when your sign-in had quietly expired — the app now keeps your typed text safe and shows a \"Sign in again\" prompt instead of failing silently, so you no longer need to be on VPN for saves to stick." },
+  { date: "2026-06-01", time: "1103", entry: "Fixed the project \"Needs update\" badge staying red after you'd already saved a weekly update on weekends and Monday mornings — it now correctly flips to \"Updated\" the moment you save." },
   { date: "2026-05-28", time: "1034", entry: "Public review site has a clearer left nav: Design Hub logo at the top links home, weeks are labeled by date range (e.g. \"May 25 – 31\"), Weekly Crits are pinned with a star, the redundant \"Weekly Crit / Quick Crits\" subheaders are gone, the active item gets an accent left bar, and the review pages now use a dark red Design Hub favicon to match the review numbering." },
   { date: "2026-05-27", time: "2228", entry: "Settings access UI now matches reality: any @dowjones.com employee can sign in as a Viewer automatically (no admin needed), so the request flow has been relabeled around role upgrades — \"Access Requests\" is now \"Role Upgrade Requests,\" the read-only toast asks for \"edit access,\" and the User Accounts section explains how the auto-Viewer onboarding works." },
   { date: "2026-05-27", time: "2153", entry: "Faster Capacity tab — the per-request integrity sweep now runs once at startup instead of on every load, removing hundreds of redundant SQLite round-trips before the page renders." },

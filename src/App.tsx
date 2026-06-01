@@ -1402,6 +1402,10 @@ const [showFilters, setShowFilters] = useState(false)
   const [countdownDisplay, setCountdownDisplay] = useState('')
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [viewerBlockedAt, setViewerBlockedAt] = useState(0)
+  // Set when authFetch detects the Hatch gateway bounced an API call to Okta
+  // (expired SSO, typically off-VPN). We show a persistent banner prompting
+  // re-auth rather than auto-reloading, so unsaved form input is preserved.
+  const [authExpired, setAuthExpired] = useState(false)
   const [copiedReport, setCopiedReport] = useState<number | null>(null)
   // `docsHtml` is a lazy builder: running the markup-to-Docs conversion is
   // expensive and only needed if the user clicks "Copy to Docs", so we defer
@@ -1763,13 +1767,19 @@ const [showFilters, setShowFilters] = useState(false)
     const loadWeekly = async () => {
       try {
         const weekRes = await authFetch('/api/current-week')
-        const { week } = await weekRes.json()
-        setCurrentWeek(week)
+        const { week, activeWeek } = await weekRes.json()
+        // Saves stamp rows with the server's getActiveWeek() (which, during the
+        // Fri 8pm→Mon noon ET grace window, is the just-closed reporting week —
+        // NOT the raw ISO week). Drive the "Needs update / Updated" badge and the
+        // missing-updates check off that same activeWeek so a freshly-saved row
+        // matches. Falls back to `week` for older servers that don't return it.
+        const reportingWeek = activeWeek || week
+        setCurrentWeek(reportingWeek)
         const [updatesRes, generalRes, snapshotsRes, missingRes, reviewSnapshotsRes] = await Promise.all([
           authFetch('/api/weekly-updates'),
           authFetch('/api/weekly-general'),
           authFetch('/api/weekly-snapshots'),
-          authFetch(`/api/weekly-updates/missing?week=${week}`),
+          authFetch(`/api/weekly-updates/missing?week=${reportingWeek}`),
           authFetch('/api/review-snapshots'),
         ])
         setWeeklyUpdates(await updatesRes.json())
@@ -1784,22 +1794,23 @@ const [showFilters, setShowFilters] = useState(false)
   }, [currentUser])
 
   const saveWeeklyUpdate = async (update: Partial<WeeklyUpdate>, opts: { keepalive?: boolean } = {}) => {
-    try {
-      const res = await authFetch('/api/weekly-updates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(update),
-        ...(opts.keepalive ? { keepalive: true } : {}),
-      })
-      // Skip state updates on keepalive flushes — the page is unloading.
-      if (opts.keepalive) return null
-      const saved = await res.json() as WeeklyUpdate
-      setWeeklyUpdates(prev => {
-        const idx = prev.findIndex(u => u.id === saved.id)
-        return idx >= 0 ? prev.map(u => u.id === saved.id ? saved : u) : [...prev, saved]
-      })
-      return saved
-    } catch (err) { console.error('Error saving weekly update:', err); return null }
+    const res = await authFetch('/api/weekly-updates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+      ...(opts.keepalive ? { keepalive: true } : {}),
+    })
+    if (opts.keepalive) return null
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw Object.assign(new Error(`Weekly save failed (${res.status})${body ? `: ${body.slice(0, 200)}` : ''}`), { status: res.status })
+    }
+    const saved = await res.json() as WeeklyUpdate
+    setWeeklyUpdates(prev => {
+      const idx = prev.findIndex(u => u.id === saved.id)
+      return idx >= 0 ? prev.map(u => u.id === saved.id ? saved : u) : [...prev, saved]
+    })
+    return saved
   }
 
   const deleteWeeklyUpdate = async (id: string, opts: { keepalive?: boolean } = {}) => {
@@ -1808,21 +1819,23 @@ const [showFilters, setShowFilters] = useState(false)
   }
 
   const saveWeeklyGeneral = async (entry: Partial<WeeklyGeneral>, opts: { keepalive?: boolean } = {}) => {
-    try {
-      const res = await authFetch('/api/weekly-general', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entry),
-        ...(opts.keepalive ? { keepalive: true } : {}),
-      })
-      if (opts.keepalive) return null
-      const saved = await res.json() as WeeklyGeneral
-      setWeeklyGeneral(prev => {
-        const idx = prev.findIndex(e => e.id === saved.id)
-        return idx >= 0 ? prev.map(e => e.id === saved.id ? saved : e) : [...prev, saved]
-      })
-      return saved
-    } catch (err) { console.error('Error saving weekly general:', err); return null }
+    const res = await authFetch('/api/weekly-general', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+      ...(opts.keepalive ? { keepalive: true } : {}),
+    })
+    if (opts.keepalive) return null
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw Object.assign(new Error(`Weekly general save failed (${res.status})${body ? `: ${body.slice(0, 200)}` : ''}`), { status: res.status })
+    }
+    const saved = await res.json() as WeeklyGeneral
+    setWeeklyGeneral(prev => {
+      const idx = prev.findIndex(e => e.id === saved.id)
+      return idx >= 0 ? prev.map(e => e.id === saved.id ? saved : e) : [...prev, saved]
+    })
+    return saved
   }
 
   const deleteWeeklyGeneral = async (id: string, opts: { keepalive?: boolean } = {}) => {
@@ -2178,6 +2191,16 @@ const [showFilters, setShowFilters] = useState(false)
     const onBlocked = () => setViewerBlockedAt(Date.now())
     window.addEventListener('dcc-viewer-blocked', onBlocked)
     return () => window.removeEventListener('dcc-viewer-blocked', onBlocked)
+  }, [])
+
+  // Listen for gateway auth bounces emitted by authFetch (expired Okta SSO).
+  // Show a persistent re-auth banner; never auto-reload, so a half-written
+  // weekly update isn't lost. Reloading hits the gateway, which redirects
+  // through Okta and re-establishes the session.
+  useEffect(() => {
+    const onAuthExpired = () => setAuthExpired(true)
+    window.addEventListener('dcc-auth-expired', onAuthExpired)
+    return () => window.removeEventListener('dcc-auth-expired', onAuthExpired)
   }, [])
 
   // Auto-dismiss the viewer toast after 6s.
@@ -3397,6 +3420,21 @@ const [showFilters, setShowFilters] = useState(false)
           </button>
           <button className="viewer-blocked-close" onClick={() => setViewerBlockedAt(0)} aria-label="Dismiss">
             <X size={14} />
+          </button>
+        </div>
+      )}
+      {/* Gateway session expired (Okta SSO died — usually off-VPN). Persistent,
+          non-dismissable: writes won't work until the user re-auths. We don't
+          auto-reload so any in-progress form text survives until they choose to. */}
+      {authExpired && (
+        <div className="viewer-blocked-toast" role="alert" aria-live="assertive">
+          <Lock size={14} />
+          <span>Your session expired. Your unsaved text is safe — sign in again to keep saving.</span>
+          <button
+            className="viewer-blocked-action"
+            onClick={() => window.location.reload()}
+          >
+            Sign in again
           </button>
         </div>
       )}
