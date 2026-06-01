@@ -36,3 +36,6 @@ backups/
 .local-secrets/
 .localsecrets/
 *.json.key
+
+# Claude Code local settings — holds DCC_SEED_SECRET in its env block
+.claude/settings.local.json

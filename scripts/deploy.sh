@@ -18,7 +18,15 @@
 
 set -euo pipefail
 
-# Source seed secret from openclaw env if not already set
+# Source seed secret: prefer the project-local Claude settings, then fall back
+# to the legacy ~/.openclaw/.env (deprecated — being removed).
+if [[ -z "${DCC_SEED_SECRET:-}" ]]; then
+  _SETTINGS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.claude/settings.local.json"
+  if [[ -f "$_SETTINGS" ]]; then
+    DCC_SEED_SECRET="$(python3 -c "import json; print(json.load(open('$_SETTINGS')).get('env',{}).get('DCC_SEED_SECRET',''))" 2>/dev/null)"
+    export DCC_SEED_SECRET
+  fi
+fi
 if [[ -z "${DCC_SEED_SECRET:-}" && -f "$HOME/.openclaw/.env" ]]; then
   export $(grep '^DCC_SEED_SECRET=' "$HOME/.openclaw/.env" | head -1)
 fi
