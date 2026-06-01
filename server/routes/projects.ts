@@ -5,6 +5,7 @@ import { run, get, all, upsertProject, upsertBusinessLine, IMAGES_DIR } from '..
 import { updateDbVersion, logActivity } from '../version.js';
 import { getUserEmail } from '../auth.js';
 import { recipientsForProject, pinRecipients, userIdForEmail } from '../activity.js';
+import { filterDraftsForViewer } from '../drafts.js';
 
 const router = express.Router();
 
@@ -38,13 +39,14 @@ export const deleteProjectCascade = async (projectId: string) => {
 router.get('/projects', async (req, res) => {
   try {
     const projects = await all('SELECT * FROM projects ORDER BY createdAt DESC');
-    res.json((projects as any[]).map((p: any) => ({
+    const hydrated = (projects as any[]).map((p: any) => ({
       ...p,
       timeline: p.timeline ? JSON.parse(p.timeline) : [],
       customLinks: p.customLinks ? JSON.parse(p.customLinks) : [],
       designers: p.designers ? JSON.parse(p.designers) : [],
       businessLines: p.businessLine ? (() => { try { return JSON.parse(p.businessLine); } catch { return [p.businessLine]; } })() : []
-    })));
+    }))
+    res.json(await filterDraftsForViewer(req, hydrated));
   } catch (e: any) { res.status(500).json({error: e.message}); }
 });
 
@@ -180,8 +182,9 @@ const buildPublicSlug = async (name: string, excludeId: string): Promise<string>
 
 router.put('/projects/:id/publish', async (req, res) => {
   try {
-    const proj = await get('SELECT name, public_slug FROM projects WHERE id = ?', [req.params.id]) as any
+    const proj = await get('SELECT name, public_slug, status FROM projects WHERE id = ?', [req.params.id]) as any
     if (!proj) return res.status(404).json({ error: 'Project not found' })
+    if (proj.status === 'draft') return res.status(400).json({ error: 'Draft projects cannot be published. Change the status first.' })
     // Reuse existing slug if already set (preserves URLs across unpublish/republish),
     // otherwise mint a new capability-style slug.
     const slug = proj.public_slug || await buildPublicSlug(proj.name, req.params.id)

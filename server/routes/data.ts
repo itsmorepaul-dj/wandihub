@@ -2,6 +2,7 @@ import express from 'express';
 import { all, get, run } from '../db.js';
 import { searchProjects, searchTeam, searchBusinessLines, searchNotes } from '../../search.js';
 import { getUserEmail } from '../auth.js';
+import { filterDraftsForViewer, canSeeDrafts } from '../drafts.js';
 
 const router = express.Router();
 
@@ -33,13 +34,14 @@ interface CalendarMonth {
 
 router.get('/data', async (req, res) => {
   try {
-    const projects = await all('SELECT * FROM projects ORDER BY createdAt DESC').then((p: any[]) => p.map((proj: any) => ({
+    const rawProjects = await all('SELECT * FROM projects ORDER BY createdAt DESC').then((p: any[]) => p.map((proj: any) => ({
       ...proj,
       timeline: proj.timeline ? JSON.parse(proj.timeline) : [],
       customLinks: proj.customLinks ? JSON.parse(proj.customLinks) : [],
       designers: proj.designers ? JSON.parse(proj.designers) : [],
       businessLines: proj.businessLine ? (() => { try { return JSON.parse(proj.businessLine); } catch { return [proj.businessLine]; } })() : []
     })));
+    const projects = await filterDraftsForViewer(req, rawProjects);
     const team = await all('SELECT * FROM team ORDER BY name').then((m: any[]) => m.map((t: any) => ({
       ...t,
       brands: JSON.parse(t.brands || '[]'),
@@ -73,8 +75,14 @@ router.get('/search', async (req, res) => {
       scopes.notes ? searchNotes(query, all) : Promise.resolve([])
     ]);
 
+    // Drop drafts entirely from search for non-team viewers (no value in
+    // surfacing an obfuscated "Draft project: X" that they can't open).
+    const allowed = await canSeeDrafts(req)
+    const projectsOut = (projectResults.map((r: any) => r.item) as any[])
+      .filter((p: any) => allowed || p?.status !== 'draft')
+
     res.json({
-      projects: projectResults.map((r: any) => r.item),
+      projects: projectsOut,
       team: teamResults.map((r: any) => r.item),
       businessLines: blResults.map((r: any) => r.item),
       notes: noteResults.map((r: any) => r.item)
@@ -89,11 +97,12 @@ router.get('/search', async (req, res) => {
 
 router.get('/calendar', async (req, res) => {
   try {
-    const projects = await all('SELECT * FROM projects').then((p: any[]) => p.map((proj: any) => ({
+    const rawProjects = await all('SELECT * FROM projects').then((p: any[]) => p.map((proj: any) => ({
       ...proj,
       timeline: proj.timeline ? JSON.parse(proj.timeline) : [],
       businessLines: proj.businessLine ? (() => { try { return JSON.parse(proj.businessLine); } catch { return [proj.businessLine]; } })() : []
     })));
+    const projects = await filterDraftsForViewer(req, rawProjects);
     const team = await all('SELECT * FROM team').then((m: any[]) => m.map((t: any) => ({
       ...t,
       timeOff: t.timeOff ? JSON.parse(t.timeOff) : []

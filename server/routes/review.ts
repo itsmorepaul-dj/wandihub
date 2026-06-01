@@ -6,6 +6,13 @@ import { getUserEmail, sessions, getSessionIdFromRequest, setSessionCookie } fro
 import { broadcast } from '../sse.js';
 import { logActivity, updateDbVersion } from '../version.js';
 import { recipientsForProject, pinRecipients, userIdForEmail } from '../activity.js';
+import { canSeeDrafts, draftLabel, redactSnapshotForViewer, draftSafeProjectName } from '../drafts.js';
+
+// data_json arrays in a review snapshot whose entries carry a project_id and
+// could reference a draft project. (activeItems is built from status IN
+// ('active','blocked') so it can't contain a draft, but we redact it too so the
+// guarantee doesn't depend on that upstream filter never changing.)
+const REVIEW_SNAPSHOT_PROJECT_ARRAYS = ['reviewItems', 'activeItems']
 
 const router = express.Router();
 
@@ -56,7 +63,22 @@ router.get('/api/reviews/:id', async (req, res) => {
       designers: item.designers ? JSON.parse(item.designers) : [],
       businessLines: item.businessLine ? (() => { try { return JSON.parse(item.businessLine); } catch { return [item.businessLine]; } })() : [],
     }))
-    res.json({ ...review, items: parsed })
+    const allowed = await canSeeDrafts(req)
+    const sanitized = allowed ? parsed : parsed.map((item: any) => {
+      if (item.status !== 'draft') return item
+      return {
+        ...item,
+        project_name: draftLabel(item.businessLine),
+        designers: [],
+        timeline: [],
+        customLinks: [],
+        deckName: null, deckLink: null, prdName: null, prdLink: null,
+        briefName: null, briefLink: null, figmaLink: null, url: null,
+        startDate: null, endDate: null,
+        _isDraftRedacted: true,
+      }
+    })
+    res.json({ ...review, items: sanitized })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -81,16 +103,19 @@ router.post('/api/reviews', async (req, res) => {
           [itemId, id, project_ids[i], i]
         )
         try {
-          const p = await get('SELECT id, name FROM projects WHERE id = ?', [project_ids[i]]) as any
+          const p = await get('SELECT id, name, status, businessLine FROM projects WHERE id = ?', [project_ids[i]]) as any
+          // Draft projects fan out under their obfuscated label, never the real
+          // name — activity rows + SSE reach non-team viewers.
+          const safeName = draftSafeProjectName(p?.name, p?.status, p?.businessLine, project_ids[i])
           const detailsJson = JSON.stringify({
             review_id: id,
             review_title: title || 'Design Review',
             review_date: reviewDate,
             project_id: project_ids[i],
-            project_name: p?.name || 'Project',
+            project_name: safeName,
             summary: `Added to ${title || 'a new review'}${reviewDate ? ` on ${reviewDate}` : ''}`,
           })
-          const activityId = await logActivity('review', 'update', p?.name || project_ids[i], email, detailsJson)
+          const activityId = await logActivity('review', 'update', safeName, email, detailsJson)
           await pinRecipients(activityId, await recipientsForProject(project_ids[i], initiatorId))
         } catch (e: any) { console.error('Create-review fan-out error:', e.message) }
       }
@@ -215,9 +240,11 @@ router.post('/api/reviews/:id/items', async (req, res) => {
       'INSERT INTO review_items (id, review_id, project_id, rank) VALUES (?, ?, ?, ?)',
       [id, req.params.id, project_id, rank]
     )
-    // Flip project to "In Review" — but don't clobber terminal states (done/archived).
+    // Flip project to "In Review" — but don't clobber terminal states (done/archived)
+    // and don't surface drafts as in-review (they need to stay obfuscated for
+    // non-team viewers; the draft author flips status manually when ready).
     await run(
-      "UPDATE projects SET status = 'review', updatedAt = datetime('now') WHERE id = ? AND status NOT IN ('done', 'archived')",
+      "UPDATE projects SET status = 'review', updatedAt = datetime('now') WHERE id = ? AND status NOT IN ('done', 'archived', 'draft')",
       [project_id]
     )
     await updateDbVersion()
@@ -226,18 +253,21 @@ router.post('/api/reviews/:id/items', async (req, res) => {
     // can render a friendly summary and link to the review.
     try {
       const r = await get('SELECT id, title, review_date FROM reviews WHERE id = ?', [req.params.id]) as any
-      const p = await get('SELECT id, name FROM projects WHERE id = ?', [project_id]) as any
+      const p = await get('SELECT id, name, status, businessLine FROM projects WHERE id = ?', [project_id]) as any
       const initiatorEmail = getUserEmail(req)
       const initiatorId = await userIdForEmail(initiatorEmail)
+      // Draft projects fan out under their obfuscated label (activity + SSE
+      // reach non-team viewers).
+      const safeName = draftSafeProjectName(p?.name, p?.status, p?.businessLine, project_id)
       const detailsJson = JSON.stringify({
         review_id: req.params.id,
         review_title: r?.title || 'Review',
         review_date: r?.review_date || null,
         project_id,
-        project_name: p?.name || 'Project',
+        project_name: safeName,
         summary: `Added to ${r?.title || 'a review'}${r?.review_date ? ` on ${r.review_date}` : ''}`,
       })
-      const activityId = await logActivity('review', 'update', p?.name || project_id, initiatorEmail, detailsJson)
+      const activityId = await logActivity('review', 'update', safeName, initiatorEmail, detailsJson)
       await pinRecipients(activityId, await recipientsForProject(project_id, initiatorId))
     } catch (e: any) { console.error('Add-to-review fan-out error:', e.message) }
     res.json({ id, review_id: req.params.id, project_id, rank })
@@ -272,7 +302,7 @@ router.put('/api/review-items/:id/restore', async (req, res) => {
 //   reviews: soft-deleted whole reviews (each with current item count at time of delete)
 //   items:   soft-deleted review items whose parent review is still live
 // Ordered newest-deleted first.
-router.get('/api/trash', async (_req, res) => {
+router.get('/api/trash', async (req, res) => {
   try {
     const deletedReviews = await all(
       `SELECT r.*,
@@ -281,15 +311,23 @@ router.get('/api/trash', async (_req, res) => {
        WHERE r.deleted_at IS NOT NULL
        ORDER BY r.deleted_at DESC`
     )
-    const deletedItems = await all(
+    const deletedItemsRaw = await all(
       `SELECT ri.id, ri.review_id, ri.project_id, ri.deleted_at,
               r.title AS review_title, r.review_date,
-              p.name AS project_name
+              p.name AS project_name, p.status AS project_status, p.businessLine AS business_lines
        FROM review_items ri
        JOIN reviews r ON r.id = ri.review_id AND r.deleted_at IS NULL
        LEFT JOIN projects p ON p.id = ri.project_id
        WHERE ri.deleted_at IS NOT NULL
        ORDER BY ri.deleted_at DESC`
+    ) as any[]
+    // Hide draft project names from non-team viewers, matching every other
+    // project-name surface. project_status/business_lines are only used here.
+    const allowed = await canSeeDrafts(req)
+    const deletedItems = allowed ? deletedItemsRaw : deletedItemsRaw.map((it: any) =>
+      it.project_status === 'draft'
+        ? { ...it, project_name: draftLabel(it.business_lines), _isDraftRedacted: true }
+        : it
     )
     res.json({ reviews: deletedReviews, items: deletedItems })
   } catch (e: any) { res.status(500).json({ error: e.message }) }
@@ -467,7 +505,7 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
     if (body.length > 5000) return res.status(400).json({ error: 'Comment too long (5000 char max)' })
 
     const item = await get(
-      `SELECT ri.id, ri.review_id, ri.project_id, p.name AS project_name, r.title AS review_title, r.review_date
+      `SELECT ri.id, ri.review_id, ri.project_id, p.name AS project_name, p.status AS project_status, p.businessLine AS business_lines, r.title AS review_title, r.review_date
        FROM review_items ri
        LEFT JOIN projects p ON p.id = ri.project_id
        LEFT JOIN reviews r ON r.id = ri.review_id
@@ -475,6 +513,9 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
       [req.params.id]
     ) as any
     if (!item) return res.status(404).json({ error: 'Review item not found' })
+    // Name used in activity rows + SSE broadcasts, which reach non-team
+    // viewers — draft projects must use their obfuscated label.
+    const safeProjectName = draftSafeProjectName(item.project_name, item.project_status, item.business_lines, 'Unknown project')
 
     const authorName = await resolveDisplayName(email, (req as any).session?.name)
     const id = `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
@@ -495,11 +536,11 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
       review_title: item.review_title || 'Review',
       review_date: item.review_date || null,
       project_id: item.project_id,
-      project_name: item.project_name || 'Unknown project',
+      project_name: safeProjectName,
       author_name: authorName,
       comment_id: id,
     })
-    const activityId = await logActivity('review', 'comment', item.project_name || 'Unknown project', email, detailsJson)
+    const activityId = await logActivity('review', 'comment', safeProjectName, email, detailsJson)
     if (activityId) {
       const recipients = item.project_id
         ? await recipientsForProject(item.project_id, commenterUserId)
@@ -522,7 +563,7 @@ router.post('/api/review-items/:id/comments', async (req, res) => {
         id: activityId,
         category: 'review',
         action: 'comment',
-        target_name: item.project_name || 'Unknown project',
+        target_name: safeProjectName,
         user_email: email,
         details: detailsJson,
         recipients,
@@ -989,13 +1030,20 @@ router.get('/review/:id', async (req, res) => {
        ORDER BY ri.rank ASC`, [req.params.id]
     ) as any[]
 
-    const parsed = items.map((item: any) => ({
+    const parsedRaw = items.map((item: any) => ({
       ...item,
       timeline: item.timeline ? JSON.parse(item.timeline) : [],
       customLinks: item.customLinks ? JSON.parse(item.customLinks) : [],
       designers: item.designers ? JSON.parse(item.designers) : [],
       businessLines: item.businessLine ? (() => { try { return JSON.parse(item.businessLine); } catch { return [item.businessLine]; } })() : [],
     }))
+
+    // Draft items: filtered out entirely for non-team viewers; kept with an
+    // _isDraft flag for team viewers so the pill renders next to the title.
+    const allowedDrafts = await canSeeDrafts(req)
+    const parsed = allowedDrafts
+      ? parsedRaw.map((item: any) => item.status === 'draft' ? { ...item, _isDraft: true } : item)
+      : parsedRaw.filter((item: any) => item.status !== 'draft')
 
     // Load review-item-scoped images. Each review_item has its own gallery —
     // project-level images are NOT included, so the same project in multiple
@@ -1074,8 +1122,8 @@ router.get('/review/:id', async (req, res) => {
         if (slack) return `<a href="${escHtml(slack)}" target="_blank" rel="noopener" class="status-badge designer-badge">${slackSvg} ${escHtml(firstName)}</a>`
         return `<span class="status-badge designer-badge">${escHtml(firstName)}</span>`
       }).join('')
-      const statusColors: Record<string, string> = { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8', archived: '#78716c' }
-      const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending', archived: 'Archived' }
+      const statusColors: Record<string, string> = { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8', archived: '#78716c', draft: '#d946ef' }
+      const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending', archived: 'Archived', draft: 'Draft' }
       const statusColor = statusColors[item.status] || '#6b7280'
       const statusLabel = statusLabels[item.status] || item.status
 
@@ -2398,7 +2446,7 @@ export function renderPage(title: string, body: string, reviews: any[], activeId
     .nav-item-weekly-crit.active .nav-item-star { color: #fff; }
     .sidebar-footer {
       flex-shrink: 0; padding: 0.75rem; border-top: 1px solid var(--rv-border-subtle);
-      display: flex; align-items: center; justify-content: flex-end;
+      display: flex; align-items: center; justify-content: flex-start;
     }
     .theme-toggle {
       background: none; border: 1px solid var(--rv-border); border-radius: 6px;
@@ -3524,7 +3572,7 @@ router.get('/api/review-snapshots/:week', async (req, res) => {
   try {
     const snapshot = await get('SELECT * FROM review_snapshots WHERE week = ?', [req.params.week])
     if (!snapshot) return res.status(404).json({ error: 'Snapshot not found' })
-    res.json(snapshot)
+    res.json(await redactSnapshotForViewer(req, snapshot, REVIEW_SNAPSHOT_PROJECT_ARRAYS))
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 

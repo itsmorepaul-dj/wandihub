@@ -3,6 +3,13 @@ import { run, get, all } from '../db.js';
 import { getUserEmail, requireAdmin } from '../auth.js';
 import { logActivity } from '../version.js';
 import { userIdForEmail, recipientsForAllActiveDesigners, pinRecipients } from '../activity.js';
+import { canSeeDrafts, draftLabel, redactSnapshotForViewer } from '../drafts.js';
+
+// data_json arrays in a weekly snapshot whose entries carry a project_id and
+// therefore can reference a draft project. General entries (generalHighlights,
+// generalLowlights, fyis, peopleUpdates) have project_id null and never name a
+// project, so they don't need draft redaction.
+const WEEKLY_SNAPSHOT_PROJECT_ARRAYS = ['highlights', 'lowlights', 'projectFyis', 'projectPeople']
 
 const router = express.Router();
 
@@ -51,7 +58,7 @@ router.get('/weekly-updates', async (req, res) => {
   try {
     const projectId = req.query.project_id as string
     let sql = `SELECT wu.*, t.name as designer_name, p.name as project_name,
-               p.businessLine as business_lines
+               p.businessLine as business_lines, p.status as project_status
                FROM weekly_updates wu
                LEFT JOIN team t ON wu.designer_id = t.id
                JOIN projects p ON wu.project_id = p.id`
@@ -61,8 +68,14 @@ router.get('/weekly-updates', async (req, res) => {
       params.push(projectId)
     }
     sql += ' ORDER BY wu.updated_at DESC'
-    const updates = await all(sql, params)
-    res.json(updates)
+    const updates = await all(sql, params) as any[]
+    const allowed = await canSeeDrafts(req)
+    const sanitized = allowed ? updates : updates.map((u: any) =>
+      u.project_status === 'draft'
+        ? { ...u, project_name: draftLabel(u.business_lines), description: '', risk_reason: '', resolution: '', _isDraftRedacted: true }
+        : u
+    )
+    res.json(sanitized)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -70,14 +83,23 @@ router.get('/weekly-updates', async (req, res) => {
 router.get('/weekly-updates/history/:projectId', async (req, res) => {
   try {
     const updates = await all(
-      `SELECT wu.*, t.name as designer_name
+      `SELECT wu.*, t.name as designer_name, p.status as project_status, p.businessLine as business_lines
        FROM weekly_updates wu
        LEFT JOIN team t ON wu.designer_id = t.id
+       LEFT JOIN projects p ON wu.project_id = p.id
        WHERE wu.project_id = ?
        ORDER BY wu.week DESC, wu.created_at DESC`,
       [req.params.projectId]
+    ) as any[]
+    // If this project is a draft, blank the update prose for non-team viewers —
+    // same treatment as the live /weekly-updates list.
+    const allowed = await canSeeDrafts(req)
+    const sanitized = allowed ? updates : updates.map((u: any) =>
+      u.project_status === 'draft'
+        ? { ...u, description: '', risk_reason: '', resolution: '', _isDraftRedacted: true }
+        : u
     )
-    res.json(updates)
+    res.json(sanitized)
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -434,7 +456,7 @@ router.get('/weekly-snapshots/preview', async (req, res) => {
     const week = (req.query.week as string) || getActiveWeek()
     const preview = await generateSnapshotPayload(week)
     // Shape matches /weekly-snapshots/:week so the client can reuse its view code.
-    res.json({
+    const payload = {
       week: preview.week,
       generated_at: new Date().toISOString(),
       plain_text: preview.plainText,
@@ -443,7 +465,8 @@ router.get('/weekly-snapshots/preview', async (req, res) => {
       // Preview has no edited metadata — it's not a persisted row.
       edited_by: null,
       edited_at: null,
-    })
+    }
+    res.json(await redactSnapshotForViewer(req, payload, WEEKLY_SNAPSHOT_PROJECT_ARRAYS))
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 
@@ -451,7 +474,7 @@ router.get('/weekly-snapshots/:week', async (req, res) => {
   try {
     const snapshot = await get('SELECT * FROM weekly_snapshots WHERE week = ?', [req.params.week])
     if (!snapshot) return res.status(404).json({ error: 'Snapshot not found' })
-    res.json(snapshot)
+    res.json(await redactSnapshotForViewer(req, snapshot, WEEKLY_SNAPSHOT_PROJECT_ARRAYS))
   } catch (e: any) { res.status(500).json({ error: e.message }) }
 })
 

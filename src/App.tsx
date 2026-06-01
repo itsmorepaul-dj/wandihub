@@ -331,6 +331,7 @@ const REVIEW_STATUS_MAP: Record<string, { label: string; color: string }> = {
   done: { label: 'Done', color: '#22c55e' },
   blocked: { label: 'Blocked', color: '#ef4444' },
   pending: { label: 'Pending', color: '#94a3b8' },
+  draft: { label: 'Draft', color: '#d946ef' },
 }
 
 // Compute per-item review minutes. Excluded=0; items with explicit duration keep it;
@@ -435,7 +436,7 @@ function ReviewItemRow({ item, index, project, onRemove, onCopyToReview, onStatu
               </button>
               {statusMenuOpen && (
                 <div className="review-status-menu" role="menu">
-                  {(['active', 'review', 'done', 'blocked', 'pending'] as const).map(s => {
+                  {(['active', 'review', 'done', 'blocked', 'pending', 'draft'] as const).map(s => {
                     const info = REVIEW_STATUS_MAP[s]
                     const isCurrent = project?.status === s
                     return (
@@ -2850,6 +2851,7 @@ const [showFilters, setShowFilters] = useState(false)
       case 'blocked': return 'bg-red-500'
       case 'pending': return 'bg-slate-400'
       case 'archived': return 'bg-stone-500'
+      case 'draft': return 'bg-fuchsia-500'
     }
   }
 
@@ -2861,6 +2863,7 @@ const [showFilters, setShowFilters] = useState(false)
       case 'blocked': return 'Blocked'
       case 'pending': return 'Pending'
       case 'archived': return 'Archived'
+      case 'draft': return 'Draft'
     }
   }
 
@@ -3129,7 +3132,7 @@ const [showFilters, setShowFilters] = useState(false)
   const projectDesigners = [...new Set(team.map(m => m.name))].sort()
   
   // Get unique statuses
-  const projectStatuses = ['active', 'review', 'done', 'blocked', 'pending'].sort()
+  const projectStatuses = ['active', 'review', 'done', 'blocked', 'pending', 'draft'].sort()
 
   // Determine if filter UI should show
   const showProjectFilter = () => {
@@ -3886,7 +3889,7 @@ const [showFilters, setShowFilters] = useState(false)
                           className={`filter-pill ${projectFilters.statuses.includes(status) ? 'active' : ''}`}
                           onClick={() => toggleStatusFilter(status)}
                         >
-                          {status === 'active' ? 'Active' : status === 'review' ? 'In Review' : status === 'done' ? 'Done' : status === 'blocked' ? 'Blocked' : 'Pending'}
+                          {status === 'active' ? 'Active' : status === 'review' ? 'In Review' : status === 'done' ? 'Done' : status === 'blocked' ? 'Blocked' : status === 'draft' ? 'Draft' : 'Pending'}
                         </button>
                       ))}
                     </>
@@ -4121,7 +4124,7 @@ const [showFilters, setShowFilters] = useState(false)
                 return (
                   <div className="projects-summary">
                     <div className="summary-stats">
-                      {([['active', 'Active', '#3b82f6'], ['review', 'In Review', '#f59e0b'], ['done', 'Done', '#22c55e'], ['blocked', 'Blocked', '#ef4444'], ['pending', 'Pending', '#94a3b8']] as const).map(([status, label, color]) => {
+                      {([['active', 'Active', '#3b82f6'], ['review', 'In Review', '#f59e0b'], ['done', 'Done', '#22c55e'], ['blocked', 'Blocked', '#ef4444'], ['pending', 'Pending', '#94a3b8'], ['draft', 'Draft', '#d946ef']] as const).map(([status, label, color]) => {
                         const count = summaryProjects.filter(p => p.status === status).length
                         return (
                           <div key={status} className="summary-stat" style={count > 0 ? { color } : undefined}>
@@ -4167,7 +4170,7 @@ const [showFilters, setShowFilters] = useState(false)
                               {isOverdue && <span className="overdue-label">Overdue</span>}
                               <span className="project-name">{project.name}{project.url && <a href={project.url} target="_blank" rel="noopener noreferrer" className="project-jira-badge" onClick={e => e.stopPropagation()}>JIRA</a>}</span>
                             </span>
-                            <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8', archived: '#78716c' }[project.status as string] }}>
+                            <span className="status-badge" style={{ color: { active: '#3b82f6', review: '#f59e0b', done: '#22c55e', blocked: '#ef4444', pending: '#94a3b8', archived: '#78716c', draft: '#d946ef' }[project.status as string] }}>
                               <span className={`status-badge-dot ${getStatusColor(project.status)}`}></span>
                               {getStatusLabel(project.status)}
                             </span>
@@ -5948,7 +5951,7 @@ const [showFilters, setShowFilters] = useState(false)
         }
 
         const generateProjectReview = () => {
-          const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending', archived: 'Archived' }
+          const statusLabels: Record<string, string> = { active: 'Active', review: 'In Review', done: 'Done', blocked: 'Blocked', pending: 'Pending', archived: 'Archived', draft: 'Draft' }
           const sizeMap: Record<number, string> = { 35: 'XXS', 70: 'XS', 105: 'S', 175: 'M', 280: 'L', 455: 'XL', 910: 'XXL' }
 
           // Review projects grouped by BL
@@ -8130,7 +8133,7 @@ const [showFilters, setShowFilters] = useState(false)
                     value={projectFormData.status}
                     onChange={e => setProjectFormData({ ...projectFormData, status: e.target.value as Project['status'] })}
                   >
-                    {(['active', 'review', 'done', 'blocked', 'pending'] as const).map(s => (
+                    {(['active', 'review', 'done', 'blocked', 'pending', 'draft'] as const).map(s => (
                       <option key={s} value={s}>{getStatusLabel(s)}</option>
                     ))}
                   </select>

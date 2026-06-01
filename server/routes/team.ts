@@ -3,6 +3,7 @@ import { run, get, all, upsertTeamMember } from '../db.js';
 import { updateDbVersion, logActivity } from '../version.js';
 import { getUserEmail } from '../auth.js';
 import { pinRecipients, userIdForEmail, recipientForTeamMember, recipientsForAllActiveDesigners } from '../activity.js';
+import { invalidateDraftViewerCache } from '../drafts.js';
 
 const router = express.Router();
 
@@ -47,6 +48,7 @@ router.post('/team', async (req, res) => {
     await upsertTeamMember({
       id: memberId, name, role, brands, status, slack, email, avatar, timeOff, weekly_hours, excluded,
     });
+    invalidateDraftViewerCache()
     await updateDbVersion()
 
     if (timeOffChanged) {
@@ -72,6 +74,7 @@ router.post('/team', async (req, res) => {
 router.delete('/team/:id', async (req, res) => {
   try {
     await run('DELETE FROM team WHERE id = ?', [req.params.id]);
+    invalidateDraftViewerCache()
     await updateDbVersion()
     res.json({success: true});
   } catch (e: any) { res.status(500).json({error: e.message}); }

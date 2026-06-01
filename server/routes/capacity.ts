@@ -4,6 +4,7 @@ import { updateDbVersion, logActivity } from '../version.js';
 import { getUserEmail } from '../auth.js';
 import { syncAssignmentToProjectDesigners } from './projects.js';
 import { pinRecipients, userIdForEmail, recipientForTeamMember } from '../activity.js';
+import { canSeeDrafts, draftLabel } from '../drafts.js';
 
 const router = express.Router();
 
@@ -59,9 +60,20 @@ router.get('/capacity', async (req, res) => {
       JOIN projects p ON pa.project_id = p.id
       JOIN team t ON pa.designer_id = t.id
       ORDER BY p.name, t.name
-    `)
+    `) as any[]
 
-    res.json({ team: teamWithHours, assignments })
+    // Obfuscate draft assignments for non-team viewers. Hours/allocation
+    // stay so capacity totals are correct; the project name becomes
+    // "Draft project: <businessLine>" so the viewer can see WHO is busy
+    // without learning what the draft is.
+    const allowed = await canSeeDrafts(req)
+    const sanitized = allowed ? assignments : assignments.map((a: any) =>
+      a.project_status === 'draft'
+        ? { ...a, project_name: draftLabel(a.businessLine), _isDraftRedacted: true }
+        : a
+    )
+
+    res.json({ team: teamWithHours, assignments: sanitized })
   } catch (e: any) { res.status(500).json({error: e.message}); }
 })
 
