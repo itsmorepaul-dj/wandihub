@@ -1,61 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── GATE 1: Block raw git push ──────────────────────────────────
-# Only deploy.sh sets DCC_DEPLOY_ACTIVE=1. Any other caller is blocked.
-# This prevents Railway rebuilds that destroy the ephemeral DB without
-# first downloading a backup.
-if [[ "${DCC_DEPLOY_ACTIVE:-}" != "1" ]]; then
-  echo ""
-  echo "❌ Push blocked: raw git push is not allowed."
-  echo ""
-  echo "Railway uses an ephemeral filesystem. A code push triggers a"
-  echo "rebuild that DESTROYS the production database. deploy.sh backs"
-  echo "up the DB before pushing. Raw git push does not."
-  echo ""
-  echo "Use:  DCC_DEPLOY_OK=1 ./scripts/deploy.sh"
-  echo ""
-  exit 1
-fi
-
-# ── GATE 2: Enforce version bump ────────────────────────────────
-# Before pushing, SITE_VERSION and SITE_TIME in server.ts must differ from origin/main.
+# Pre-push hook — Hatch era.
+#
+# NOTE: This project deploys to Hatch via source-upload (tar+curl), NOT via
+# git push. A `git push` to GitHub does NOT trigger any deploy and does NOT
+# touch the production database (which lives on a persistent Hatch volume at
+# /files/shared.db and survives rollouts). So a raw push is SAFE — the old
+# Railway-era "block all pushes" gate has been removed.
+#
+# The remaining check is a soft reminder to bump SITE_VERSION before pushing
+# code intended for deploy. It only WARNS — it never blocks — because pushing
+# docs/infra without a version bump is legitimate now that push != deploy.
+# See DEPLOY.md for the real deploy procedure.
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 VERSION_FILE="server/version.ts"
-if [[ ! -f "$VERSION_FILE" ]]; then
-  exit 0
-fi
+[[ -f "$VERSION_FILE" ]] || exit 0
+
+# Compare against the current branch's upstream, falling back to origin/HEAD.
+UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo '')"
+[[ -n "$UPSTREAM" ]] || exit 0
 
 extract_vals() {
-  local content="$1"
-  local version time
-  version=$(printf '%s' "$content" | sed -n "s/^export const SITE_VERSION = '\([^']*\)'.*/\1/p" | head -n1)
-  time=$(printf '%s' "$content" | sed -n "s/^export const SITE_TIME = '\([^']*\)'.*/\1/p" | head -n1)
-  printf '%s|%s' "$version" "$time"
+  printf '%s' "$1" \
+    | sed -n "s/^export const SITE_VERSION = '\([^']*\)'.*/\1/p" | head -n1
 }
 
-local_vals=$(extract_vals "$(cat "$VERSION_FILE")")
-
-# If remote branch doesn't exist yet, allow first push.
-if ! git show "origin/main:$VERSION_FILE" >/dev/null 2>&1; then
-  exit 0
+if ! git show "$UPSTREAM:$VERSION_FILE" >/dev/null 2>&1; then
+  exit 0  # upstream file doesn't exist yet — nothing to compare
 fi
 
-remote_vals=$(extract_vals "$(git show "origin/main:$VERSION_FILE")")
+local_ver=$(extract_vals "$(cat "$VERSION_FILE")")
+remote_ver=$(extract_vals "$(git show "$UPSTREAM:$VERSION_FILE")")
 
-if [[ "$local_vals" == "$remote_vals" ]]; then
+if [[ "$local_ver" == "$remote_ver" ]]; then
   echo ""
-  echo "❌ Push blocked: SITE_VERSION/SITE_TIME in $VERSION_FILE match origin/main."
-  echo "Rule: Update site version metadata before Railway deploy/push."
+  echo "⚠️  Note: SITE_VERSION ($local_ver) is unchanged vs $UPSTREAM."
+  echo "   If these commits are headed for a deploy, bump SITE_VERSION/SITE_TIME"
+  echo "   in $VERSION_FILE and add a src/changelog.ts entry first (see DEPLOY.md)."
+  echo "   (Pushing anyway — this is only a reminder, not a block.)"
   echo ""
-  echo "Current: $local_vals"
-  echo "Remote : $remote_vals"
-  echo ""
-  echo "Update $VERSION_FILE, then push again."
-  exit 1
 fi
 
 exit 0
